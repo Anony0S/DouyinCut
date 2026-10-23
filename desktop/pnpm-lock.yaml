@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      cally:
+        specifier: ^0.9.2
+        version: 0.9.2
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@5.7.3)(vue@3.5.44(typescript@5.7.3))
@@ -758,6 +761,9 @@ packages:
     resolution: {integrity: sha512-9k3v7xcHwgdO/DruxGIg4HtjvlAZlcnsX/mzqUb1t3NkYnl9kK2UJ+Gq0io+vQf7iT//BD/HB/NBkUR1LWxoeA==}
     engines: {node: '>=14'}
 
+  atomico@1.79.2:
+    resolution: {integrity: sha512-mshhLRMeIltNYbnQnqgnrvJ/uDa8XDfTQcjw3ymOygQqwHIQ4Sp0LcNYMCbACkV3DtV+eDXb9szwU4qMUuGwYQ==}
+
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
@@ -783,6 +789,9 @@ packages:
   bundle-name@4.1.1:
     resolution: {integrity: sha512-DdH81/zPLVS11EUgWq3tEu/xn+EzljlMYooDNdzWEnFha3R3NBMpMV1UqYIpjYHV/SgpFKMIX1Oh7o06SjM/oA==}
     engines: {node: '>=18'}
+
+  cally@0.9.2:
+    resolution: {integrity: sha512-zY/Ueh+p6O+LKPYqNB13dATgNuazAHS0n3JbtKyUmMoQfRq5mC2/zFI3UV2X3g+2lZn2BBwr1Z+HxyG9Dt/6lw==}
 
   caniuse-lite@1.0.30001817:
     resolution: {integrity: sha512-uZ1JG80BwhtMalIAGPxPfmNhHyd/B/nTdr3hITWlRamSyAdUStP1Gop01e7SD5q6J90ixJvWDbvmiFVfDgn4bw==}
@@ -1875,6 +1884,8 @@ snapshots:
 
   ansis@4.4.0: {}
 
+  atomico@1.79.2: {}
+
   balanced-match@1.0.2: {}
 
   baseline-browser-mapping@2.11.30: {}
@@ -1898,6 +1909,10 @@ snapshots:
   bundle-name@4.1.1:
     dependencies:
       run-applescript: 7.1.0
+
+  cally@0.9.2:
+    dependencies:
+      atomico: 1.79.2
 
   caniuse-lite@1.0.30001817: {}
 

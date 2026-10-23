@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @plugin "daisyui" {
-  themes: light --default;
+  themes: light --default, dark --prefersdark;
 }
 
 @plugin "daisyui/theme" {
@@ -17,17 +17,17 @@
 }
 
 :root {
-  --page: #f5f6fa;
-  --surface-soft: #fafbfe;
-  --surface-secondary: #eef0f7;
-  --app-border: #e3e6ef;
-  --text: #26293c;
-  --text-secondary: #5c6278;
-  --text-muted: #70778e;
-  --accent: #6b55d8;
-  --accent-hover: #5841bd;
-  --accent-soft: #f1eeff;
-  --accent-border: #ded7fb;
+  --page: var(--color-base-200);
+  --surface-soft: color-mix(in oklab, var(--color-base-100) 65%, var(--color-base-200));
+  --surface-secondary: var(--color-base-200);
+  --app-border: var(--color-base-300);
+  --text: var(--color-base-content);
+  --text-secondary: color-mix(in oklab, var(--color-base-content) 80%, var(--color-base-100));
+  --text-muted: color-mix(in oklab, var(--color-base-content) 65%, var(--color-base-100));
+  --accent: var(--color-primary);
+  --accent-hover: color-mix(in oklab, var(--color-primary) 85%, var(--color-base-content));
+  --accent-soft: color-mix(in oklab, var(--color-primary) 12%, var(--color-base-100));
+  --accent-border: color-mix(in oklab, var(--color-primary) 30%, var(--color-base-100));
   --sidebar: #202235;
   --video: #191b26;
   font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;
@@ -35,7 +35,6 @@
   background:var(--page);
   font-synthesis:none;
   font-size:14px;
-  color-scheme:light
 }
 
 * {
@@ -244,7 +243,7 @@ header {
 
 .primary {
   background:var(--accent);
-  color:#ffffff
+  color:var(--color-primary-content)
 }
 
 .primary:hover:not(:disabled) {
@@ -266,7 +265,7 @@ header {
   background:var(--accent-soft);
   border:1px solid var(--accent-border);
   border-radius:8px;
-  color:#5b5285;
+  color:var(--text-secondary);
   display:flex;
   justify-content:space-between;
   gap:20px;
@@ -275,7 +274,7 @@ header {
 }
 
 .intro-strip strong {
-  color:#4c3d91
+  color:var(--accent)
 }
 
 .workspace-grid {
@@ -286,7 +285,7 @@ header {
 }
 
 .panel {
-  background:#fff;
+  background:var(--color-base-100);
   border:1px solid var(--app-border);
   border-radius:12px;
   padding:20px;
@@ -341,11 +340,11 @@ header {
   flex-shrink:0;
   width:30px;
   height:38px;
-  background:#eeebff;
+  background:var(--accent-soft);
   display:grid;
   place-items:center;
   border-radius:4px;
-  color:#6e5cc4;
+  color:var(--accent);
   font-size:10px
 }
 
@@ -445,7 +444,7 @@ header {
 .candidate-meta {
   display:flex;
   justify-content:space-between;
-  color:#6b55b3;
+  color:var(--accent);
   font-size:10px
 }
 
@@ -485,7 +484,7 @@ progress {
 }
 
 .error-text {
-  color:#a3394a;
+  color:var(--color-error);
   font-size:12px
 }
 
@@ -560,7 +559,7 @@ main.workspace-main { padding-top: 26px; }
 .clip-source-time > span { color: var(--text-muted); }
 .clip-play { padding: 7px 9px; font-size: 11px; white-space: nowrap; }
 .clip-reason { margin: 9px 0 7px; color: var(--text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-.clip-dialogue { padding: 8px 9px; border: 1px solid var(--app-border); background: #fff; border-radius: 6px; }
+.clip-dialogue { padding: 8px 9px; border: 1px solid var(--app-border); background: var(--color-base-100); border-radius: 6px; }
 .clip-dialogue summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
 .clip-dialogue summary::-webkit-details-marker { display: none; }
 .clip-dialogue-excerpt { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
@@ -575,7 +574,7 @@ main.workspace-main { padding-top: 26px; }
 .clip-time-fields input { margin-top: 5px; padding: 7px 8px; font-size: 12px; }
 .roughcut-clip-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .roughcut-clip-actions button { padding: 8px; font-size: 12px; }
-.roughcut-clip-actions .clip-remove { font-size: 11px; color: #a3394a; }
+.roughcut-clip-actions .clip-remove { font-size: 11px; color: var(--color-error); }
 .roughcut-editor-footer { border-top: 1px solid var(--app-border); margin-top: 12px; padding-top: 10px; }
 .roughcut-editor-footer .hint { margin: 0 0 9px; }
 .unsaved-hint { color: var(--accent); }
@@ -605,15 +604,15 @@ main.workspace-main { padding-top: 26px; }
 .job-error-trigger {
   display: inline-flex;
   padding: 2px;
-  color: #a3394a;
+  color: var(--color-error);
   background: transparent;
   border: 0;
   flex-shrink: 0;
 }
 
 .job-error-trigger:hover, .job-error-trigger:focus-visible {
-  background: #fbeef0;
-  outline: 2px solid #df9ba5;
+  background: color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));
+  outline: 2px solid color-mix(in oklab, var(--color-error) 45%, var(--color-base-100));
 }
 
 .job-error-popover {
@@ -623,7 +622,7 @@ main.workspace-main { padding-top: 26px; }
   padding: 18px;
   border: 1px solid var(--app-border);
   border-radius: 12px;
-  background: #fff;
+  background: var(--color-base-100);
   color: var(--text);
   box-shadow: 0 12px 36px #19213d24;
   box-sizing: border-box;
@@ -641,7 +640,7 @@ main.workspace-main { padding-top: 26px; }
 .job-error-popover pre {
   margin: 0;
   padding: 12px;
-  background: #f4f6fa;
+  background: var(--color-base-200);
   border-radius: 6px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -851,7 +850,7 @@ main.workspace-main { padding-top: 26px; }
 
 .secret-input-error {
   margin: 6px 0 0;
-  color: #a3394a;
+  color: var(--color-error);
   font-size: 13px;
 }
 
@@ -989,7 +988,7 @@ h1 {
 }
 
 .secondary:hover:not(:disabled) {
-  background: #e4e5f1;
+  background: var(--color-base-300);
 }
 
 .candidate-card:hover {

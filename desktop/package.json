@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vue-tsc --noEmit && vite build",
+    "test:appearance": "node scripts/verify-appearance.cjs",
     "test:secret-input": "node scripts/verify-secret-input.cjs",
     "test:events": "node scripts/verify-events.cjs",
     "test:job-error": "node scripts/verify-job-error.cjs",
@@ -27,6 +28,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "cally": "^0.9.2",
     "pinia": "^3.0.4",
     "vue": "^3.5.0",
     "vue-router": "^4.6.4"

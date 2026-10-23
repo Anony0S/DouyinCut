@@ -7,6 +7,7 @@ import { useProjectStore } from './stores/project'
 import { createWorkspace, provideWorkspace } from './workspace'
 import { provideVideoImport } from './composables/useVideoImport'
 import LiveIcon from './components/live/LiveIcon.vue'
+import { appearance, setAppearance, type Appearance } from './appearance'
 const route=useRoute(),router=useRouter(),session=useSessionStore(),project=useProjectStore()
 const {busy,connected,activeJobs,error,message}=storeToRefs(session)
 type ToastKind = 'success' | 'error'
@@ -44,7 +45,17 @@ onUnmounted(()=>{workspace.stop();for(const timer of toastTimers.values()) windo
       <button :class="{active:route.name==='live-monitoring'}" :disabled="busy" @click="workspace.go('live-monitoring')">直播监控</button>
       <button :class="{active:route.name==='jobs'}" :disabled="busy" @click="workspace.go('jobs')">后台任务 <span>{{ activeJobs }}</span></button>
       <button :class="{active:route.name==='settings'}" :disabled="busy" @click="workspace.go('settings')">云端设置 <span>↗</span></button>
-      <div class="sidebar-bottom"><span :class="['status-dot',{online:connected}]"></span>{{ connected?'本地服务已连接':'本地服务未连接' }}<p>v0.1</p></div>
+      <div class="sidebar-bottom">
+        <label for="app-appearance" class="mb-2 mt-0 text-inherit">外观</label>
+        <select id="app-appearance" class="select select-sm mb-5 w-full bg-base-100 text-base-content"
+          aria-label="外观" :value="appearance"
+          @change="setAppearance(($event.target as HTMLSelectElement).value as Appearance)">
+          <option value="system">跟随系统</option>
+          <option value="light">浅色</option>
+          <option value="dark">深色</option>
+        </select>
+        <span :class="['status-dot',{online:connected}]"></span>{{ connected?'本地服务已连接':'本地服务未连接' }}<p>v0.1</p>
+      </div>
     </aside>
 
     <main :class="{ 'workspace-main': route.name==='workspace', 'live-monitoring-main': route.name==='live-monitoring' }">

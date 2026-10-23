@@ -116,6 +116,71 @@ class LiveMonitoringTests(unittest.TestCase):
                                          "include_end_recording": True})
         self.assertEqual([item["id"] for item in recent.json()[0]["sessions"]], [session_id])
 
+    def test_recording_session_api_reads_outside_window_and_distinguishes_missing_from_failure(self):
+        monitor = self.live.create_monitor("https://live.douyin.com/retained", "保留选择")
+        other = self.live.create_monitor("https://live.douyin.com/other", "其他直播间")
+        with patch("app.live_monitoring.service.time.time", return_value=1000):
+            session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "retained")
+            self.live.stop_session(monitor["id"], session_id)
+        path = Path(self.temp.name) / "retained" / "segment.ts"
+        path.write_bytes(b"recording")
+        segment_id = self.live.upsert_segment(session_id, path, 7, "completed", 9, 1_000_000)
+        self.live.set_current_product(session_id, promotion_id="product", product_name="保留的商品",
+                                      event_time=1000, received_at=1000)
+        url = f"/api/v1/live/monitors/{monitor['id']}/sessions/{session_id}"
+        self.assertEqual(self.client.get(url).status_code, 401)
+        listed = self.client.get("/api/v1/live/monitors", headers=self.headers,
+                                 params={"window_start": 2000, "window_end": 3000})
+        self.assertTrue(all(not item["sessions"] for item in listed.json()))
+        response = self.client.get(url, headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["id"], session_id)
+        self.assertEqual(response.json()["segments"][0]["id"], segment_id)
+        self.assertEqual(response.json()["current_product"]["product_name"], "保留的商品")
+        wrong_room = self.client.get(f"/api/v1/live/monitors/{other['id']}/sessions/{session_id}",
+                                     headers=self.headers)
+        self.assertEqual(wrong_room.status_code, 200)
+        self.assertIsNone(wrong_room.json(), "a session cannot be read under another monitor")
+        with patch.object(LiveStore, "recording_session", side_effect=RuntimeError("storage unavailable")):
+            with TestClient(self.app, raise_server_exceptions=False) as failing_client:
+                failed = failing_client.get(url, headers=self.headers)
+            self.assertEqual(failed.status_code, 500, "storage errors must not look like a missing session")
+        with self.store.connection() as conn:
+            conn.execute("DELETE FROM live_sessions WHERE id=?", (session_id,))
+        missing = self.client.get(url, headers=self.headers)
+        self.assertEqual(missing.status_code, 200)
+        self.assertIsNone(missing.json(), "only a successful absence response confirms removal")
+
+    def test_recording_end_time_source_distinguishes_recovery_from_observed_failures(self):
+        monitor = self.live.create_monitor("https://live.douyin.com/recovery-source", "结束时间来源")
+        with patch("app.live_monitoring.service.time.time", return_value=1000):
+            stopped = self.live.start_session(monitor["id"], Path(self.temp.name) / "stopped")
+        with patch("app.live_monitoring.service.time.time", return_value=1100):
+            self.live.stop_session(monitor["id"], stopped)
+            failed = self.live.start_session(monitor["id"], Path(self.temp.name) / "failed")
+        with patch("app.live_monitoring.service.time.time", return_value=1200):
+            self.live.stop_session(monitor["id"], failed, "failed")
+            recovered = self.live.start_session(monitor["id"], Path(self.temp.name) / "recovered")
+        url = f"/api/v1/live/monitors/{monitor['id']}/sessions/"
+        active = self.client.get(url + recovered, headers=self.headers).json()
+        self.assertIsNone(active["end_time_source"])
+        with patch("app.live_monitoring.service.time.time", return_value=2000):
+            LiveMonitorWorker(self.settings, resolver=object())
+        listed = self.client.get("/api/v1/live/monitors", headers=self.headers,
+                                 params={"window_start": 900, "window_end": 2100}).json()[0]["sessions"]
+        details = {item["id"]: item for item in listed}
+        self.assertEqual(details[stopped]["end_time_source"], "observed")
+        self.assertEqual(details[failed]["status"], "failed")
+        self.assertEqual(details[failed]["end_time_source"], "observed")
+        self.assertEqual(details[recovered]["status"], "failed")
+        self.assertEqual(details[recovered]["end_time_source"], "recovery_check")
+        self.assertEqual(details[recovered]["ended"], 2000)
+        self.assertEqual(self.client.get(url + recovered, headers=self.headers).json(), details[recovered])
+        # A later worker restart must not replace the first recovery check's time.
+        with patch("app.live_monitoring.service.time.time", return_value=3000):
+            LiveMonitorWorker(self.settings, resolver=object())
+        self.assertEqual(self.client.get(url + recovered, headers=self.headers).json()["ended"], 2000)
+
     def test_douyin_url_validation_supports_share_short_link_only(self):
         self.assertEqual(normalize_douyin_url("复制这条消息 https://v.douyin.com/abc123/ 去看看"),
                          "https://v.douyin.com/abc123/")

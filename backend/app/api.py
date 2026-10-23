@@ -108,6 +108,10 @@ def create_app(settings: Settings | None = None, token: str | None = None):
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
 
+    @app.get("/api/v1/live/monitors/{monitor_id}/sessions/{session_id}")
+    def live_recording_session(monitor_id: str, session_id: str):
+        return live_store.recording_session(monitor_id, session_id)
+
     @app.post("/api/v1/live/monitors", status_code=201)
     def create_live_monitor(body: LiveMonitorRequest):
         return live_store.create_monitor(body.url, body.name)

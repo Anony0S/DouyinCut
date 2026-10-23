@@ -82,6 +82,7 @@ class LiveStore:
                 CREATE TABLE IF NOT EXISTS live_sessions (
                     id TEXT PRIMARY KEY, monitor_id TEXT NOT NULL, status TEXT NOT NULL,
                     started REAL NOT NULL, ended REAL, ffmpeg_pid INTEGER,
+                    end_time_source TEXT CHECK(end_time_source IN ('observed', 'recovery_check')),
                     FOREIGN KEY(monitor_id) REFERENCES live_monitors(id)
                 );
                 CREATE TABLE IF NOT EXISTS live_segments (
@@ -218,49 +219,59 @@ class LiveStore:
                      include_end_recording, window_end)).fetchall()
                 monitor["sessions"] = []
                 for session in sessions:
-                    item = dict(session)
-                    clip_jobs = {}
-                    for job in conn.execute(
-                        "SELECT id,state,error,json_extract(payload,'$.segment_id') AS segment_id FROM jobs "
-                        "WHERE kind=? AND json_extract(payload,'$.session_id')=? ORDER BY created DESC",
-                        (PRODUCT_CLIP_JOB, session["id"]),
-                    ).fetchall():
-                        clip_jobs.setdefault(job["segment_id"], {"id": job["id"], "state": job["state"],
-                                                                 "error": job["error"]})
-                    item["segments"] = [
-                        {**dict(segment), "clip_job": clip_jobs.get(segment["id"])}
-                        for segment in conn.execute(
-                            "SELECT * FROM live_segments WHERE session_id=? ORDER BY segment_index DESC LIMIT 100",
-                            (session["id"],)).fetchall()
-                    ]
-                    item["product_events"] = [dict(event) for event in conn.execute(
-                        "SELECT id,promotion_id,product_name,explain_type,event_time,received_at,source "
-                        "FROM live_product_events WHERE session_id=? ORDER BY event_time,event_key",
-                        (session["id"],)).fetchall()]
-                    item["product_clips"] = [dict(clip) for clip in conn.execute(
-                        "SELECT * FROM live_segment_product_clips WHERE session_id=? "
-                        "ORDER BY segment_index DESC,start DESC",
-                        (session["id"],)).fetchall()]
-                    current_product = conn.execute(
-                        "SELECT promotion_id,product_name,event_time,received_at "
-                        "FROM live_session_current_product WHERE session_id=?",
-                        (session["id"],),
-                    ).fetchone()
-                    item["current_product"] = dict(current_product) if current_product else None
-                    listener = conn.execute("SELECT status,detail,updated FROM live_product_listener_state WHERE session_id=?",
-                                            (session["id"],)).fetchone()
-                    item["product_listener"] = dict(listener) if listener else None
-                    catalog_state = conn.execute(
-                        "SELECT error_detail,updated FROM live_session_product_catalog_state WHERE session_id=?",
-                        (session["id"],),
-                    ).fetchone()
-                    item["product_catalog_error"] = (
-                        {"detail": json.loads(catalog_state["error_detail"]),
-                         "updated": catalog_state["updated"]}
-                        if catalog_state else None
-                    )
-                    monitor["sessions"].append(item)
+                    monitor["sessions"].append(self._session_detail(conn, session))
         return monitors
+
+    def recording_session(self, monitor_id: str, session_id: str):
+        with self.store.connection() as conn:
+            row = conn.execute("SELECT * FROM live_sessions WHERE monitor_id=? AND id=?",
+                               (monitor_id, session_id)).fetchone()
+            return self._session_detail(conn, row) if row is not None else None
+
+    @staticmethod
+    def _session_detail(conn, session):
+        item = dict(session)
+        clip_jobs = {}
+        for job in conn.execute(
+            "SELECT id,state,error,json_extract(payload,'$.segment_id') AS segment_id FROM jobs "
+            "WHERE kind=? AND json_extract(payload,'$.session_id')=? ORDER BY created DESC",
+            (PRODUCT_CLIP_JOB, session["id"]),
+        ).fetchall():
+            clip_jobs.setdefault(job["segment_id"], {"id": job["id"], "state": job["state"],
+                                                     "error": job["error"]})
+        item["segments"] = [
+            {**dict(segment), "clip_job": clip_jobs.get(segment["id"])}
+            for segment in conn.execute(
+                "SELECT * FROM live_segments WHERE session_id=? ORDER BY segment_index DESC LIMIT 100",
+                (session["id"],)).fetchall()
+        ]
+        item["product_events"] = [dict(event) for event in conn.execute(
+            "SELECT id,promotion_id,product_name,explain_type,event_time,received_at,source "
+            "FROM live_product_events WHERE session_id=? ORDER BY event_time,event_key",
+            (session["id"],)).fetchall()]
+        item["product_clips"] = [dict(clip) for clip in conn.execute(
+            "SELECT * FROM live_segment_product_clips WHERE session_id=? "
+            "ORDER BY segment_index DESC,start DESC",
+            (session["id"],)).fetchall()]
+        current_product = conn.execute(
+            "SELECT promotion_id,product_name,event_time,received_at "
+            "FROM live_session_current_product WHERE session_id=?",
+            (session["id"],),
+        ).fetchone()
+        item["current_product"] = dict(current_product) if current_product else None
+        listener = conn.execute("SELECT status,detail,updated FROM live_product_listener_state WHERE session_id=?",
+                                (session["id"],)).fetchone()
+        item["product_listener"] = dict(listener) if listener else None
+        catalog_state = conn.execute(
+            "SELECT error_detail,updated FROM live_session_product_catalog_state WHERE session_id=?",
+            (session["id"],),
+        ).fetchone()
+        item["product_catalog_error"] = (
+            {"detail": json.loads(catalog_state["error_detail"]),
+             "updated": catalog_state["updated"]}
+            if catalog_state else None
+        )
+        return item
 
     def record_product_event(self, session_id: str, *, event_key: str, promotion_id: str,
                              product_name: str = "", explain_type: int | None = None,
@@ -527,7 +538,8 @@ class LiveStore:
     def stop_session(self, monitor_id: str, session_id: str, status: str = "stopped"):
         now = time.time()
         with self.store.connection() as conn:
-            conn.execute("UPDATE live_sessions SET status=?,ended=? WHERE id=? AND status='recording'",
+            conn.execute("UPDATE live_sessions SET status=?,ended=?,end_time_source='observed' "
+                         "WHERE id=? AND status='recording'",
                          (status, now, session_id))
             conn.execute("UPDATE live_monitors SET current_session_id=NULL,live_state=?,updated=? WHERE id=?",
                          ("offline" if status == "stopped" else "error", now, monitor_id))
@@ -904,7 +916,7 @@ class LiveMonitorWorker:
                             os.kill(pid, 15)
                     except (OSError, subprocess.TimeoutExpired):
                         pass
-                conn.execute("UPDATE live_sessions SET status='failed',ended=? WHERE id=?",
+                conn.execute("UPDATE live_sessions SET status='failed',ended=?,end_time_source='recovery_check' WHERE id=?",
                              (time.time(), row["id"]))
                 conn.execute("UPDATE live_segments SET status='failed',ended=? WHERE session_id=? AND status='recording'",
                              (time.time(), row["id"]))

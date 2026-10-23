@@ -7,6 +7,7 @@ import {
   liveMonitoringApi,
   type LiveMonitor,
   type LiveMonitorSettings,
+  type LiveSession,
 } from "../services/liveMonitoring";
 import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
@@ -27,14 +28,20 @@ const url = ref(""),
   loading = ref(false),
   showCreate = ref(false);
 const selectedId = ref(""),
-  selectedSessionId = ref(""),
   updatedAt = ref<number | null>(null);
+const selectedSession = ref<LiveSession>();
+const refreshError = ref("");
+let refreshVersion = 0;
+let disposed = false;
+let chooseRoomDefault = false;
 const urlInput = ref<HTMLInputElement>(),
   createDialog = ref<HTMLDialogElement>();
 let timer: ReturnType<typeof setInterval> | undefined;
 const currentTime = ref(Date.now() / 1000);
 const selectedDate = ref("");
 const recordingWindow = ref({ start: currentTime.value - 86400, end: currentTime.value, date: "", includeEndRecording: true });
+const dateLoading = computed(() => loading.value
+  && (updatedAt.value === null || selectedDate.value !== recordingWindow.value.date));
 const latestHistoryDate = computed(() => {
   const yesterday = new Date(currentTime.value * 1000);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -55,7 +62,7 @@ function dateWindow(date: string, now: number) {
   return { start: start.getTime() / 1000, end: end.getTime() / 1000, date, includeEndRecording: false };
 }
 async function changeDate(date: string) {
-  if (loading.value || date === selectedDate.value) return;
+  if (dateLoading.value || date === selectedDate.value) return;
   if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > latestHistoryDate.value
     || localDate(new Date(`${date}T00:00:00`)) !== date)) return;
   selectedDate.value = date;
@@ -69,17 +76,36 @@ const selectedMonitor = computed(
     monitors.value[0],
 );
 const sessions = computed(() =>
-  [...(selectedMonitor.value?.sessions ?? [])].sort(
-    (a, b) =>
-      Number(b.status === "recording") - Number(a.status === "recording") ||
-      b.started - a.started,
-  ),
+  [...(selectedMonitor.value?.sessions ?? [])].sort(recordingFirst),
 );
-const selectedSession = computed(
-  () =>
-    sessions.value.find((item) => item.id === selectedSessionId.value) ??
-    sessions.value[0],
-);
+function recordingFirst(a: LiveSession, b: LiveSession) {
+  return Number(b.status === "recording") - Number(a.status === "recording") || b.started - a.started;
+}
+const selectionOutsideWindow = computed(() => selectedSession.value
+  && !sessions.value.some(item => item.id === selectedSession.value?.id));
+function defaultSession(items: LiveSession[]) {
+  return [...items].sort(recordingFirst)[0];
+}
+function latestSession(items: LiveSession[]) {
+  return [...items].sort((a, b) => b.started - a.started)[0];
+}
+function selectMonitor(id: string) {
+  if (id === selectedMonitor.value?.id) return;
+  selectedId.value = id;
+  selectedSession.value = defaultSession(sessions.value);
+  chooseRoomDefault = loading.value;
+  if (loading.value) void refresh();
+}
+function selectSession(id: string) {
+  const item = sessions.value.find(item => item.id === id);
+  if (!item) return;
+  chooseRoomDefault = false;
+  selectedSession.value = item;
+  if (loading.value) void refresh();
+}
+function viewSelectedDate() {
+  if (selectedSession.value) void changeDate(localDate(new Date(selectedSession.value.started * 1000)));
+}
 const recordingCount = computed(
   () => monitors.value.filter((item) => item.live_state === "recording").length,
 );
@@ -90,12 +116,6 @@ const attentionCount = computed(
   () => monitors.value.filter(monitorNeedsAttention).length,
 );
 
-watch(
-  () => selectedMonitor.value?.id,
-  () => {
-    selectedSessionId.value = "";
-  },
-);
 watch(showCreate, async (value) => {
   await nextTick();
   if (value) {
@@ -111,37 +131,51 @@ function closeCreate() {
 }
 
 async function refresh() {
-  if (loading.value) return;
+  const version = ++refreshVersion;
   loading.value = true;
-  const previousSelection = selectedSession.value?.id;
   const previousMonitor = selectedMonitor.value?.id;
   const dateChanged = selectedDate.value !== recordingWindow.value.date;
   try {
     await session.connect();
+    if (disposed || version !== refreshVersion) return;
     const now = Date.now() / 1000;
     const range = dateWindow(selectedDate.value, now);
     const result = await liveMonitoringApi.list(range);
+    if (disposed || version !== refreshVersion) return;
+    const nextMonitor = result.find(item => item.id === selectedId.value)
+      ?? result.find(item => item.live_state === "recording") ?? result[0];
+    const items = nextMonitor?.sessions ?? [];
+    const current = !chooseRoomDefault && previousMonitor === nextMonitor?.id ? selectedSession.value : undefined;
+    let nextSession = items.find(item => item.id === current?.id);
+    if (!nextSession && current && nextMonitor) {
+      if (dateChanged) {
+        nextSession = latestSession(items);
+      } else {
+        // Absence from a time window does not establish that the session was deleted.
+        const retained = await liveMonitoringApi.session(nextMonitor.id, current.id);
+        if (disposed || version !== refreshVersion) return;
+        nextSession = retained ?? latestSession(items);
+      }
+    } else if (!current) {
+      nextSession = !chooseRoomDefault && dateChanged && previousMonitor === nextMonitor?.id
+        ? latestSession(items) : defaultSession(items);
+    }
     currentTime.value = now;
     recordingWindow.value = range;
     monitors.value = result;
-    if (!monitors.value.some((item) => item.id === selectedId.value)) {
-      selectedId.value =
-        (
-          monitors.value.find((item) => item.live_state === "recording") ??
-          monitors.value[0]
-        )?.id ?? "";
-    }
-    if (dateChanged && previousMonitor === selectedMonitor.value?.id) {
-      selectedSessionId.value = sessions.value.some(item => item.id === previousSelection)
-        ? previousSelection ?? ""
-        : [...sessions.value].sort((a, b) => b.started - a.started)[0]?.id ?? "";
-    }
+    selectedId.value = nextMonitor?.id ?? "";
+    selectedSession.value = nextSession;
+    chooseRoomDefault = false;
+    if (session.error === refreshError.value) session.error = "";
+    refreshError.value = "";
     updatedAt.value = Date.now() / 1000;
   } catch (cause) {
+    if (disposed || version !== refreshVersion) return;
     selectedDate.value = recordingWindow.value.date;
+    refreshError.value = cause instanceof Error ? cause.message : "操作失败";
     session.report(cause);
   } finally {
-    loading.value = false;
+    if (version === refreshVersion) loading.value = false;
   }
 }
 async function addMonitor() {
@@ -243,10 +277,12 @@ async function deleteProductClip(clipId: string) {
 onMounted(() => {
   void refresh();
   timer = setInterval(() => {
-    void refresh();
+    if (!loading.value) void refresh();
   }, 5000);
 });
 onUnmounted(() => {
+  disposed = true;
+  refreshVersion++;
   if (timer) clearInterval(timer);
 });
 </script>
@@ -402,26 +438,36 @@ onUnmounted(() => {
         :selected-id="selectedMonitor?.id ?? ''"
         :loading="loading && updatedAt === null"
         :busy="busy"
-        @select="selectedId = $event"
+        @select="selectMonitor"
         @settings="updateSettings"
         @record="record"
         :on-remove="remove" />
 
       <div v-if="selectedMonitor" class="live-detail">
+        <div v-if="refreshError" role="alert" class="alert alert-error mb-3 flex-none text-sm">
+          刷新录制失败：{{ refreshError }}。已保留上次成功读取的内容。
+        </div>
         <LiveRecordingTimeline
           :key="selectedMonitor.id"
           :sessions="sessions"
           :selected-id="selectedSession?.id ?? ''"
+          :selected-session="selectedSession"
           :start="recordingWindow.start"
           :end="recordingWindow.end"
           :now="currentTime"
           :date="selectedDate"
           :max-date="latestHistoryDate"
-          :loading="loading"
+          :loading="dateLoading"
           :label="windowLabel"
           :empty-message="emptyMessage"
           @date-change="changeDate"
-          @select="selectedSessionId = $event" />
+          @select="selectSession" />
+        <div v-if="selectionOutsideWindow" role="status"
+          class="alert alert-info alert-vertical sm:alert-horizontal mb-3 flex-none text-sm">
+          <span>所选场次已不在当前时间范围内</span>
+          <button type="button" class="btn btn-sm" :disabled="dateLoading"
+            aria-label="查看该日期" @click="viewSelectedDate">查看该日期</button>
+        </div>
         <LiveSessionPanel
           v-if="selectedSession"
           :key="selectedSession.id"

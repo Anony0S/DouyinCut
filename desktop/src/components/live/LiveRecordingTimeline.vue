@@ -2,10 +2,12 @@
 import { computed, ref } from 'vue'
 import type { LiveSession } from '../../services/liveMonitoring'
 import { formatLiveTime } from './presentation'
+import RecordingDatePicker from './RecordingDatePicker.vue'
 
 const props = defineProps<{
   sessions: LiveSession[]
   selectedId: string
+  selectedSession: LiveSession | undefined
   start: number
   end: number
   now: number
@@ -16,16 +18,16 @@ const props = defineProps<{
   emptyMessage: string
 }>()
 const emit = defineEmits<{ select: [id: string]; 'date-change': [date: string] }>()
-function changeDate(event: Event) {
-  const input = event.target as HTMLInputElement
-  const date = input.value
-  input.value = props.date
-  emit('date-change', date)
-}
-const previewId = ref('')
+const hoveredId = ref('')
+const focusedId = ref('')
 const chronological = computed(() => [...props.sessions].sort((a, b) => a.started - b.started || a.id.localeCompare(b.id)))
-const preview = computed(() => props.sessions.find(item => item.id === previewId.value)
-  ?? props.sessions.find(item => item.id === props.selectedId))
+const preview = computed(() => props.sessions.find(item => item.id === hoveredId.value)
+  ?? props.sessions.find(item => item.id === focusedId.value)
+  ?? props.selectedSession)
+function previewFocus(id: string) {
+  focusedId.value = id
+  hoveredId.value = ''
+}
 const ticks = computed(() => Array.from({ length: 5 }, (_, index) => ({
   position: index * 25,
   label: new Date((props.start + (props.end - props.start) * index / 4) * 1000).toLocaleString('zh-CN', {
@@ -43,7 +45,9 @@ function duration(item: LiveSession) {
   return [hours ? `${hours} 小时` : '', minutes ? `${minutes} 分钟` : '', seconds % 60 ? `${seconds % 60} 秒` : ''].filter(Boolean).join(' ') || '不足 1 秒'
 }
 function state(item: LiveSession) {
-  return item.status === 'recording' ? '录制中' : item.status === 'failed' ? '异常结束' : '已结束'
+  if (item.status === 'recording') return '录制中'
+  if (item.status !== 'failed') return '已结束'
+  return item.end_time_source === 'recovery_check' ? '异常结束，结束时间可能晚于实际停录时间' : '异常结束'
 }
 function summary(item: LiveSession) {
   return `${formatLiveTime(item.started)} — ${item.status === 'recording' ? '至今' : formatLiveTime(item.ended)} · ${duration(item)} · ${state(item)}`
@@ -51,20 +55,16 @@ function summary(item: LiveSession) {
 </script>
 
 <template>
-  <section class="card card-border bg-base-100 live-recording-timeline" aria-label="录制时间线" @mouseleave="previewId = ''">
+  <section class="card card-border bg-base-100 live-recording-timeline" aria-label="录制时间线" @mouseleave="hoveredId = ''">
     <div class="live-recording-timeline-heading">
       <h3>录制场次</h3>
       <span class="text-base-content/60">{{ label }} · {{ sessions.length }} 场</span>
       <div class="live-recording-timeline-controls">
-        <label class="live-recording-date">
-          <span class="live-sr-only">录制日期</span>
-          <input class="input input-sm" type="date" aria-label="录制日期" :max="maxDate"
-            :value="date" :disabled="loading"
-            @change="changeDate" />
-        </label>
-        <button v-if="date" type="button" class="btn btn-ghost btn-sm" :disabled="loading"
+        <RecordingDatePicker :value="date" :max="maxDate" :disabled="loading"
+          @change="emit('date-change', $event)" />
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || !date"
           aria-label="回到最近" @click="$emit('date-change', '')">回到最近</button>
-        <span v-if="loading" role="status" class="text-base-content/60">正在读取…</span>
+        <span v-if="loading" role="status" class="live-sr-only">正在读取…</span>
       </div>
     </div>
     <div class="live-recording-timeline-scroll">
@@ -78,7 +78,7 @@ function summary(item: LiveSession) {
             :class="{ 'is-selected': item.id === selectedId, 'is-recording': item.status === 'recording' }"
             :style="position(item)" :aria-label="`选择录制场次：${summary(item)}`"
             :aria-pressed="item.id === selectedId"
-            @mouseenter="previewId = item.id" @focus="previewId = item.id" @blur="previewId = ''"
+            @mouseenter="hoveredId = item.id" @focus="previewFocus(item.id)" @blur="focusedId = ''"
             @click="$emit('select', item.id)">
             <span v-if="item.started < start" class="live-recording-timeline-continuation" aria-label="开始于窗口之前">‹</span>
             <span class="live-sr-only">{{ state(item) }}</span>
@@ -86,6 +86,17 @@ function summary(item: LiveSession) {
           </button>
         </div>
       </div>
+    </div>
+    <div v-if="chronological.length" class="flex gap-2 overflow-x-auto p-1 [scrollbar-width:thin]" role="group" aria-label="逐场选择录制场次">
+      <button v-for="(item, index) in chronological" :key="item.id" type="button"
+        class="btn btn-sm min-w-[100px]! shrink-0 tabular-nums"
+        :class="{ 'btn-active outline-2 outline-primary outline-offset-1': item.id === selectedId }"
+        :aria-label="`逐场选择录制场次：第 ${index + 1} 场 · ${summary(item)}`" :aria-pressed="item.id === selectedId"
+        @mouseenter="hoveredId = item.id" @focus="previewFocus(item.id)" @blur="focusedId = ''"
+        @click="$emit('select', item.id)">
+        <span class="text-base-content/60">{{ index + 1 }}</span>
+        {{ formatLiveTime(item.started, true) }}
+      </button>
     </div>
     <button v-if="preview" type="button" class="btn btn-ghost btn-sm live-recording-timeline-summary"
       :aria-label="`查看录制场次：${summary(preview)}`" @click="$emit('select', preview.id)">

@@ -1,0 +1,16 @@
+{
+  "product_name": "黑色短款外套",
+  "variant": "黑色",
+  "target_duration_us": 60000000,
+  "clips": [
+    {
+      "path": "C:/素材/直播.mp4",
+      "start_us": 12000000,
+      "end_us": 22000000,
+      "tags": ["front"],
+      "transcripts": [
+        {"start_us": 13000000, "end_us": 16000000, "text": "请填写该区间真实口播内容"}
+      ]
+    }
+  ]
+}

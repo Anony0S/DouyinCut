@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DouyinCut",
+  "version": "0.1.0",
+  "identifier": "com.douyincut.desktop",
+  "build": {
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "../dist",
+    "beforeBuildCommand": "pnpm run build"
+  },
+  "app": {
+    "windows": [{ "title": "DouyinCut · 服装直播剪辑", "width": 1440, "height": 960, "minWidth": 900, "minHeight": 650 }],
+    "security": { "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:5173 ws://127.0.0.1:5173; media-src 'self' blob:; style-src 'self' 'unsafe-inline'" }
+  },
+  "bundle": { "active": false }
+}

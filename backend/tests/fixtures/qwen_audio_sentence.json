@@ -1,0 +1,132 @@
+{
+  "sentence": {
+    "sentence_id": 1,
+    "begin_time": 600,
+    "end_time": 3834,
+    "text": "hello world，这里是阿里巴巴语音实验室。",
+    "channel_id": 0,
+    "speaker_id": null,
+    "sentence_end": true,
+    "words": [
+      {
+        "begin_time": 600,
+        "end_time": 1000,
+        "text": "hello",
+        "punctuation": "",
+        "fixed": true,
+        "speaker_id": null
+      },
+      {
+        "begin_time": 1000,
+        "end_time": 1400,
+        "text": " world",
+        "punctuation": "，",
+        "fixed": true,
+        "speaker_id": null
+      },
+      {
+        "begin_time": 1400,
+        "end_time": 1920,
+        "text": "这里是",
+        "punctuation": "",
+        "fixed": true,
+        "speaker_id": null
+      },
+      {
+        "begin_time": 1920,
+        "end_time": 2520,
+        "text": "阿里巴巴",
+        "punctuation": "",
+        "fixed": true,
+        "speaker_id": null
+      },
+      {
+        "begin_time": 2520,
+        "end_time": 2880,
+        "text": "语音",
+        "punctuation": "",
+        "fixed": true,
+        "speaker_id": null
+      },
+      {
+        "begin_time": 2880,
+        "end_time": 3834,
+        "text": "实验室",
+        "punctuation": "。",
+        "fixed": true,
+        "speaker_id": null
+      }
+    ]
+  },
+  "text": "hello world，这里是阿里巴巴语音实验室。",
+  "request_id": "a7e18c36-206b-9808-a37e-e2b2ecaa0154",
+  "output": {
+    "sentence": {
+      "sentence_id": 1,
+      "begin_time": 600,
+      "end_time": 3834,
+      "text": "hello world，这里是阿里巴巴语音实验室。",
+      "channel_id": 0,
+      "speaker_id": null,
+      "sentence_end": true,
+      "words": [
+        {
+          "begin_time": 600,
+          "end_time": 1000,
+          "text": "hello",
+          "punctuation": "",
+          "fixed": true,
+          "speaker_id": null
+        },
+        {
+          "begin_time": 1000,
+          "end_time": 1400,
+          "text": " world",
+          "punctuation": "，",
+          "fixed": true,
+          "speaker_id": null
+        },
+        {
+          "begin_time": 1400,
+          "end_time": 1920,
+          "text": "这里是",
+          "punctuation": "",
+          "fixed": true,
+          "speaker_id": null
+        },
+        {
+          "begin_time": 1920,
+          "end_time": 2520,
+          "text": "阿里巴巴",
+          "punctuation": "",
+          "fixed": true,
+          "speaker_id": null
+        },
+        {
+          "begin_time": 2520,
+          "end_time": 2880,
+          "text": "语音",
+          "punctuation": "",
+          "fixed": true,
+          "speaker_id": null
+        },
+        {
+          "begin_time": 2880,
+          "end_time": 3834,
+          "text": "实验室",
+          "punctuation": "。",
+          "fixed": true,
+          "speaker_id": null
+        }
+      ]
+    },
+    "text": "hello world，这里是阿里巴巴语音实验室。",
+    "request_id": "a7e18c36-206b-9808-a37e-e2b2ecaa0154"
+  },
+  "usage": {
+    "duration": 4,
+    "input_tokens": 105,
+    "output_tokens": 8,
+    "total_tokens": 113
+  }
+}

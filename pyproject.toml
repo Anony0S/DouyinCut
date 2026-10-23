@@ -1,0 +1,22 @@
+[project]
+name = "douyincut"
+version = "0.1.0"
+description = "Windows clothing livestream editing workspace"
+requires-python = ">=3.12"
+dependencies = [
+    "dashscope>=1.27.7",
+    "douyincut-backend",
+    "openai>=3.29.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["backend"]
+
+[tool.uv.sources]
+douyincut-backend = { workspace = true }

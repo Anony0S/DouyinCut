@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+node_modules/
+dist/
+target/
+.env
+data/
+.runtime/
+*.log
+tools/live_product_bridge/live-product-bridge.exe

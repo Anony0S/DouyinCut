@@ -1,0 +1,45 @@
+{
+  "name": "douyincut-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "pnpm": ">=10 <11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@tauri-apps/cli",
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vue-tsc --noEmit && vite build",
+    "test:secret-input": "node scripts/verify-secret-input.cjs",
+    "test:events": "node scripts/verify-events.cjs",
+    "test:job-error": "node scripts/verify-job-error.cjs",
+    "test:confirmation-popover": "node scripts/verify-confirmation-popover.cjs",
+    "test:delete-wiring": "node scripts/verify-delete-confirmation-wiring.cjs",
+    "test:live-timeline": "node scripts/verify-live-recording-timeline.cjs",
+    "test:roughcut": "node scripts/verify-roughcut.cjs",
+    "test:routing": "node scripts/verify-routing.cjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "pinia": "^3.0.4",
+    "vue": "^3.5.0",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "daisyui": "^5.7.50",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.7.0",
+    "vite": "^6.0.0",
+    "vite-plugin-vue-devtools": "^8.2.1",
+    "vue-tsc": "^2.2.0"
+  }
+}

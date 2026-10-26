@@ -1,7 +1,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod session;
+
 fn main() {
-    tauri::Builder::default()
-        .run(tauri::generate_context!())
-        .expect("无法启动 DouyinCut");
+    use tauri::Manager;
+    let application = tauri::Builder::default()
+        .setup(session::setup)
+        .build(tauri::generate_context!());
+    match application {
+        Ok(app) => app.run(|handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(runtime) = handle.try_state::<session::SessionHost>() {
+                    if let Err(message) = runtime.shutdown() {
+                        session::show_error(&message);
+                    }
+                }
+            }
+        }),
+        Err(error) => session::show_error(&error.to_string()),
+    }
 }

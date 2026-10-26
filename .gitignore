@@ -11,3 +11,5 @@ data/
 .runtime/
 *.log
 tools/live_product_bridge/live-product-bridge.exe
+desktop/src-tauri/runtime/
+desktop/src-tauri/gen/

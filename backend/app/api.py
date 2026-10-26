@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import Field
 
 from .core.config import Settings
@@ -38,7 +39,7 @@ class SecretRequest(Model):
     value: str = Field(max_length=20000)
 
 
-def create_app(settings: Settings | None = None, token: str | None = None):
+def create_app(settings: Settings | None = None, token: str | None = None, *, frontend_dir: Path | None = None):
     settings = settings or Settings.from_env()
     settings.prepare()
     store = Store(settings.database)
@@ -46,7 +47,11 @@ def create_app(settings: Settings | None = None, token: str | None = None):
     token = token or os.environ.get("DOUYINCUT_SESSION_TOKEN") or secrets.token_urlsafe(32)
     app = FastAPI(title="DouyinCut", version="0.1.0")
     app.state.store, app.state.settings, app.state.live_store = store, settings, live_store
-    allowed = {"http://127.0.0.1:5173", f"http://127.0.0.1:{settings.port}", "http://tauri.localhost", "https://tauri.localhost"}
+    allowed = {f"http://127.0.0.1:{settings.port}"}
+    if frontend_dir is None:
+        allowed.update({"http://127.0.0.1:5173", "http://tauri.localhost", "https://tauri.localhost"})
+    else:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1'])
     app.add_middleware(CORSMiddleware, allow_origins=list(allowed), allow_credentials=True,
                        allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Content-Type", "X-Session-Token"])
 
@@ -62,6 +67,10 @@ def create_app(settings: Settings | None = None, token: str | None = None):
         response.headers["X-Request-ID"] = trace
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Cache-Control"] = "no-store"
+        if frontend_dir is not None:
+            from .desktop_frontend import PRODUCTION_CSP
+            response.headers['Content-Security-Policy'] = PRODUCTION_CSP
+            response.headers['Referrer-Policy'] = 'no-referrer'
         return response
 
     @app.exception_handler(KeyError)
@@ -466,5 +475,9 @@ def create_app(settings: Settings | None = None, token: str | None = None):
                     yield ": heartbeat\n\n"
                 await asyncio.sleep(2)
         return StreamingResponse(stream(), media_type="text/event-stream")
+
+    if frontend_dir is not None:
+        from .desktop_frontend import WorkbenchFiles
+        app.mount('/', WorkbenchFiles(directory=frontend_dir, html=True), name='workbench')
 
     return app

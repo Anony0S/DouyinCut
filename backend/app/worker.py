@@ -209,10 +209,11 @@ class Worker:
             thread.join(timeout=2)
         return True
 
-    def run(self):
-        while True:
+    def run(self, stop=None):
+        stop = stop if stop is not None else threading.Event()
+        while not stop.is_set():
             if not self.run_once():
-                time.sleep(0.5)
+                stop.wait(0.5)
 
 
 def main():

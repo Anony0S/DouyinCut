@@ -1271,14 +1271,15 @@ class LiveMonitorWorker:
                 self.live.set_liveness(monitor_id, None)
                 self.live.set_monitor_state(monitor_id, "error", f"{type(exc).__name__}: {exc}")
 
-    def run(self):
+    def run(self, stop=None):
+        stop = stop if stop is not None else threading.Event()
         try:
-            while True:
+            while not stop.is_set():
                 try:
                     self.run_once()
                 except Exception:
                     logging.getLogger("douyincut.live-monitor").exception("Live monitor cycle failed")
-                time.sleep(1)
+                stop.wait(1)
         except KeyboardInterrupt:
             pass
         for monitor_id in list(self.processes):

@@ -176,7 +176,7 @@ flowchart TD
 - Pinia 仅保存会跨页面共享的会话、项目列表、当前项目和任务状态；视频播放器引用、文件选择器、设置页表单草稿与密钥明文保持组件本地，不写入 Pinia 或浏览器持久化。
 - FastAPI / Pydantic 处理本地接口、认证和校验，SQLite 保存元数据、版本、任务、租约和缓存。
 - API 与重型媒体 / 云端工作进程隔离。FFmpeg / ffprobe 负责探测、音频、裁切与拼接，进程参数用列表，不拼接 shell。
-- Tauri 2 当前只提供开发外壳，Python sidecar / 服务生命周期与生产安装包未完成。
+- 已新增生产 DesktopSession 管理边界、同源静态工作台和 PyInstaller 单目录最小测试程序；通过真实回环 API 验证会话认证、项目列表与空闲退出。Tauri release 程序已实际构建，并在无开发工具 PATH 的中文目录验证 WebView 项目列表、令牌内存交接及宿主进程组清理。安装器及活动任务的完整生命周期尚未完成；构建、边界和实际证据见 [Windows 生产桌面会话](docs/windows-session.md)。
 - 本版无需 LangChain、LangGraph、Redis 或 Celery，也不部署本地 AI 模型。
 
 ## 4. ASR 协议与时间映射

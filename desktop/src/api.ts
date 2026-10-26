@@ -13,7 +13,12 @@ export type VideoProject = { id: string; name: string; product_name: string; dur
 export type ProjectPage = { items: VideoProject[]; total: number; page: number; page_size: number; pages: number }
 export type ProjectDetail = { asset: Asset; draft: ProjectDraft; plans: Plan[]; candidates: Candidate[]; artifacts: Artifact[]; jobs: Job[]; latest_analysis: Job | null }
 
-const sessionToken = import.meta.env.VITE_SESSION_TOKEN || ''
+declare global {
+  var __DOUYINCUT_SESSION_TOKEN__: string | undefined
+}
+
+const sessionToken = globalThis.__DOUYINCUT_SESSION_TOKEN__ || import.meta.env.VITE_SESSION_TOKEN || ''
+delete globalThis.__DOUYINCUT_SESSION_TOKEN__
 
 export function apiRequest(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers)

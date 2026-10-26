@@ -19,6 +19,7 @@
     "test:appearance": "node scripts/verify-appearance.cjs",
     "test:secret-input": "node scripts/verify-secret-input.cjs",
     "test:events": "node scripts/verify-events.cjs",
+    "test:runtime-session": "node scripts/verify-runtime-session.cjs",
     "test:job-error": "node scripts/verify-job-error.cjs",
     "test:confirmation-popover": "node scripts/verify-confirmation-popover.cjs",
     "test:delete-wiring": "node scripts/verify-delete-confirmation-wiring.cjs",

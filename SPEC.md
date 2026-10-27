@@ -323,7 +323,7 @@ API 只监听本机回环地址；请求共用本地会话令牌头或 Cookie，
 
 统一开发入口 `uv run python scripts/dev.py`；前端 pnpm，安装走项目 setup 脚本。FFmpeg / ffprobe 需 PATH 可用。后端更改后重启统一启动器再刷新。
 
-冻结桌面程序关闭初始化页或工作台窗口时会隐藏到系统托盘，保留 WebView、页面草稿和已启动会话；首次关闭显示后台运行及托盘操作说明。托盘菜单可恢复窗口或显式退出。Windows 单实例对象以 Tauri 应用标识、当前用户 SID 和当前交互会话命名，并使用当前用户默认 ACL；同一会话再次启动应唤回现有窗口，不创建第二套 Tauri 会话或后台服务。托盘 / 单实例验收已结合代码测试和用户桌面反馈完成；实际验证来源及此前一次未观察到唤回的记录见 [Windows 托盘与单实例](docs/windows-tray.md)。活动任务的显式退出确认和安全暂停仍由工单 05 实现。
+冻结桌面程序关闭初始化页或工作台窗口时会隐藏到系统托盘，保留 WebView、页面草稿和已启动会话；首次关闭显示后台运行及托盘操作说明。托盘菜单可恢复窗口或显式退出。Windows 单实例对象以 Tauri 应用标识、当前用户 SID 和当前交互会话命名，并使用当前用户默认 ACL；同一会话再次启动应唤回现有窗口，不创建第二套 Tauri 会话或后台服务。托盘 / 单实例验收已结合代码测试和用户桌面反馈完成；实际验证来源及此前一次未观察到唤回的记录见 [Windows 托盘与单实例](docs/windows-tray.md)。工单 05 的活动任务退出确认、媒体检查点暂停及手动恢复已实现，当前等待 Windows 桌面验收；隔离夹具操作见 [Windows 托盘与单实例](docs/windows-tray.md)。
 
 当前为开发原型，不是 Windows 安装包；Tauri sidecar、WebView 编码支持、干净 Windows 安装验收及第三方许可证须在正式发布前验证。当前实际验证记录见 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)。
 

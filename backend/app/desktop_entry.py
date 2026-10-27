@@ -48,8 +48,7 @@ def main() -> int:
         parser.error('session startup requires --work-dir')
     resources = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2]))
     frontend = args.frontend_dir or resources / 'frontend'
-    session = DesktopSession(Settings(args.work_dir.absolute()), frontend,
-                             workspace_config=args.workspace_config, application_dir=args.application_dir)
+    session = None
     shutdown = threading.Event()
 
     def read_control():
@@ -69,6 +68,15 @@ def main() -> int:
             emit({'event': 'awaiting_host'})
             if sys.stdin.readline().strip() != 'start':
                 raise RuntimeError('原生外壳未授权启动桌面会话')
+        if getattr(sys, 'frozen', False):
+            from .bundled_media import bundled_settings
+            settings = bundled_settings(args.work_dir, resources)
+        else:
+            settings = Settings.from_env()
+            from dataclasses import replace
+            settings = replace(settings, data_dir=args.work_dir.absolute())
+        session = DesktopSession(settings, frontend,
+                                 workspace_config=args.workspace_config, application_dir=args.application_dir)
         info = session.start()
         emit({'event': 'ready', 'url': info.url, 'token': info.token, 'roles': session.status()})
         threading.Thread(target=read_control, daemon=True).start()
@@ -81,8 +89,10 @@ def main() -> int:
         return 0
     except (Exception, KeyboardInterrupt) as exc:
         traceback.print_exc(file=sys.stderr)
-        session.close()
-        emit({'event': 'error', 'message': str(exc) or type(exc).__name__, 'roles': session.status()})
+        if session is not None:
+            session.close()
+        emit({'event': 'error', 'message': str(exc) or type(exc).__name__,
+              'roles': session.status() if session is not None else {}})
         return 1
 
 

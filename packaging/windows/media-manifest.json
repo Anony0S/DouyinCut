@@ -1,0 +1,17 @@
+{
+  "version": "8.1-full_build-www.gyan.dev",
+  "platform": "windows-x64",
+  "license": "GPL-3.0-or-later",
+  "provider": "https://www.gyan.dev/ffmpeg/builds/",
+  "acquisition": "Pre-acquired Gyan.FFmpeg WinGet distribution; hashes measured from the installed files",
+  "provenance_verification": "Bundled upstream README records the version, GPL v3 and FFmpeg source commit; network verification pending",
+  "redistribution_readiness": "Corresponding source and external-library license bundle require release verification before distribution",
+  "ffmpeg_source": "https://github.com/FFmpeg/FFmpeg/commit/9047fa1b08",
+  "required_encoders": ["libx264", "aac", "pcm_s16le", "mjpeg"],
+  "files": {
+    "ffmpeg.exe": "d1e2a156261ecc675081943197a85f08f2868784a0af499171ede89353edad31",
+    "ffprobe.exe": "70872c3ffbc43d0b2c570f9837f54d6e9a832f4ca25463e9735b6a3ec0621478",
+    "LICENSE": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "README.txt": "557205ec68086511f87c0c2ca7ba077d4c687f71e55f3165aed425ebe704b5d8"
+  }
+}

@@ -196,6 +196,9 @@ class Worker:
         except Exception as exc:
             # Expected errors are sanitized by providers and media handlers.
             message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else f"任务失败（{type(exc).__name__}）"
+            if isinstance(exc, OSError) and job['kind'] in {'export', 'preview'}:
+                output_root = self.settings.data_dir / ('previews' if job['kind'] == 'preview' else 'exports')
+                message = f'媒体输出写入失败：{output_root}；请检查权限、磁盘空间或文件占用（{type(exc).__name__}）'
             self.store.finish(job["id"], self.owner, "failed", error=message[:1000],
                               error_detail=getattr(exc, "details", None))
             if job["kind"] == "import" and job["payload"].get("live_segment_id"):
@@ -204,7 +207,8 @@ class Worker:
             if job["kind"] == "import" and job["payload"].get("live_product_clip_id"):
                 from .live_monitoring import LiveStore
                 LiveStore(self.store).retry_product_clip_import(job["payload"]["live_product_clip_id"])
-            logger.error("job %s failed: %s", job["id"], type(exc).__name__)
+            logger.error("job %s failed: %s", job["id"], type(exc).__name__,
+                         exc_info=isinstance(exc, OSError) and job['kind'] in {'export', 'preview'})
         finally:
             stop.set()
             thread.join(timeout=2)

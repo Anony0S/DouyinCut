@@ -7,7 +7,7 @@
 在 Windows x64 构建机的项目根目录运行：
 
 ~~~powershell
-./scripts/build-windows-session.ps1
+./scripts/build-windows-session.ps1 -MediaSource 'C:/构建依赖/ffmpeg-8.1-full_build'
 ~~~
 
 需要 uv、pnpm 10、Node、Rust MSVC 工具链、Visual Studio C++ Build Tools 与 Windows SDK。脚本使用 uv 管理的标准 CPython 3.12.14，按 uv.lock / pnpm-lock.yaml 安装依赖，构建生产前端、PyInstaller 单目录运行时和 Tauri 测试程序。不要用含定制证书路径的宿主 Python 冻结。构建阶段允许下载依赖，失败立即终止；日志位于 .runtime/windows-packaging/logs。
@@ -15,7 +15,7 @@
 只有 Python 冻结验证时可运行：
 
 ~~~powershell
-./scripts/build-windows-session.ps1 -RuntimeOnly
+./scripts/build-windows-session.ps1 -RuntimeOnly -MediaSource 'C:/构建依赖/ffmpeg-8.1-full_build'
 uv run python scripts/verify-windows-session.py --runtime desktop/src-tauri/runtime/DouyinCutRuntime/DouyinCutRuntime.exe
 ~~~
 

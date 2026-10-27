@@ -197,11 +197,11 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if suffix not in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".ts", ".m4v"}:
             raise ValueError("请选择支持的视频文件")
         folder = settings.data_dir / "recordings" / "imports"
-        folder.mkdir(parents=True, exist_ok=True)
         final = folder / (secrets.token_hex(16) + suffix)
         temporary = final.with_suffix(suffix + ".partial")
         size = 0
         try:
+            folder.mkdir(parents=True, exist_ok=True)
             with temporary.open("wb") as output:
                 async for chunk in request.stream():
                     if chunk:
@@ -211,9 +211,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                 raise ValueError("所选视频为空文件")
             temporary.rename(final)
             return store.enqueue("import", {"path": str(final), "display_name": display_name})
-        except BaseException:
-            temporary.unlink(missing_ok=True)
-            final.unlink(missing_ok=True)
+        except BaseException as exc:
+            for owned in (temporary, final):
+                try:
+                    owned.unlink(missing_ok=True)
+                except OSError:
+                    pass  # Cleanup failure must not hide the original write error.
+            if isinstance(exc, OSError):
+                raise HTTPException(503, f'视频导入写入失败：{folder}；请检查权限、磁盘空间或文件占用') from None
             raise
 
     @app.get("/api/v1/assets")

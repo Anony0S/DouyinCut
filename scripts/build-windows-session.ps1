@@ -1,4 +1,4 @@
-param([switch]$RuntimeOnly)
+param([switch]$RuntimeOnly, [Parameter(Mandatory=$true)][string]$MediaSource)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -44,6 +44,7 @@ try {
     $buildPython = & uv python find --managed-python 3.12.14
     if ($LASTEXITCODE -ne 0) { throw 'Cannot locate the managed build interpreter.' }
     Invoke-Checked 'uv' @('sync', '--locked', '--python', $buildPython.Trim())
+    Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/prepare-windows-media.py', '--source', $MediaSource)
     Invoke-Checked 'pnpm' @('--dir', 'desktop', 'install', '--frozen-lockfile')
     Invoke-Checked 'pnpm' @('--dir', 'desktop', 'run', 'build')
     Invoke-Checked 'uv' @('run', '--no-sync', 'python', '-m', 'PyInstaller', '--clean', '--noconfirm',
@@ -53,6 +54,7 @@ try {
     if (-not (Test-Path $runtime)) { throw 'Frozen runtime output is missing.' }
     Write-Output "Frozen runtime: $runtime"
     Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/verify-windows-session.py', '--runtime', $runtime)
+    Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/verify-windows-media.py', '--runtime', $runtime)
     if (-not $RuntimeOnly) {
         Invoke-Checked 'pnpm' @('--dir', 'desktop', 'run', 'tauri', 'build', '--no-bundle', '--config', 'src-tauri/tauri.session.conf.json')
         Write-Output ("Native test program: " + (Join-Path $repo 'desktop/src-tauri/target/release/douyincut.exe'))

@@ -21,9 +21,9 @@
 
 本次保留上游 GPL v3 LICENSE、包含构建配置及来源的 README.txt，并随冻结资源分发。它们证明本地输入的许可证声明，不能代替完整的再分发准备。
 
-来源研究记录在 `.scratch/windows-packaging/research-media-sources.md`。Gyan 8.1 release API 提供了完整构建 ZIP 的上游 SHA-256；它属于整个归档，不等于当前 exe 的摘要，本机未下载该归档进行逐项比对。FFmpeg 主源码固定到上述完整提交；对应源码压缩包和固定许可证 URL 可由上游 API / 仓库定位。本轮下载尝试遇到 TLS 握手超时，没有取得可验证的本地源码归档。
+来源研究记录在 `.scratch/windows-packaging/research-media-sources.md`。2026-10-28 已下载 Gyan 8.1 full ZIP，整体 SHA-256 与 release API 的上游值一致；压缩包中的 `ffmpeg.exe`、`ffprobe.exe`、`LICENSE`、`README.txt` SHA-256 均与当前锁定文件一致。FFmpeg 主源码归档固定到上述完整提交，已下载并验证包含源码、LICENSE.md 与 COPYING.GPLv3；归档及两份许可证的大小和 SHA-256 记录在 `media-sources.json` 与本地 `.runtime/windows-packaging/media-source-evidence/download-record.json`。
 
-本地 README 列出 70 个外部库版本，FFmpeg 实测 build configuration 记录 102 个开关；依赖表仍含未固定的 `openal-soft latest`。逐项的源码、确切许可证原文、构建脚本、补丁和工具链尚未收齐，也未验证其与当前二进制构建完全对应。机器可读的 `media-sources.json` 将这些内容与待补资料区分，并保持 `redistribution_ready: false`。不得把来源记录、主 FFmpeg 源码链接或该布尔值以外的局部材料说成完整对应源码或许可审查结论。
+本地 README 列出 70 个外部库版本，FFmpeg 实测 build configuration 记录 102 个开关；依赖表仍含未固定的 `openal-soft latest`。Gyan 发布压缩包包含二进制、README 和许可证，但不含主源码或外部依赖源码。检查的 release API 只列二进制归档；`GyanD/codexffmpeg` 仓库递归树仅含 README 与 funding 文件；官方构建页介绍构建类型、分支和库范围，没有该固定 release 对应的获取依赖、补丁和复现构建配方。逐项外部源码、确切许可证原文、构建脚本、补丁和工具链尚未收齐。机器可读的 `media-sources.json` 将已核验材料与待补资料区分，并保持 `redistribution_ready: false`。不得把 FFmpeg 主源码与许可证误称为 Gyan 静态构建全部对应源码或完整许可审查结论。
 
 对外发布安装包前必须取得并核验该固定构建的完整可访问对应源码、构建材料及相关许可证，按实际分发方式核对义务，再由明确的发布验收把媒体依赖记录为可再分发。上游材料缺失时，需要先选择并重新固定可追溯构建，再完整回归；不可静默替换依赖。当前冻结包只用于本机开发验收，不能据此标记许可证交付已完成。
 
@@ -53,9 +53,26 @@
 
 2026-10-27 用户反馈“我已经进行测试了，功能正常”，记录所要求的普通桌面播放 / 导出流程人工验收通过，证据见 .runtime/m03-final/manual-acceptance.json。再次导入属于此前可选步骤，用户没有逐项说明，故不单独宣称该步骤或全部支持格式已经人工实测。自动报告保留其原有 not_automated 标记；完整对应源码及外部许可证仍未完成。
 
+### 2026-10-27：下载并核验固定上游材料
+
+- FFmpeg 固定提交 `9047fa1b084f76b1b4d065af2d743df1b40dfb56` 的源码归档已从 GitHub API 下载到 `.runtime/windows-packaging/media-source-evidence/ffmpeg-source.tar.gz`，SHA-256 `f989a6d8605ea13687af9eac793e177089b943c66b59f8ecb0d85fe490d5bdf7`；已检查归档含 `fftools/ffmpeg.c`、`LICENSE.md`、`COPYING.GPLv3`。两份固定提交许可证也已下载并记录 SHA-256。
+- Gyan `ffmpeg-8.1-full_build.zip` 已下载并匹配官方 release API SHA-256 `587b1c37de29c5003d01cf65da10001bac43a58b88e61af0fc77c61daff04761`。包内 FFmpeg、ffprobe、LICENSE、README 的 SHA-256 与当前已使用资源全部一致，锁定二进制来源得到验证。
+- 进一步检查 Gyan release API、项目 GitHub 递归树和官方构建页。发布仍只提供二进制归档，项目树没有构建配方；官方页面描述 full / essentials 内容，不含固定版本外部依赖获取、补丁或完整复现配方。
+- Gyan 静态构建中的 70 项外部依赖源码及许可证未收齐，`openal-soft` 版本仍记为 `latest`。因此主 FFmpeg 源码已取得，但完整 Corresponding Source / 构建脚本仍不完整，来源清单继续 `redistribution_ready: false`，工单 03 的媒体再分发验收保持未完成。
+
 ### 2026-10-27：来源清单与隔离导入验收准备
 
 - 新增 `.scratch/windows-packaging/research-media-sources.md` 与 `packaging/windows/media-sources.json`，固定完整 FFmpeg 提交、Gyan 发布 ZIP 的上游摘要、实测构建配置和 README 中的 70 个外部库版本；源码包未能经本轮 TLS 下载验证，所有未收齐资料明示为缺口，并将 `redistribution_ready` 保持为 false。
 - 构建准备 CLI 现在要求版本及 README 摘要匹配的来源清单，并将其纳入冻结运行时哈希校验；缺失、错版或篡改时拒绝构建 / 启动。新增公开 CLI 验证 6 项通过。已用固定媒体工具重备资源，并重建冻结运行时；完整媒体验收再次通过，真实付费请求数为 0。
 - 原生文件选择器导入仍未由用户验收。运行 `uv run python scripts/prepare-windows-media-import-check.py` 会生成新空工作区、测试版及 `launch-import-check.cmd`；测试输入是合成 6 秒 160×120 视频，云端设置指向 `.invalid`。请在退出所有其他 DouyinCut 窗口后启动该 launcher，在“新建视频项目”选择 fixture 输出中 `synthetic_video` 指向的文件，等项目加载并确认显示 6 秒及 160×120，然后通过托盘菜单退出；不要点击云端分析。成功后原文件 SHA-256 不变、导入副本与项目素材由隔离工作区接收。此项仍需真实 Windows 文件选择器桌面操作，自动 API 上传不替代它。
 - GPL 对应源码、外部库精确许可证及完整构建材料仍未齐备，工单 03 继续保持 `ready-for-human`；工单 05 因 03 未完成，暂不能开始。
+
+### 2026-10-27：隔离导入启动器误拦截修正
+
+用户报告启动后只有命令窗口，无应用窗口。复现发现：PowerShell `Get-Process` 在未找到应用进程时，即便使用 `-ErrorAction SilentlyContinue`，原命令仍返回 1；批处理因此误走“已有进程”分支，根本没有启动桌面程序，运行时日志也未生成。启动器现在在未找到进程时显式 `exit 0`，找到进程仍 `exit 1`。同步修正生成脚本及已交付 `1793108258504987400/launch-import-check.cmd`，无需另建或清空工作区。修正后同一检查连续两次在无匹配进程时放行；另用实际存在的 `cmd` 进程验证拦截分支仍有效。证据记录于测试目录 `launcher-check.json`；它验证启动检查的退出码，不代表原生应用窗口或文件选择器验收通过。
+
+### 2026-10-27：用户确认原生导入正常
+
+用户按修正后的启动 / 原生文件选择器导入步骤复测并回复“可以 工作正常”。据此记录普通桌面启动、文件选择及项目导入人工验收通过。只读核对隔离工作区发现导入任务成功，素材为 6 秒、160×120；结果指向同一素材记录，副本位于隔离工作区 `recordings/imports/`，副本及原输入 SHA-256 与准备时一致。证据保存为 `.runtime/windows-packaging/media-import-check/1793108258504987400/manual-acceptance.json`，区分用户桌面反馈与本地只读验证，不表示所有支持格式或真实云端流程已测试。
+
+工单 03 的导入验收项现已完成；完整对应源码、外部库许可证及构建配方仍是唯一未完成项，故继续保持 `ready-for-human`，不解除工单 05 的依赖。

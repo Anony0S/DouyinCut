@@ -50,13 +50,15 @@ store.put("config", {"id": "cloud", "config": CloudConfig(
 ).model_dump()})
 
 launcher = root / "launch-import-check.cmd"
+# Get-Process reports missing names as errors even with SilentlyContinue;
+# explicitly return success when neither process is present.
 launcher.write_text(
     "@echo off\r\n"
     "chcp 65001 >nul\r\n"
     "setlocal\r\n"
     "title DouyinCut isolated video import check\r\n"
     'set "ROOT=%~dp0"\r\n'
-    'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p=Get-Process -Name douyincut,DouyinCutRuntime -ErrorAction SilentlyContinue; if ($p) { Write-Output \'Exit other DouyinCut windows from their tray before testing.\'; exit 1 }"\r\n'
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$p=Get-Process -Name douyincut,DouyinCutRuntime -ErrorAction SilentlyContinue; if ($p) { Write-Output \'Exit other DouyinCut windows from their tray before testing.\'; exit 1 }; exit 0"\r\n'
     "if errorlevel 1 goto already_running\r\n"
     'set "WEBVIEW2_USER_DATA_FOLDER=%ROOT%webview-profile"\r\n'
     'set "PATH=%SystemRoot%\\System32;%SystemRoot%"\r\n'

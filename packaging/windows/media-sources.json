@@ -16,8 +16,15 @@
       "url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1/ffmpeg-8.1-full_build.zip",
       "bytes": 247913948,
       "upstream_sha256": "587b1c37de29c5003d01cf65da10001bac43a58b88e61af0fc77c61daff04761",
-      "locally_downloaded": false,
-      "local_sha256": null
+      "locally_downloaded": true,
+      "local_sha256": "587b1c37de29c5003d01cf65da10001bac43a58b88e61af0fc77c61daff04761",
+      "evidence_file": ".runtime/windows-packaging/media-source-evidence/gyan-8.1-full_build.zip",
+      "member_comparison": {
+        "ffmpeg.exe": {"sha256": "d1e2a156261ecc675081943197a85f08f2868784a0af499171ede89353edad31", "matches_pinned_binary": true},
+        "ffprobe.exe": {"sha256": "70872c3ffbc43d0b2c570f9837f54d6e9a832f4ca25463e9735b6a3ec0621478", "matches_pinned_binary": true},
+        "LICENSE": {"sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903", "matches_pinned_binary": true},
+        "README.txt": {"sha256": "557205ec68086511f87c0c2ca7ba077d4c687f71e55f3165aed425ebe704b5d8", "matches_pinned_binary": true}
+      }
     }
   },
   "ffmpeg_source": {
@@ -26,12 +33,15 @@
     "commit_url": "https://github.com/FFmpeg/FFmpeg/commit/9047fa1b084f76b1b4d065af2d743df1b40dfb56",
     "source_archive_url": "https://api.github.com/repos/FFmpeg/FFmpeg/tarball/9047fa1b084f76b1b4d065af2d743df1b40dfb56",
     "source_archive_name": "FFmpeg-FFmpeg-n8.1-0-g9047fa1.tar.gz",
-    "source_archive_sha256": null,
-    "locally_collected": false,
-    "license_urls": [
-      "https://raw.githubusercontent.com/FFmpeg/FFmpeg/9047fa1b084f76b1b4d065af2d743df1b40dfb56/LICENSE.md",
-      "https://raw.githubusercontent.com/FFmpeg/FFmpeg/9047fa1b084f76b1b4d065af2d743df1b40dfb56/COPYING.GPLv3"
-    ]
+    "source_archive_sha256": "f989a6d8605ea13687af9eac793e177089b943c66b59f8ecb0d85fe490d5bdf7",
+    "source_archive_bytes": 16859282,
+    "source_archive_evidence_file": ".runtime/windows-packaging/media-source-evidence/ffmpeg-source.tar.gz",
+    "locally_collected": true,
+    "license_files": [
+      {"file": "LICENSE.md", "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/9047fa1b084f76b1b4d065af2d743df1b40dfb56/LICENSE.md", "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af", "bytes": 4346},
+      {"file": "COPYING.GPLv3", "url": "https://raw.githubusercontent.com/FFmpeg/FFmpeg/9047fa1b084f76b1b4d065af2d743df1b40dfb56/COPYING.GPLv3", "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903", "bytes": 35147}
+    ],
+    "license_evidence_directory": ".runtime/windows-packaging/media-source-evidence"
   },
   "observed_build": {
     "configuration_source": "ffmpeg.exe -hide_banner -buildconf",
@@ -319,9 +329,9 @@
       "zimg": "release-3.0.6-213-gbf3f425",
       "zvbi": "v0.2.44-4-g41477c9"
     },
-    "source_archives": null,
-    "license_texts": null,
-    "build_recipe_and_patches": null,
+    "source_archives": "not collected for external libraries",
+    "license_texts": "not collected for external libraries",
+    "build_recipe_and_patches": "not found in the checked Gyan 8.1 release assets or codexffmpeg repository tree; provider contact / further source locations still need follow-up",
     "floating_versions": [
       "openal-soft"
     ]
@@ -334,10 +344,10 @@
       "README.txt"
     ],
     "pending_materials": [
-      "fixed FFmpeg corresponding-source archive",
       "external-library source archives and exact license texts",
       "provider build scripts, patches, and toolchain inputs",
-      "verification that the upstream binary archive contains the measured executable hashes"
+      "resolve the unpinned openal-soft latest version",
+      "determine complete corresponding source scope for all enabled static dependencies"
     ]
   },
   "evidence": {
@@ -345,6 +355,9 @@
     "local_readme": ".runtime/windows-packaging/media/README.txt",
     "local_manifest": "packaging/windows/media-manifest.json",
     "verification_date": "2026-10-27",
+    "download_record": ".runtime/windows-packaging/media-source-evidence/download-record.json",
+    "provider_page": "https://www.gyan.dev/ffmpeg/builds/",
+    "provider_page_checked": "2026-10-27",
     "local_readme_sha256": "557205ec68086511f87c0c2ca7ba077d4c687f71e55f3165aed425ebe704b5d8"
   }
 }

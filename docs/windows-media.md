@@ -25,6 +25,8 @@
 
 本地 README 列出 70 个外部库版本，FFmpeg 实测 build configuration 记录 102 个开关；依赖表仍含未固定的 `openal-soft latest`。Gyan 发布压缩包包含二进制、README 和许可证，但不含主源码或外部依赖源码。检查的 release API 只列二进制归档；`GyanD/codexffmpeg` 仓库递归树仅含 README 与 funding 文件；官方构建页介绍构建类型、分支和库范围，没有该固定 release 对应的获取依赖、补丁和复现构建配方。逐项外部源码、确切许可证原文、构建脚本、补丁和工具链尚未收齐。机器可读的 `media-sources.json` 将已核验材料与待补资料区分，并保持 `redistribution_ready: false`。不得把 FFmpeg 主源码与许可证误称为 Gyan 静态构建全部对应源码或完整许可审查结论。
 
+Gyan 在其他版本的对应源码询问中要求使用官方邮箱联系，并提供应用和组织链接；公开答复见 [#249](https://github.com/GyanD/codexffmpeg/issues/249#issuecomment-6264377917)、[#250](https://github.com/GyanD/codexffmpeg/issues/250#issuecomment-6380032174)、[#251](https://github.com/GyanD/codexffmpeg/issues/251#issuecomment-6380026779)。这些不是本项目版本的供应方答复。询问稿已准备于 `.scratch/windows-packaging/gyan-corresponding-source-request.md`；需填入真实公开身份链接后由发布方从官方邮箱发出。没有发送请求，完整材料也尚未交付。
+
 对外发布安装包前必须取得并核验该固定构建的完整可访问对应源码、构建材料及相关许可证，按实际分发方式核对义务，再由明确的发布验收把媒体依赖记录为可再分发。上游材料缺失时，需要先选择并重新固定可追溯构建，再完整回归；不可静默替换依赖。当前冻结包只用于本机开发验收，不能据此标记许可证交付已完成。
 
 ## 无付费媒体验收

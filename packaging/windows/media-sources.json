@@ -358,6 +358,12 @@
     "download_record": ".runtime/windows-packaging/media-source-evidence/download-record.json",
     "provider_page": "https://www.gyan.dev/ffmpeg/builds/",
     "provider_page_checked": "2026-10-27",
+    "provider_corresponding_source_request_draft": ".scratch/windows-packaging/gyan-corresponding-source-request.md",
+    "provider_request_policy_evidence": [
+      "https://github.com/GyanD/codexffmpeg/issues/249#issuecomment-6264377917",
+      "https://github.com/GyanD/codexffmpeg/issues/250#issuecomment-6380032174",
+      "https://github.com/GyanD/codexffmpeg/issues/251#issuecomment-6380026779"
+    ],
     "local_readme_sha256": "557205ec68086511f87c0c2ca7ba077d4c687f71e55f3165aed425ebe704b5d8"
   }
 }

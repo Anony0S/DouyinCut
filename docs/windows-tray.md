@@ -1,6 +1,6 @@
 # Windows 托盘与单实例
 
-本页对应 [工单 04：托盘后台运行与当前用户单实例](../.scratch/windows-packaging/issues/04-tray-single-instance.md)。普通桌面原生验证完成前，工单保持 `ready-for-human`。
+本页对应 [工单 04：托盘后台运行与当前用户单实例](../.scratch/windows-packaging/issues/04-tray-single-instance.md)。2026-10-27 结合代码验证及用户人工验收反馈，工单已标记为 `resolved`。
 
 ## 行为
 
@@ -27,7 +27,7 @@ cargo test --offline --manifest-path desktop/src-tauri/Cargo.toml instance::plat
 uv run python scripts/prepare-windows-tray-smoke.py
 ~~~
 
-脚本在 `.runtime/windows-packaging/tray-smoke/<时间戳>/` 下生成新的测试工作目录、release 程序副本、独立 WebView2 profile 和 `launch-tray-check.cmd`。先通过托盘退出其他 DouyinCut 实例，再双击生成的启动器。验证数据只存在于该目录，不要使用真实工作目录。
+脚本在 `.runtime/windows-packaging/tray-smoke/<时间戳>/` 下生成新的测试工作目录、release 程序副本、独立 WebView2 profile 和 `launch-tray-check.cmd`。启动器使用 ASCII 子目录名，启动失败后会保留命令窗口并显示退出码及运行时日志位置。先通过托盘退出其他 DouyinCut 实例，再双击生成的启动器。验证数据只存在于该目录，不要使用真实工作目录。
 
 打开第二个 PowerShell 窗口，在每个检查点执行以下命令，对比程序与运行时的 PID / 数量：
 
@@ -45,3 +45,9 @@ Get-CimInstance Win32_Process |
 4. 从托盘菜单显式退出，确认启动器与该应用拥有的运行时进程结束。
 
 记录 Windows 版本、各步骤结果和进程数量，再将工单状态从 `ready-for-human` 更新为实际验收结果。
+
+## 人工验收记录
+
+2026-10-27，用户报告隔离程序启动时有 1 个 `douyincut.exe` 和 4 个 `DouyinCutRuntime.exe`。点击关闭、托盘恢复和首次关闭提示均正常；从托盘退出后，进程查询没有返回相关进程。后续复测确认先隐藏原窗口再双击同一启动器，原窗口恢复且运行时进程数不变。早先一次双击未观察到可见变化，后续复测成功；两次之间未修改运行时。隐藏期间活动状态和其他用户 / 会话隔离仍待验证，工单 04 保持 `ready-for-human`。
+
+同日，在收到隐藏期间本地导出 / 状态保持及另一 Windows 用户隔离的补充验证步骤后，用户回复“验证完成，功能正常”。结合此前结果，按用户报告补录剩余验收，工单 04 标记为 `resolved`。本次没有新增代理自动桌面操作证据；Windows 具体版本、第二账户信息及逐项截图 / 进程快照未提供。早先一次未观察到唤回的记录继续保留，不宣称已定位其根因。安装器、活动任务显式退出与云端中断恢复不在本票完成范围内。

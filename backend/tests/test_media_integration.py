@@ -42,7 +42,7 @@ class MediaIntegrationTests(unittest.TestCase):
                 {'start_ms': 3000, 'end_ms': 4500, 'reason': '面料'},
                 {'start_ms': 0, 'end_ms': 1000, 'reason': '上身'}]})
             worker = Worker(settings)
-            with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+            with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                     patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \
                     patch('app.ai.providers.cloud_json', return_value=response), \
                     patch('app.ai.roughcut.select_intervals', return_value=selection):

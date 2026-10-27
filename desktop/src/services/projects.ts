@@ -2,6 +2,7 @@ import { api, uploadVideo, type ProjectDetail, type ProjectDraft, type ProjectPa
 
 export type ProjectFilter = { page: number; search: string; status: string }
 export const projectsApi = {
+  saveEditingDefaults: (instructions: string) => api<{instructions:string}>('/settings/editing-defaults', 'PUT', {instructions}),
   list: (filter: ProjectFilter) => api<ProjectPage>(`/projects?${new URLSearchParams({page:String(filter.page),page_size:'20',search:filter.search,status:filter.status})}`),
   detail: (id: string) => api<ProjectDetail>(`/projects/${encodeURIComponent(id)}`),
   saveDraft: (id: string, draft: ProjectDraft) => api<ProjectDraft>(`/projects/${encodeURIComponent(id)}`, 'PATCH', draft),

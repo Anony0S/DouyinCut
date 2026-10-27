@@ -54,8 +54,8 @@ class Worker:
         cached = store.cached(key)
         if cached is not None:
             if job["kind"] == "import" and job["payload"].get("live_product_clip_id") and job["payload"].get("product_name"):
-                from .projects.service import ProjectDraft, save_draft
-                save_draft(store, cached["asset_id"], ProjectDraft(product_name=job["payload"]["product_name"]))
+                from .projects.service import new_project_draft, save_draft
+                save_draft(store, cached["asset_id"], new_project_draft(store, product_name=job["payload"]["product_name"]))
             if job["kind"] == "import" and job["payload"].get("live_segment_id"):
                 from .live_monitoring import LiveStore
                 LiveStore(store).finish_import(job["payload"]["live_segment_id"], cached["asset_id"])
@@ -133,10 +133,11 @@ class Worker:
             ctx.checkpoint()
             product = Product(name=request.product_name, confirmed=True)
             decision = TimeSelection.model_validate(selected)
-            validate_selection_duration(decision, request.target_duration_us)
+            validate_selection_duration(decision, request.target_duration_us, request.duration_tolerance_us)
             candidates = candidates_from_intervals(decision, transcripts, product.id)
             plan = build_plan(product, candidates, {asset.id: asset}, transcripts, request.target_duration_us,
-                              request.instructions, ordered_ids=[c.id for c in candidates])
+                              request.instructions, ordered_ids=[c.id for c in candidates],
+                              tolerance_us=request.duration_tolerance_us)
             result = {"asset_id": asset.id, "product_id": product.id, "plan_id": plan.id,
                       "candidate_ids": [c.id for c in candidates], "transcript_count": len(transcripts),
                       "selected_intervals": decision.model_dump()["clips"], "timestamp_unit": "milliseconds",
@@ -152,8 +153,8 @@ class Worker:
             raise ValueError("未知任务类型")
         store.commit_result(key, result, objects, followup, job_id=job["id"], owner=self.owner)
         if job["kind"] == "import" and payload.get("live_product_clip_id") and payload.get("product_name"):
-            from .projects.service import ProjectDraft, save_draft
-            save_draft(store, result["asset_id"], ProjectDraft(product_name=payload["product_name"]))
+            from .projects.service import new_project_draft, save_draft
+            save_draft(store, result["asset_id"], new_project_draft(store, product_name=payload["product_name"]))
         if job["kind"] == "import" and payload.get("live_segment_id"):
             from .live_monitoring import LiveStore
             LiveStore(store).finish_import(payload["live_segment_id"], result["asset_id"])

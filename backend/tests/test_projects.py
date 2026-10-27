@@ -86,7 +86,7 @@ class ProjectTests(unittest.TestCase):
         self.store.put('export', {'id': 'eb', 'plan_id': 'other', 'revision': 1})
         self.store.enqueue('analyze', {'asset_id': 'a', 'product_name': '已提交资料'})
         self.store.enqueue('analyze', {'asset_id': 'b', 'product_name': '另一个商品'})
-        saved = ProjectDraft(product_name='新资料', product_info='补充信息', instructions='突出面料', target_duration_us=90000000)
+        saved = ProjectDraft(product_name='新资料', duration_tolerance_us=8_000_000, instructions='突出面料', target_duration_us=90000000)
         save_draft(self.store, 'a', saved)
         detail = project_detail(self.store, 'a')
         self.assertEqual(detail['draft'], saved.model_dump())
@@ -98,6 +98,40 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(project_detail(self.store, 'b')['draft']['product_name'], '另一个商品')
         with self.assertRaises(KeyError):
             save_draft(self.store, 'missing', saved)
+
+    def test_saved_default_instructions_survive_failure_and_new_app(self):
+        from app.ai.roughcut import DEFAULT_INSTRUCTIONS
+        from app.projects.service import new_project_draft
+        url='/api/v1/settings/editing-defaults'
+        self.assertEqual(self.client.put(url, json={'instructions':'新要求'}).status_code, 401)
+        self.assertEqual(self.client.get(url, headers=self.headers).json()['instructions'], DEFAULT_INSTRUCTIONS)
+        self.asset('existing'); self.asset('new')
+        save_draft(self.store, 'existing', ProjectDraft(product_name='已编辑', instructions='此项目专用'))
+        result=self.client.put(url, headers=self.headers, json={'instructions':'  保留细节，去掉价格  '})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()['instructions'], '保留细节，去掉价格')
+        job=self.store.enqueue('analyze', {'asset_id':'existing'})
+        self.store.claim('test-worker')
+        self.store.finish(job['id'], 'test-worker', 'failed', error='模型调用失败')
+        self.assertEqual(project_detail(self.store, 'new')['draft']['instructions'], '保留细节，去掉价格')
+        self.assertEqual(project_detail(self.store, 'existing')['draft']['instructions'], '此项目专用')
+        self.assertEqual(new_project_draft(self.store, product_name='直播导入').instructions, '保留细节，去掉价格')
+        app=create_app(Settings(Path(self.temp.name)),token='test')
+        with TestClient(app) as client:
+            self.assertEqual(client.get(url,headers=self.headers).json()['instructions'],'保留细节，去掉价格')
+        self.assertEqual(self.client.put(url,headers=self.headers,json={'instructions':'x'*4001}).status_code,422)
+        reset=self.client.put(url,headers=self.headers,json={'instructions':'  '})
+        self.assertEqual(reset.json()['instructions'],DEFAULT_INSTRUCTIONS)
+
+    def test_tolerance_draft_persists_and_invalid_fields_are_rejected(self):
+        self.asset('a')
+        draft=ProjectDraft(product_name='测试',duration_tolerance_us=30_000_000).model_dump()
+        url='/api/v1/projects/a'
+        self.assertEqual(self.client.patch(url,headers=self.headers,json=draft).status_code,200)
+        self.assertEqual(self.client.get(url,headers=self.headers).json()['draft']['duration_tolerance_us'],30_000_000)
+        for value in (-1,30_000_001,'15000000',False,1.5):
+            self.assertEqual(self.client.patch(url,headers=self.headers,json={**draft,'duration_tolerance_us':value}).status_code,422)
+        self.assertEqual(self.client.patch(url,headers=self.headers,json={**draft,'product_info':'removed'}).status_code,422)
 
     def test_auth_validation_and_saved_draft_survive_restart(self):
         self.asset('a')

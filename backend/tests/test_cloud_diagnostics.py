@@ -184,7 +184,7 @@ class CloudDiagnosticsTests(unittest.TestCase):
 
     def test_asr_timeout_details_survive_uncertain_retry_without_new_request(self):
         details = {"stage": "timeout", "reason": "timed out", "response_body": None}
-        with patch("app.ai.providers.model_api_key", return_value="mock-key"), \
+        with patch("app.ai.providers.asr_api_key", return_value="mock-key"), \
                 patch("app.ai.providers.extract_audio"), patch("app.ai.providers.upload_audio", return_value="https://oss.example/audio"), \
                 patch("app.ai.providers.cloud_json", side_effect=ProviderError("超时", details)) as network:
             for _ in range(2):
@@ -196,7 +196,7 @@ class CloudDiagnosticsTests(unittest.TestCase):
     def test_asr_validation_and_rejection_keep_response_details(self):
         data = {"output": {"unsupported": "response"}, "request_id": "asr-request"}
         rejection_details = {"stage": "http_error", "http_status": 401, "response_body": "InvalidApiKey"}
-        with patch("app.ai.providers.model_api_key", return_value="mock-key"), \
+        with patch("app.ai.providers.asr_api_key", return_value="mock-key"), \
                 patch("app.ai.providers.extract_audio"), patch("app.ai.providers.upload_audio", return_value="https://oss.example/audio"), \
                 patch("app.ai.providers.cloud_json", side_effect=[data, ProviderHTTPError(401, rejection_details)]):
             with self.assertRaises(ProviderError) as raised:

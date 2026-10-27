@@ -121,6 +121,21 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.cached('asr-paid-response')['status'], 'succeeded')
         self.assertIsNone(retried['error'])
 
+    def test_speech_endpoint_retry_clears_task_caches_but_preserves_paid_speech(self):
+        from app.ai.providers import CloudConfig
+        config = CloudConfig(base_url='https://text.example/v1', asr_base_url='https://speech.example').model_dump()
+        job_id = self.failed_analysis(config)
+        task_key = f'roughcut-transcript:{job_id}'
+        self.store.cache(task_key, {'segments': []})
+        endpoint_hash = hashlib.sha256(CloudConfig.model_validate(config).asr_url.encode()).hexdigest()
+        paid_key = f"qwen-audio-v1:a:{endpoint_hash}:{config['asr_model']}:0:120000000"
+        self.store.cache(paid_key, {'status': 'succeeded', 'response': {'text': 'paid'}})
+        current = {**config, 'asr_base_url': 'https://another-speech.example'}
+        queued = self.store.control(job_id, 'retry', retry_config=current)
+        self.assertIsNone(self.store.cached(task_key))
+        self.assertEqual(self.store.cached(paid_key)['status'], 'succeeded')
+        self.assertEqual(queued['payload']['config'], current)
+
     def test_retry_timeout_change_reuses_completed_decision(self):
         from app.ai.providers import CloudConfig
         config = CloudConfig().model_dump()
@@ -132,7 +147,8 @@ class StoreTests(unittest.TestCase):
 
     def test_acknowledge_asr_uncertain_releases_only_matching_submitting_markers(self):
         from app.ai.providers import CloudConfig
-        config = CloudConfig().model_dump()
+        config = CloudConfig(base_url='https://text.example/v1',
+                             asr_base_url='https://speech.example/gateway').model_dump()
         self.store.put('asset', asset().model_dump())
         self.store.put('asset', asset('other').model_dump())
         job_id = self.failed_analysis(config)

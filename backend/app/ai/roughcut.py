@@ -12,9 +12,9 @@ MAX_CLIP_DURATION_US = 10_000_000
 
 class RoughcutRequest(Model):
     product_name: str = Field(min_length=1, max_length=200)
-    product_info: str = Field(default="", max_length=4000)
     instructions: str = Field(default=DEFAULT_INSTRUCTIONS, max_length=4000)
     target_duration_us: int = Field(default=60_000_000, ge=15_000_000, le=180_000_000)
+    duration_tolerance_us: int = Field(default=15_000_000, ge=0, le=30_000_000)
     refresh_asr: bool = False
 
 
@@ -64,13 +64,14 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
         "只保留目标商品相关内容；明确排除其他商品 / 款式、商品切换后的内容、价格、优惠、催单、直播互动、重复话术和无关内容。"
         "从全量对话中挑出若干有价值的短片段，不要因为同款就保留长段口播。"
         "有需要删除的内容必须拆开区间，选中的区间不能包含要求排除的内容。"
-        "目标时长允许上下 15 秒，素材不足可以更短；不得编造时间、重叠或重复区间。"
+        "目标时长允许上下给定的 duration_tolerance_ms 偏差，素材不足可以更短；不得编造时间、重叠或重复区间。"
         "clips 数组顺序就是拼接顺序，可按叙事重排，所有区间须在视频范围内。"
         "优先上身 / 版型 / 面料 / 穿着感受口播，用户要求优先。按给定目标时长选择，控制总时长。"
         "返回严格 JSON：{\"clips\":[{\"start_ms\":600,\"end_ms\":3834,\"reason\":\"保留理由\"}]}，"
         "reason 简洁；没有可用内容时 clips 为空。\n"
-        + json.dumps({"product_name": request.product_name, "product_info": request.product_info,
+        + json.dumps({"product_name": request.product_name,
                       "instructions": instructions, "target_duration_ms": request.target_duration_us // 1000,
+                      "duration_tolerance_ms": request.duration_tolerance_us // 1000,
                       "source_duration_ms": duration_us // 1000, "timestamp_unit": "milliseconds",
                       "transcript": [{"start_ms": t.start_us // 1000, "end_ms": t.end_us // 1000, "text": t.text}
                                      for t in transcripts]}, ensure_ascii=False)
@@ -85,7 +86,7 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         selection = TimeSelection.model_validate_json(raw)
-        validate_selection_duration(selection, request.target_duration_us)
+        validate_selection_duration(selection, request.target_duration_us, request.duration_tolerance_us)
         candidates_from_intervals(selection, transcripts, "validation-product")
         return selection
     except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
@@ -93,10 +94,10 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
                             parsed_response_details(response, config.chat_url, config.planner_model, key)) from None
 
 
-def validate_selection_duration(selection: TimeSelection, target_us: int):
+def validate_selection_duration(selection: TimeSelection, target_us: int, tolerance_us: int = 15_000_000):
     duration = sum((clip.end_ms - clip.start_ms) * 1000 for clip in selection.clips)
-    if duration > target_us + 15_000_000:
-        raise ValueError(f"决策结果合计 {duration / 1e6:.1f} 秒，超过目标 {target_us / 1e6:.0f} 秒允许的 15 秒偏差；请重新选择精华片段")
+    if duration > target_us + tolerance_us:
+        raise ValueError(f"决策结果合计 {duration / 1e6:.1f} 秒，超过目标 {target_us / 1e6:.0f} 秒允许的 {tolerance_us / 1e6:g} 秒偏差；请重新选择精华片段")
     long_clips = [(clip.end_ms - clip.start_ms) / 1000 for clip in selection.clips
                   if (clip.end_ms - clip.start_ms) * 1000 > MAX_CLIP_DURATION_US]
     if long_clips:

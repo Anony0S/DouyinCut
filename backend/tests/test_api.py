@@ -120,6 +120,57 @@ class ApiTests(unittest.TestCase):
                 config['asr_model'] = invalid
                 self.assertEqual(self.client.patch('/api/v1/settings/cloud', headers=self.headers, json=config).status_code, 422)
 
+    def test_speech_settings_persist_independently_and_validate(self):
+        from unittest.mock import patch
+        with patch('app.api.read_secret', return_value=None):
+            config = self.client.get('/api/v1/settings/cloud', headers=self.headers).json()['config']
+            self.assertEqual(config['asr_base_url'], 'https://dashscope.aliyuncs.com')
+            self.assertEqual(config['asr_timeout_seconds'], 300)
+            text_url = config['base_url']
+            config.update(asr_base_url='https://speech.example/gateway/', asr_timeout_seconds=420)
+            saved = self.client.patch('/api/v1/settings/cloud', headers=self.headers, json=config)
+            self.assertEqual(saved.status_code, 200)
+            self.assertEqual(saved.json()['asr_base_url'], 'https://speech.example/gateway')
+            reloaded = self.client.get('/api/v1/settings/cloud', headers=self.headers).json()['config']
+            self.assertEqual(reloaded['asr_timeout_seconds'], 420)
+            self.assertEqual(reloaded['base_url'], text_url)
+            self.assertEqual(reloaded['chat_timeout_seconds'], 300)
+            for url in ('http://speech.example', 'https://user:secret@speech.example',
+                        'https://speech.example?key=private-key', 'https://speech.example#fragment',
+                        'https://speech.example/api/v1/services/aigc/multimodal-generation/generation'):
+                invalid = self.client.patch('/api/v1/settings/cloud', headers=self.headers,
+                                            json={**config, 'asr_base_url': url})
+                self.assertEqual(invalid.status_code, 422)
+                self.assertNotIn('private-key', invalid.text)
+            for timeout in (0, 29, 901, '300', 300.5):
+                self.assertEqual(self.client.patch('/api/v1/settings/cloud', headers=self.headers,
+                    json={**config, 'asr_timeout_seconds': timeout}).status_code, 422)
+
+    def test_analysis_requires_each_key_and_snapshots_separate_connections(self):
+        from unittest.mock import patch
+        from app.ai.providers import CloudConfig
+        from app.core.domain import Asset
+        store = self.app.state.store
+        store.put('asset', Asset(id='split-key-asset', sha256='digest', path='source.mp4', name='source',
+            duration_us=10_000_000, width=320, height=240, has_audio=True).model_dump())
+        config = CloudConfig(base_url='https://text.example/v1', asr_base_url='https://speech.example',
+                             oss_endpoint='https://oss.example', oss_bucket='audio')
+        store.put('config', {'id': 'cloud', 'config': config.model_dump()})
+        url = '/api/v1/assets/split-key-asset/analyze'
+        for values, message in (({'llm_api_key': 'text-key'}, '语音识别模型卡片'),
+                                ({'asr_api_key': 'speech-key'}, '文本剪辑模型卡片')):
+            with patch('app.ai.providers.read_secret', side_effect=values.get):
+                response = self.client.post(url, headers=self.headers, json={'product_name': '测试商品'})
+            self.assertGreaterEqual(response.status_code, 400)
+            self.assertIn(message, response.text)
+            self.assertEqual(store.jobs(), [])
+        with patch('app.ai.providers.read_secret', side_effect={'llm_api_key': 'text-key', 'asr_api_key': 'speech-key'}.get):
+            response = self.client.post(url, headers=self.headers, json={'product_name': '测试商品'})
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()['payload']['config'], config.model_dump())
+        self.assertNotIn('text-key', response.text)
+        self.assertNotIn('speech-key', response.text)
+
     def test_chat_timeout_settings_default_persist_and_validate(self):
         from unittest.mock import patch
         with patch('app.api.read_secret', return_value=None):
@@ -136,6 +187,7 @@ class ApiTests(unittest.TestCase):
         from unittest.mock import patch
         values = {
             'llm_api_key': 'sk-example-private-1234',
+            'asr_api_key': 'sk-speech-private-3456',
             'oss_access_key_id': 'LTAIexample-private-5678',
             'oss_access_key_secret': 'oss-example-private-9012',
         }
@@ -197,6 +249,7 @@ class ApiTests(unittest.TestCase):
         with patch('app.api.write_secret', side_effect=lambda name, value: values.update({name: value})), patch('app.api.read_secret', side_effect=values.get):
             for name, value in {
                 'llm_api_key': 'sk-model-test-key-1234',
+                'asr_api_key': 'sk-speech-test-key-5678',
                 'oss_access_key_id': 'LTAI-test-access-id-9012',
                 'oss_access_key_secret': 'oss-test-access-secret-3456',
             }.items():

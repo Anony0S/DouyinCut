@@ -14,7 +14,7 @@ import JobErrorDetails from '../components/JobErrorDetails.vue'
 import ConfirmPopover from '../components/ConfirmPopover.vue'
 const project=useProjectStore(),session=useSessionStore(),workspace=useWorkspace(),route=useRoute()
 const {busy,connected,pendingImportId}=storeToRefs(session)
-const {assets,assetId,activeAsset,productName,productInfo,instructions,targetSeconds,refreshAsr,analyzingAsset,
+const {assets,assetId,activeAsset,productName,instructions,targetSeconds,toleranceSeconds,refreshAsr,analyzingAsset,
  latestAnalysis,transcript,transcriptVisible,assetJobs,selectedPlan,previewArtifact,assetPlans,planDirty,projectExports}=storeToRefs(project)
 const orderedPlans=computed(()=>assetPlans.value)
 const {analyze,loadTranscript,saveProjectInfo,savePlan,deletePlan,approveAndExport,createJianyingDraft,moveClip}=project
@@ -76,7 +76,7 @@ watch(assetId,id=>{stopSourcePlayback();mediaUrl.value=id ? `/api/v1/assets/${id
 onUnmounted(stopSourcePlayback)
 </script>
 <template><template v-if="activeAsset?.id===route.params.id">
-        <div class="workspace-project-bar"><button class="secondary" :disabled="busy" @click="workspace.goProjects()">← 返回视频项目</button><span>{{ activeAsset?.name||'新建视频项目' }}</span><button v-if="activeAsset" class="secondary" :disabled="busy" @click="saveProjectInfo">保存资料与要求</button></div>
+        <div class="workspace-project-bar"><button class="secondary" :disabled="busy" @click="workspace.goProjects()">← 返回视频项目</button><span>{{ activeAsset?.name||'新建视频项目' }}</span><button v-if="activeAsset" class="secondary" :disabled="busy" @click="saveProjectInfo">保存项目设置</button></div>
         <div class="intro-strip"><strong>单款视频 → 语音粗剪 → 拼接预览</strong><span>输入视频主要讲同一款商品，本版按口播选片。</span></div>
         <WorkspaceSplit>
           <template #left>
@@ -92,9 +92,17 @@ onUnmounted(stopSourcePlayback)
             <div class="roughcut-config-group"><div class="section-divider"></div><h2>02 / 商品资料与要求</h2>
             <form @submit.prevent="analyze">
               <label for="product-name">商品名称</label><input id="product-name" v-model="productName" required maxlength="200" placeholder="独束分身型微定制【奶黄千层】假两件针织开衫"/>
-              <label for="product-info">补充信息（可选）</label><textarea id="product-info" v-model="productInfo" maxlength="4000" rows="2" placeholder="颜色、面料、款号、版型等商品资料"/>
-              <label for="roughcut-instructions">剪辑要求</label><textarea id="roughcut-instructions" v-model="instructions" maxlength="4000" rows="3"/>
+              <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
+                <label for="roughcut-instructions" class="m-0">剪辑要求</label>
+                <button type="button" class="btn btn-sm" :disabled="busy||!connected" @click="project.saveDefaultInstructions()">保存为默认</button>
+              </div>
+              <textarea id="roughcut-instructions" v-model="instructions" class="textarea mt-2 w-full" maxlength="4000" rows="3" aria-describedby="instructions-save-hint"/>
+              <p id="instructions-save-hint" class="hint">保存后用于后续新项目；当前项目的要求可单独修改，分析失败不会丢失已保存内容。</p>
               <label for="target-duration">目标时长</label><select id="target-duration" v-model.number="targetSeconds"><option :value="60">约 60 秒</option><option :value="90">约 90 秒</option></select>
+              <label for="duration-tolerance" class="flex flex-wrap items-center justify-between gap-2">允许偏差 <output for="duration-tolerance">± {{ toleranceSeconds }} 秒</output></label>
+              <input id="duration-tolerance" v-model.number="toleranceSeconds" class="range range-sm mt-2 w-full text-primary [--range-bg:var(--color-base-300)] [--range-thumb:var(--color-primary)] [--range-fill:0]" type="range" min="0" max="30" step="1" :disabled="busy||analyzingAsset" :aria-valuetext="'允许偏差 ' + toleranceSeconds + ' 秒'" aria-describedby="duration-tolerance-hint"/>
+              <div class="mt-1 flex justify-between text-xs text-base-content/60" aria-hidden="true"><span>0 秒</span><span>15 秒</span><span>30 秒</span></div>
+              <p id="duration-tolerance-hint" class="hint">优先控制在 {{ Math.max(0,targetSeconds-toleranceSeconds) }}～{{ targetSeconds+toleranceSeconds }} 秒；素材不足可更短，最长不超过 {{ targetSeconds+toleranceSeconds }} 秒。</p>
               <label class="asr-refresh"><input v-model="refreshAsr" type="checkbox"/>重新识别语音（会再次调用 ASR）</label>
               <button class="primary full" :disabled="busy||!connected||!activeAsset||!productName.trim()||analyzingAsset">{{ analyzingAsset?'正在分析与粗剪…':'使用云端 AI 分析并粗剪' }}</button>
             </form>

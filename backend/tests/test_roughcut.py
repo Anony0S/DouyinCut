@@ -40,7 +40,7 @@ class RoughcutTests(unittest.TestCase):
         response = {'output': {'sentences': [
             {'begin_time': 600, 'end_time': 1500, 'text': '第一句'},
             {'begin_time': 2000, 'end_time': 3800, 'text': '第二句'}]}}
-        with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+        with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.extract_audio') as extract, \
                 patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \
                 patch('app.ai.providers.cloud_json', return_value=response) as network:
@@ -58,7 +58,7 @@ class RoughcutTests(unittest.TestCase):
             self.assertEqual(network.call_count, 3)
 
     def test_planner_receives_all_text_and_product_and_defaults_without_images(self):
-        request = RoughcutRequest(product_name='奶黄千层', product_info='假两件针织开衫', instructions='')
+        request = RoughcutRequest(product_name='奶黄千层', instructions='')
         response = {'choices': [{'message': {'content': self.selection.model_dump_json()}}]}
         with patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
                 patch('app.ai.roughcut.cloud_json', return_value=response) as network:
@@ -66,7 +66,8 @@ class RoughcutTests(unittest.TestCase):
         payload = network.call_args.args[2]
         self.assertIsInstance(payload['messages'][0]['content'], str)
         prompt = json.loads(payload['messages'][0]['content'].split('\n', 1)[1])
-        self.assertEqual(prompt['product_info'], '假两件针织开衫')
+        self.assertNotIn('product_info', prompt)
+        self.assertEqual(prompt['duration_tolerance_ms'], 15000)
         self.assertEqual(prompt['instructions'], DEFAULT_INSTRUCTIONS)
         self.assertEqual([t['start_ms'] for t in prompt['transcript']], [0, 10000, 20000])
         self.assertEqual(prompt['source_duration_ms'], 250000)
@@ -75,7 +76,7 @@ class RoughcutTests(unittest.TestCase):
 
     def test_text_only_asr_keeps_response_for_hover_and_retry_never_repays(self):
         response = {'output': {'text': '只有整段文本'}, 'request_id': 'text-only-request'}
-        with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+        with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.extract_audio'), \
                 patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \
                 patch('app.ai.providers.cloud_json', return_value=response) as network:
@@ -111,7 +112,7 @@ class RoughcutTests(unittest.TestCase):
     def test_worker_publishes_single_product_plan_and_automatic_preview_without_vision(self):
         self.store.put('asset', self.asset.model_dump())
         job = self.store.enqueue('analyze', {'asset_id': self.asset.id, 'config': self.config.model_dump(),
-                                            'product_name': '奶黄千层', 'product_info': '针织开衫'})
+                                            'product_name': '奶黄千层'})
         worker = Worker(self.settings)
         with patch('app.ai.providers.transcribe', return_value=self.sentences), \
                 patch('app.ai.roughcut.select_intervals', return_value=self.selection), \
@@ -135,13 +136,36 @@ class RoughcutTests(unittest.TestCase):
         self.assertEqual(previews[0]['payload']['plan_id'], plan['id'])
         self.assertTrue(any('素材不足' in w for w in plan['warnings']))
 
+    def test_worker_checks_cached_selection_against_task_tolerance(self):
+        self.store.put('asset', self.asset.model_dump())
+        sentences=[Transcript(source_asset_id=self.asset.id,start_us=i*10_000_000,
+            end_us=i*10_000_000+5_000_000,text='面料柔软。') for i in range(4)]
+        decision=TimeSelection.model_validate({'clips':[{'start_ms':i*10000,'end_ms':i*10000+5000,
+            'reason':'面料'} for i in range(4)]})
+        for tolerance, expected in ((4_000_000,'failed'),(5_000_000,'succeeded')):
+            job=self.store.enqueue('analyze',{'asset_id':self.asset.id,'product_name':'测试',
+                'config':self.config.model_dump(),'target_duration_us':15_000_000,'duration_tolerance_us':tolerance})
+            self.store.cache(f"roughcut-timestamps-v1:{job['id']}",decision.model_dump())
+            with patch('app.ai.providers.transcribe',return_value=sentences), \
+                    patch('app.ai.roughcut.select_intervals') as planner:
+                Worker(self.settings).run_once()
+            result=self.store.job(job['id'])
+            self.assertEqual(result['state'],expected,result.get('error'))
+            planner.assert_not_called()
+            if expected=='failed':
+                self.assertIn('4 秒偏差',result['error'])
+                self.assertEqual(self.store.list('plan'),[])
+            else:
+                plan=self.store.get('plan',result['result']['plan_id'])
+                self.assertFalse(any('片段较长' in warning for warning in plan['warnings']))
+
     def test_planner_retry_reuses_real_asr_cache_and_does_not_publish_partial_plan(self):
         self.store.put('asset', self.asset.model_dump())
         response = {'output': {'sentences': [{'begin_time': 0, 'end_time': 5000, 'text': '上身很显瘦。'}]}}
         job = self.store.enqueue('analyze', {'asset_id': self.asset.id, 'product_name': '奶黄千层',
                                             'config': self.config.model_dump()})
         worker = Worker(self.settings)
-        with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+        with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.extract_audio'), \
                 patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \
                 patch('app.ai.providers.cloud_json', return_value=response) as network, \
@@ -203,7 +227,7 @@ class RoughcutTests(unittest.TestCase):
         key = f'qwen-audio-v1:{self.asset.sha256}:{endpoint_hash}:{self.config.asr_model}:0:120000000'
         self.store.cache(key, {'status': 'succeeded', 'response': {'sentence':
             {'begin_time': 0, 'end_time': 120000, 'text': '面料柔软。今天九十九。' * 20}}})
-        with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+        with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.cloud_json') as network:
             with self.assertRaisesRegex(ProviderError, '长段口播'):
                 transcribe(self.asset, self.config, self.settings, self.store, self.root, lambda: None,
@@ -220,7 +244,7 @@ class RoughcutTests(unittest.TestCase):
                               {'begin_time': 10000, 'end_time': 14000, 'text': '面料柔软。'}]}
         self.store.cache(key, {'status': 'succeeded', 'response': {'sentence': sentence}, 'segments': [
             {'start_us': 0, 'end_us': 120000000, 'text': sentence['text'], 'timing': 'sentence'}]})
-        with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+        with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.cloud_json') as network:
             rows = transcribe(asset, self.config, self.settings, self.store, self.root, lambda: None,
                               require_sentence_timing=True)
@@ -229,7 +253,7 @@ class RoughcutTests(unittest.TestCase):
 
     def test_explicit_refresh_is_cached_per_task_and_does_not_bypass_uncertain_requests(self):
         response = {'sentence': {'text': '上身显瘦。', 'begin_time': 600, 'end_time': 4000}}
-        with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+        with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.extract_audio'), \
                 patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \
                 patch('app.ai.providers.cloud_json', return_value=response) as network:
@@ -254,6 +278,27 @@ class RoughcutTests(unittest.TestCase):
         selection = TimeSelection.model_validate({'clips': [{'start_ms': 840080, 'end_ms': 960000, 'reason': '整段'}]})
         with self.assertRaisesRegex(ValueError, '119.9 秒'):
             validate_selection_duration(selection, 60000000)
+
+    def test_duration_tolerance_controls_actual_selection_limit(self):
+        selection = TimeSelection.model_validate({'clips': [
+            {'start_ms': index * 10000, 'end_ms': (index + 1) * 10000, 'reason': '独立卖点'}
+            for index in range(8)]})
+        with self.assertRaisesRegex(ValueError, '15 秒偏差'):
+            validate_selection_duration(selection, 60_000_000, 15_000_000)
+        validate_selection_duration(selection, 60_000_000, 20_000_000)
+        with self.assertRaisesRegex(ValueError, '0 秒偏差'):
+            validate_selection_duration(selection, 60_000_000, 0)
+        # Insufficient material may be shorter; tolerance never invents source content.
+        validate_selection_duration(self.selection, 60_000_000, 0)
+
+    def test_custom_tolerance_is_in_planner_prompt(self):
+        response = {'choices': [{'message': {'content': self.selection.model_dump_json()}}]}
+        with patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
+                patch('app.ai.roughcut.cloud_json', return_value=response) as network:
+            select_intervals(self.sentences, RoughcutRequest(product_name='测试', duration_tolerance_us=7_000_000),
+                             self.config, self.asset.duration_us)
+        prompt = json.loads(network.call_args.args[2]['messages'][0]['content'].split('\n', 1)[1])
+        self.assertEqual(prompt['duration_tolerance_ms'], 7000)
 
     def test_single_long_clip_is_rejected_even_when_total_duration_is_valid(self):
         selection = TimeSelection.model_validate({'clips': [{'start_ms': 0, 'end_ms': 11000, 'reason': '整段'}]})
@@ -296,7 +341,7 @@ class RoughcutApiTests(unittest.TestCase):
         previous = CloudConfig(asr_model='other-speech-model', oss_endpoint='https://oss-cn-beijing.aliyuncs.com',
                                oss_bucket='test-bucket')
         store.put('config', {'id': 'cloud', 'config': previous.model_dump()})
-        with patch('app.api.model_api_key', return_value='mock-key'):
+        with patch('app.api.model_api_key', return_value='mock-key'), patch('app.api.asr_api_key', return_value='mock-asr-key'):
             task = self.client.post('/api/v1/assets/video/analyze', headers=self.headers,
                                     json={'product_name': '奶黄千层'}).json()
         worker = Worker(self.settings)
@@ -311,7 +356,7 @@ class RoughcutApiTests(unittest.TestCase):
         self.assertIsNone(retried.json()['error'])
         selection = TimeSelection.model_validate({'clips': [{'start_ms': 600, 'end_ms': 4000, 'reason': '面料'}]})
         response = {'sentence': {'text': '面料柔软。', 'begin_time': 600, 'end_time': 4000}}
-        with patch('app.ai.providers.model_api_key', return_value='mock-key'), \
+        with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.extract_audio'), \
                 patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \
                 patch('app.ai.providers.cloud_json', return_value=response) as network, \
@@ -320,7 +365,7 @@ class RoughcutApiTests(unittest.TestCase):
         network.assert_called_once()
         self.assertEqual(network.call_args.args[2]['model'], 'qwen-audio-3.1-asr-flash')
         self.assertEqual(store.job(task['id'])['state'], 'succeeded')
-        with patch('app.api.model_api_key', return_value='mock-key'):
+        with patch('app.api.model_api_key', return_value='mock-key'), patch('app.api.asr_api_key', return_value='mock-asr-key'):
             fresh = self.client.post('/api/v1/assets/video/analyze', headers=self.headers,
                                      json={'product_name': '奶黄千层'})
         self.assertEqual(fresh.status_code, 202, fresh.text)
@@ -362,7 +407,7 @@ class RoughcutApiTests(unittest.TestCase):
                                                                oss_bucket='test-bucket').model_dump()})
         url = '/api/v1/assets/video/analyze'
         self.assertEqual(self.client.post(url, headers=self.headers, json={}).status_code, 422)
-        with patch('app.api.model_api_key', return_value='mock-key'):
+        with patch('app.api.model_api_key', return_value='mock-key'), patch('app.api.asr_api_key', return_value='mock-asr-key'):
             self.assertEqual(self.client.post(url, headers=self.headers, json={'product_name': '  '}).status_code, 422)
             result = self.client.post(url, headers=self.headers, json={'product_name': ' 奶黄千层 ', 'instructions': ''})
             self.assertEqual(result.status_code, 202, result.text)

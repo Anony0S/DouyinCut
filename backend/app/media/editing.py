@@ -44,7 +44,7 @@ def remap_subtitles(clips: list[Clip], transcripts: list[Transcript]) -> list[Su
 def build_plan(product: Product, candidates: list[Candidate], assets: dict[str, Asset],
                transcripts: list[Transcript], target_us: int = 60_000_000,
                instructions: str = "", exclude_tags: list[str] | None = None,
-               ordered_ids: list[str] | None = None) -> Plan:
+               ordered_ids: list[str] | None = None, tolerance_us: int = 15_000_000) -> Plan:
     if not product.confirmed:
         raise ValueError("请先确认商品归属，再生成单款方案")
     banned = set(exclude_tags or [])
@@ -68,7 +68,7 @@ def build_plan(product: Product, candidates: list[Candidate], assets: dict[str, 
                 raise ValueError("选中的片段包含重叠源区间")
             continue
         duration = candidate.end_us - candidate.start_us
-        if ordered_ids is None and clips and cursor + duration > target_us + 15_000_000:
+        if ordered_ids is None and clips and cursor + duration > target_us + tolerance_us:
             continue
         clips.append(Clip(source_asset_id=asset.id, source_start_us=candidate.start_us,
                           source_end_us=candidate.end_us, timeline_start_us=cursor,
@@ -78,9 +78,9 @@ def build_plan(product: Product, candidates: list[Candidate], assets: dict[str, 
             break
     if not clips:
         raise ValueError("没有符合要求的有效片段")
-    if cursor < max(0, target_us - 15_000_000):
+    if cursor < max(0, target_us - tolerance_us):
         warnings.append("素材不足：保留完整内容，未强行补足目标时长")
-    if cursor > target_us + 15_000_000:
+    if cursor > target_us + tolerance_us:
         warnings.append("片段较长：为保留完整内容超过目标时长，请审核切点")
     first = assets[clips[0].source_asset_id]
     if any(t.timing == "audio_chunk" and any(

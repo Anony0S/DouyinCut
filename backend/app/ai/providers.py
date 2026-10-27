@@ -21,15 +21,16 @@ TRANSCRIPT_COMMA_SPLIT_MIN_US = 3_500_000
 
 
 class CloudConfig(Model):
-    # Chat and audio requests share the configured provider origin and credential.
     region: Literal["cn"] = "cn"
     base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1", max_length=500)
     planner_model: str = Field(default="qwen3.8-flash", min_length=1, max_length=100)
+    asr_base_url: str = Field(default="https://dashscope.aliyuncs.com", max_length=500)
     asr_model: str = Field(default="qwen-audio-3.1-asr-flash", min_length=1, max_length=100,
                            pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     oss_endpoint: str = Field(default="", max_length=300)
     oss_bucket: str = Field(default="", max_length=100)
     chat_timeout_seconds: int = Field(default=300, ge=30, le=900)
+    asr_timeout_seconds: int = Field(default=300, ge=30, le=900)
 
     @field_validator("asr_model", mode="before")
     @classmethod
@@ -39,7 +40,7 @@ class CloudConfig(Model):
         value = value.strip()
         return value
 
-    @field_validator("base_url")
+    @field_validator("base_url", "asr_base_url")
     @classmethod
     def valid_base_url(cls, value):
         value = value.strip().rstrip("/")
@@ -49,12 +50,13 @@ class CloudConfig(Model):
             raise ValueError("模型 Base URL 必须是无用户名、密码或查询参数的 HTTPS 地址")
         if parsed.path.endswith("/chat/completions"):
             raise ValueError("Base URL 不要包含 /chat/completions")
+        if parsed.path.endswith("/api/v1/services/aigc/multimodal-generation/generation"):
+            raise ValueError("Base URL 不要包含语音识别接口路径")
         return value
 
     @property
     def asr_url(self):
-        parsed = urlparse(self.base_url)
-        return f"{parsed.scheme}://{parsed.netloc}/api/v1/services/aigc/multimodal-generation/generation"
+        return f"{self.asr_base_url}/api/v1/services/aigc/multimodal-generation/generation"
 
     @property
     def chat_url(self):
@@ -65,7 +67,14 @@ def model_api_key(config):
     key = read_secret("llm_api_key")
     if key:
         return key
-    raise ProviderError("请在模型连接区域配置模型 API Key")
+    raise ProviderError("请在文本剪辑模型卡片配置 API Key")
+
+
+def asr_api_key(config):
+    key = read_secret("asr_api_key")
+    if key:
+        return key
+    raise ProviderError("请在语音识别模型卡片配置 API Key")
 
 
 class ProviderError(RuntimeError):
@@ -422,7 +431,7 @@ def audio_segments(response, asset_id: str, start_us: int, end_us: int) -> list[
 
 def transcribe(asset, config, settings, store, workdir, checkpoint, progress=None, *, require_sentence_timing=False,
                refresh_scope: str | None = None):
-    key = model_api_key(config)
+    key = asr_api_key(config)
     audio_start_us = (probe_stream_timing(Path(asset.path), settings)["audio_start_us"]
                       if Path(asset.path).is_file() else getattr(asset, "audio_start_us", 0))
     endpoint_hash = hashlib.sha256(config.asr_url.encode()).hexdigest()
@@ -469,7 +478,7 @@ def transcribe(asset, config, settings, store, workdir, checkpoint, progress=Non
             try:
                 response = cloud_json("POST", config.asr_url,
                                       qwen_audio_payload(config.asr_model, file_url), key,
-                                      sse=False, operation="asr", timeout_seconds=300)
+                                      sse=False, operation="asr", timeout_seconds=config.asr_timeout_seconds)
             except ProviderHTTPError as exc:
                 if exc.status_code in ASR_REJECTED_HTTP_STATUSES:
                     rejection = {"status": "rejected", "http_status": exc.status_code}
@@ -478,7 +487,7 @@ def transcribe(asset, config, settings, store, workdir, checkpoint, progress=Non
                     store.cache(cache_key, rejection)
                     if refresh_scope:
                         store.cache(base_key, rejection)
-                    hint = "请检查模型连接中的百炼 API Key" if exc.status_code == 401 else "请检查模型连接、模型权限或配额"
+                    hint = "请检查语音识别模型卡片中的 API Key" if exc.status_code == 401 else "请检查语音识别连接、模型权限或配额"
                     raise ProviderError(f"Qwen 语音请求被拒绝（HTTP {exc.status_code}），{hint}，修正后可重试", exc.details) from None
                 store.cache(cache_key, {**store.cached(cache_key), "error_detail": exc.details})
                 if refresh_scope:

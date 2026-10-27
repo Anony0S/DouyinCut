@@ -95,33 +95,44 @@ async function mount() {
 async function verify() {
   const { root, app } = await mount()
   try {
-    assert.ok(text(root).includes('最近 24 小时'), 'page shows recording timeline')
-    assert.equal(lastWindow.get('window_start'), String(now - 86400), 'request covers the complete recent day')
-    assert.equal(lastWindow.get('window_end'), String(now))
-    assert.equal(lastWindow.get('include_end_recording'), 'true', 'recent window includes a recording just starting now')
+    assert.ok(text(root).includes('今天 · 2026-10-23 · 00:00–24:00'), 'page shows recording timeline')
+    assert.equal(lastWindow.get('window_start'), '1792684800', 'today starts at local midnight')
+    assert.equal(lastWindow.get('window_end'), '1792771200', 'today includes its unused evening hours')
+    assert.equal(lastWindow.get('include_end_recording'), 'false', 'exclude the following midnight from the selected day')
     assert.equal(all(root, el => el.type === 'select').length, 0, 'timeline replaces the dropdown')
     assert.ok(text(root).includes('讲解-当前'), 'recording is selected before finished sessions')
     assert.ok(text(root).includes('片段-当前'))
-    const recentButton = selectButton(root, '回到最近')
-    assert.ok(recentButton, 'return-to-recent button stays visible in the recent window')
-    assert.equal(recentButton.props.disabled, true, 'return-to-recent is disabled when already recent')
+    const ticks = all(root, el => el.props.class === 'live-recording-timeline-ticks')[0]
+    assert.deepEqual(ticks.children.filter(el => el.type === 'span').map(text), ['00:00', '06:00', '12:00', '18:00', '24:00'])
+    const recentButton = selectButton(root, '回到今天')
+    assert.ok(recentButton, 'return-to-today button stays visible when viewing today')
+    assert.equal(recentButton.props.disabled, true, 'return-to-today is disabled when already today')
     const dateTrigger = all(root, el => el.type === 'summary' && el.props['aria-label'] === '录制日期')[0]
     const polling = deferred()
     const originalResponse = response
     response = () => polling.promise
+    clockNow += 5000
     for (const poll of polls) poll()
     await settle()
-    assert.equal(selectButton(root, '回到最近'), recentButton, 'polling retains the same return button')
+    assert.equal(selectButton(root, '回到今天'), recentButton, 'polling retains the same return button')
     assert.equal(dateTrigger.props['aria-disabled'], false, 'background polling does not disable or dim the date trigger')
     assert.ok(!text(root).includes('正在读取…'), 'background polling does not insert a shifting date status')
     polling.resolve(originalResponse)
     response = originalResponse
     await settle()
+    assert.equal(lastWindow.get('window_start'), '1792684800', 'same-day polling does not shift the start')
+    assert.equal(lastWindow.get('window_end'), '1792771200', 'same-day polling does not shift the end')
+    const recordingPeriod = all(root, el => el.type === 'button' && el.props.class?.includes('live-recording-timeline-period') && el.props.class?.includes('is-recording'))[0]
+    assert.equal(parseFloat(recordingPeriod.props.style.left), 14 / 24 * 100)
+    assert.ok(Math.abs(parseFloat(recordingPeriod.props.style.width) - 3605 / 86400 * 100) < 1e-8, 'ongoing period extends only to now and leaves future hours empty')
     const historical = selectButton(root, '选择录制场次：')
     assert.ok(historical)
+    const historicalStyle = { ...historical.props.style }
     historical.props.onMouseenter()
     await settle()
     assert.ok(text(root).includes('讲解-当前'), 'hovering does not change selected explanation')
+    assert.equal(historical.props['aria-pressed'], false, 'hover does not select the period')
+    assert.deepEqual(historical.props.style, historicalStyle, 'hover preserves the period position and size')
     const track = all(root, el => el.props.role === 'group' && el.props['aria-label'] === '选择录制场次')[0]
     track.props.onMouseleave?.() // Moving from the time bar to its summary stays inside the timeline.
     await settle()
@@ -137,9 +148,9 @@ async function verify() {
     assert.match(text(root), /分段\s+07/, 'click switches recording segments')
     assert.ok(text(root).includes('片段-历史'), 'click switches product clips')
     assert.ok(!text(root).includes('片段-当前'), 'previous session content is replaced')
-  } finally { app.unmount() }
+  } finally { app.unmount(); clockNow = fixedNow }
 
-  response = [monitor('一', [session('跨界', now - 90000, now - 82800, 9), session('较新', now - 7200, now - 3600, 10)]), monitor('二', [])]
+  response = [monitor('一', [session('跨界', now - 59400, now - 52200, 9), session('较新', now - 7200, now - 3600, 10)]), monitor('二', [])]
   const second = await mount()
   try {
     assert.ok(text(second.root).includes('讲解-较新'), 'latest finished session is the default without an active recording')
@@ -150,7 +161,7 @@ async function verify() {
     assert.ok(text(selectButton(second.root, '查看录制场次：')).includes('2 小时'), 'clipping does not shorten the full duration')
     const room = all(second.root, el => el.props.role === 'button' && text(el).includes('直播间-二'))[0]
     await click(room)
-    assert.ok(text(second.root).includes('最近 24 小时无录制，可选择历史日期'))
+    assert.ok(text(second.root).includes('今天无录制，可选择其他日期'))
     assert.equal(all(second.root, el => el.type === 'h3' && ['商品讲解', '录制分段', '商品视频片段'].includes(text(el))).length, 3, 'empty room retains all three empty cards')
     assert.ok(!text(second.root).includes('讲解-跨界'), 'switching rooms clears old session contents')
     const firstRoom = all(second.root, el => el.props.role === 'button' && text(el).includes('直播间-一'))[0]
@@ -164,7 +175,8 @@ async function verify() {
   try {
     const input = all(dated.root, el => el.type === 'calendar-date' && el.props['aria-label'] === '录制日期')[0]
     assert.ok(input, 'recording timeline offers a historical date picker')
-    assert.equal(input.props.max, '2026-10-22', 'today and future dates cannot be selected')
+    assert.equal(input.props.max, '2026-10-23', 'today can be selected and future dates are disabled')
+    assert.equal(input.props.value, '2026-10-23', 'calendar initially highlights today')
     assert.equal(all(dated.root, el => el.type === 'input' && el.props.type === 'date').length, 0, 'Cally replaces the native date input')
     const picker = all(dated.root, el => el.type === 'details' && el.props.class?.includes('dropdown'))[0]
     const dateTrigger = picker.children.find(el => el.type === 'summary')
@@ -176,8 +188,8 @@ async function verify() {
     }
     picker.open = true
     picker.props.onToggle()
-    await input.props.onChange({ target: { value: '2026-10-23' } }); await settle()
-    assert.equal(lastWindow.get('window_start'), String(now - 86400), 'invalid future or current date does not change the applied window')
+    await input.props.onChange({ target: { value: '2026-10-24' } }); await settle()
+    assert.equal(lastWindow.get('window_start'), '1792684800', 'invalid future date does not change the applied window')
     await input.props.onChange({ target: { value: '2026-10-22' } })
     await settle()
     assert.equal(picker.open, false, 'choosing a historical date closes the calendar')
@@ -187,21 +199,27 @@ async function verify() {
     assert.equal(lastWindow.get('include_end_recording'), 'false', 'historical day excludes recordings starting next midnight')
     assert.ok(text(dated.root).includes('2026-10-22'))
     assert.ok(text(dated.root).includes('讲解-昨晚'), 'changing date chooses the latest matching session')
-    assert.equal(selectButton(dated.root, '回到最近').props.disabled, false, 'historical windows enable return-to-recent')
+    assert.equal(selectButton(dated.root, '回到今天').props.disabled, false, 'historical windows enable return-to-today')
+    await input.props.onChange({ target: { value: '2026-10-23' } }); await settle()
+    assert.equal(lastWindow.get('window_start'), '1792684800', 'selecting today restores the default day window')
+    assert.equal(lastWindow.get('window_end'), '1792771200')
+    assert.equal(input.props.value, '2026-10-23')
+    assert.equal(selectButton(dated.root, '回到今天').props.disabled, true, 'selecting today disables the return button')
+    await input.props.onChange({ target: { value: '2026-10-22' } }); await settle()
     const historyPoll = deferred()
     const historicalResponse = response
     response = () => historyPoll.promise
     for (const poll of polls) poll()
     await settle()
-    assert.equal(selectButton(dated.root, '回到最近').props.disabled, false, 'background history polling keeps return-to-recent usable')
+    assert.equal(selectButton(dated.root, '回到今天').props.disabled, false, 'background history polling keeps return-to-today usable')
     response = historicalResponse
-    await click(selectButton(dated.root, '回到最近'))
+    await click(selectButton(dated.root, '回到今天'))
     historyPoll.resolve([monitor('一', history)])
     await settle()
-    assert.equal(lastWindow.get('window_start'), String(now - 86400))
+    assert.equal(lastWindow.get('window_start'), '1792684800')
     assert.ok(text(dated.root).includes('讲解-今天'))
-    assert.ok(!text(dated.root).includes('讲解-昨晚'), 'late history poll cannot replace the recent window')
-    assert.equal(selectButton(dated.root, '回到最近').props.disabled, true, 'return button stays mounted and disables after returning')
+    assert.ok(!text(dated.root).includes('讲解-昨晚'), 'late history poll cannot replace today')
+    assert.equal(selectButton(dated.root, '回到今天').props.disabled, true, 'return button stays mounted and disables after returning')
   } finally { dated.app.unmount() }
 
   const overlap = session('跨日保留', 1792677600, 1792688400, 14)
@@ -212,8 +230,8 @@ async function verify() {
     const dateInput = () => all(retained.root, el => el.type === 'calendar-date' && el.props['aria-label'] === '录制日期')[0]
     await dateInput().props.onChange({ target: { value: '2026-10-22' } }); await settle()
     assert.ok(text(retained.root).includes('讲解-跨日保留'), 'intersecting selection survives switching to a historical date')
-    await click(selectButton(retained.root, '回到最近'))
-    assert.ok(text(retained.root).includes('讲解-跨日保留'), 'returning to recent preserves an intersecting selection')
+    await click(selectButton(retained.root, '回到今天'))
+    assert.ok(text(retained.root).includes('讲解-跨日保留'), 'returning to today preserves an intersecting selection')
     await dateInput().props.onChange({ target: { value: '2026-10-22' } }); await settle()
     const recordingRoom = all(retained.root, el => el.props.role === 'button' && text(el).includes('直播间-一'))[0]
     assert.ok(text(recordingRoom).includes('录制中'), 'historical sessions do not hide the room’s current recording state')
@@ -223,8 +241,8 @@ async function verify() {
     assert.ok(text(retained.root).includes('当天无录制'))
     assert.ok(!text(retained.root).includes('讲解-跨日保留'), 'empty historical room does not fall back to another room')
     await click(selectButton(retained.root, '清空日期'))
-    assert.equal(lastWindow.get('window_start'), String(now - 86400), 'clearing the picker restores the recent day')
-    assert.ok(text(retained.root).includes('最近 24 小时无录制，可选择历史日期'))
+    assert.equal(lastWindow.get('window_start'), '1792684800', 'clearing the picker restores today')
+    assert.ok(text(retained.root).includes('今天无录制，可选择其他日期'))
   } finally { retained.app.unmount() }
 
   response = [{ ...monitor('持续', [session('持续录制', 1792594800, null, 16)]), live_state: 'recording' }]
@@ -237,7 +255,7 @@ async function verify() {
     assert.ok(text(selectButton(ongoing.root, '查看录制场次：')).includes('40 小时'), 'ongoing duration is calculated to now, not historical midnight')
     assert.ok(text(ongoing.root).includes('讲解-持续录制'))
   } finally { ongoing.app.unmount() }
-  const drifting = session('移出窗口', now - 90000, now - 82800, 17)
+  const drifting = session('移出窗口', now - 52200, now - 45000, 17)
   const recent = session('窗口内', now - 1800, now - 600, 18)
   response = [monitor('一', [drifting, recent])]
   const preserved = await mount()
@@ -249,18 +267,22 @@ async function verify() {
     assert.ok(text(preserved.root).includes('讲解-移出窗口'), 'a new recording does not take over a manual selection')
     response = [monitor('一', [recent, session('新录制', now, null, 19)])]
     detailResponse = { ...drifting, current_product: { ...drifting.current_product, product_name: '窗口外已更新' } }
-    clockNow += 7200000
+    clockNow += 32700000
     for (const poll of polls) poll()
     await settle()
-    assert.ok(text(preserved.root).includes('窗口外已更新'), 'polling retains and updates the selected session outside the rolling window')
+    assert.ok(text(preserved.root).includes('窗口外已更新'), 'polling retains and updates the selected session from the previous day')
     assert.ok(text(preserved.root).includes('片段-移出窗口'), 'all three cards continue showing the retained session')
     assert.match(text(preserved.root), /分段\s+17/)
     assert.ok(text(preserved.root).includes('所选场次已不在当前时间范围内'))
     assert.ok(text(selectButton(preserved.root, '查看录制场次：')).includes('2 小时'), 'the retained selection keeps its summary even without a bar in the window')
-    assert.equal(lastWindow.get('window_start'), String(now - 79200), 'recent window advances while the selection stays pinned')
+    assert.equal(lastWindow.get('window_start'), '1792771200', 'today advances at midnight while the selection stays pinned')
+    assert.equal(lastWindow.get('window_end'), '1792857600')
+    assert.ok(text(preserved.root).includes('今天 · 2026-10-24 · 00:00–24:00'))
+    assert.equal(all(preserved.root, el => el.type === 'calendar-date')[0].props.value, '2026-10-24', 'default calendar follows today across midnight')
+    assert.equal(selectButton(preserved.root, '回到今天').props.disabled, true)
     response = [monitor('一', [drifting])]
     await click(selectButton(preserved.root, '查看该日期'))
-    assert.equal(lastWindow.get('window_start'), '1792598400', 'the retained session opens its local calendar day')
+    assert.equal(lastWindow.get('window_start'), '1792684800', 'the retained session opens its local calendar day')
     assert.ok(text(preserved.root).includes('讲解-移出窗口'))
   } finally { preserved.app.unmount(); clockNow = fixedNow; detailResponse = null }
 
@@ -268,7 +290,7 @@ async function verify() {
   const removed = await mount()
   try {
     await click(selectButton(removed.root, '选择录制场次：'))
-    clockNow += 7200000
+    clockNow += 32700000
     response = [monitor('一', [recent, session('继续录制', now, null, 20), session('最新结束', now + 60, now + 120, 21)])]
     detailResponse = () => { throw new Error('详情暂时不可用') }
     for (const poll of polls) poll()
@@ -288,7 +310,7 @@ async function verify() {
     response = [monitor('一', [])]
     for (const poll of polls) poll()
     await settle()
-    assert.ok(text(removed.root).includes('最近 24 小时无录制，可选择历史日期'))
+    assert.ok(text(removed.root).includes('今天无录制，可选择其他日期'))
     assert.ok(!text(removed.root).includes('讲解-最新结束'), 'confirmed deletion without candidates clears the old cards')
   } finally { removed.app.unmount(); clockNow = fixedNow; detailResponse = null }
 
@@ -330,9 +352,9 @@ async function verify() {
 
     const returning = deferred()
     response = () => returning.promise
-    const returnPromise = selectButton(racing.root, '回到最近').props.onClick({})
+    const returnPromise = selectButton(racing.root, '回到今天').props.onClick({})
     await settle()
-    assert.equal(selectButton(racing.root, '回到最近').props.disabled, true, 'date changes still lock repeated navigation until loaded')
+    assert.equal(selectButton(racing.root, '回到今天').props.disabled, true, 'date changes still lock repeated navigation until loaded')
     assert.equal(all(racing.root, el => el.type === 'summary' && el.props['aria-label'] === '录制日期')[0].props['aria-disabled'], true)
     response = [monitor('一', [drifting, session('新房正在录制', now - 60, null, 25)]), monitor('二', [])]
     await click(all(racing.root, el => el.props.role === 'button' && text(el).includes('直播间-一'))[0])
@@ -390,7 +412,7 @@ async function verifyLocalCalendarDay() {
   const { root, app } = await mount()
   try {
     const input = all(root, el => el.type === 'calendar-date' && el.props['aria-label'] === '录制日期')[0]
-    assert.equal(input.props.max, date)
+    assert.equal(input.props.max, checkMidnightDst ? '2018-11-05' : '2026-11-02')
     await input.props.onChange({ target: { value: date } }); await settle()
     assert.equal(lastWindow.get('window_start'), start, 'calendar day begins at the first valid local instant')
     assert.equal(lastWindow.get('window_end'), end, 'calendar day ends at next midnight, even when DST skipped the first midnight')
@@ -399,7 +421,7 @@ async function verifyLocalCalendarDay() {
     await settle()
     assert.equal(lastWindow.get('window_start'), start, 'polling preserves historical calendar boundaries')
     assert.equal(lastWindow.get('window_end'), end)
-    assert.equal(input.props.max, checkMidnightDst ? '2018-11-05' : '2026-11-02', 'latest selectable date advances with the local calendar')
+    assert.equal(input.props.max, checkMidnightDst ? '2018-11-06' : '2026-11-03', 'latest selectable date advances with the local calendar')
     assert.ok(text(root).includes('当天无录制'))
   } finally { app.unmount() }
 }

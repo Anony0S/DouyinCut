@@ -28,12 +28,15 @@ function previewFocus(id: string) {
   focusedId.value = id
   hoveredId.value = ''
 }
-const ticks = computed(() => Array.from({ length: 5 }, (_, index) => ({
-  position: index * 25,
-  label: new Date((props.start + (props.end - props.start) * index / 4) * 1000).toLocaleString('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  }),
-})))
+const ticks = computed(() => Array.from({ length: 5 }, (_, index) => {
+  const instant = new Date(props.start * 1000)
+  instant.setHours(index * 6, 0, 0, 0)
+  const timestamp = index === 4 ? props.end : instant.getTime() / 1000
+  return {
+    position: (timestamp - props.start) / (props.end - props.start) * 100,
+    label: `${String(index * 6).padStart(2, '0')}:00`,
+  }
+}))
 function position(item: LiveSession) {
   const start = Math.max(props.start, item.started)
   const end = Math.min(props.end, item.status === 'recording' ? props.now : item.ended ?? item.started)
@@ -63,7 +66,7 @@ function summary(item: LiveSession) {
         <RecordingDatePicker :value="date" :max="maxDate" :disabled="loading"
           @change="emit('date-change', $event)" />
         <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || !date"
-          aria-label="回到最近" @click="$emit('date-change', '')">回到最近</button>
+          aria-label="回到今天" @click="$emit('date-change', '')">回到今天</button>
         <span v-if="loading" role="status" class="live-sr-only">正在读取…</span>
       </div>
     </div>

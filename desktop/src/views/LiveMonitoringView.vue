@@ -39,31 +39,28 @@ const urlInput = ref<HTMLInputElement>(),
 let timer: ReturnType<typeof setInterval> | undefined;
 const currentTime = ref(Date.now() / 1000);
 const selectedDate = ref("");
-const recordingWindow = ref({ start: currentTime.value - 86400, end: currentTime.value, date: "", includeEndRecording: true });
+const recordingWindow = ref(dateWindow("", currentTime.value));
 const dateLoading = computed(() => loading.value
   && (updatedAt.value === null || selectedDate.value !== recordingWindow.value.date));
-const latestHistoryDate = computed(() => {
-  const yesterday = new Date(currentTime.value * 1000);
-  yesterday.setDate(yesterday.getDate() - 1);
-  return localDate(yesterday);
-});
-const windowLabel = computed(() => recordingWindow.value.date || "最近 24 小时");
-const emptyMessage = computed(() => recordingWindow.value.date ? "当天无录制" : "最近 24 小时无录制，可选择历史日期");
+const latestSelectableDate = computed(() => localDate(new Date(currentTime.value * 1000)));
+const windowLabel = computed(() => `${recordingWindow.value.date || `今天 · ${localDate(new Date(recordingWindow.value.start * 1000))}`} · 00:00–24:00`);
+const emptyMessage = computed(() => recordingWindow.value.date ? "当天无录制" : "今天无录制，可选择其他日期");
 
 function localDate(value: Date) {
   return `${String(value.getFullYear()).padStart(4, "0")}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 function dateWindow(date: string, now: number) {
-  if (!date) return { start: now - 86400, end: now, date, includeEndRecording: true };
-  const start = new Date(`${date}T00:00:00`);
+  const day = date || localDate(new Date(now * 1000));
+  const start = new Date(`${day}T00:00:00`);
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
   end.setHours(0, 0, 0, 0);
   return { start: start.getTime() / 1000, end: end.getTime() / 1000, date, includeEndRecording: false };
 }
 async function changeDate(date: string) {
+  if (date === latestSelectableDate.value) date = "";
   if (dateLoading.value || date === selectedDate.value) return;
-  if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > latestHistoryDate.value
+  if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > latestSelectableDate.value
     || localDate(new Date(`${date}T00:00:00`)) !== date)) return;
   selectedDate.value = date;
   await refresh();
@@ -456,7 +453,7 @@ onUnmounted(() => {
           :end="recordingWindow.end"
           :now="currentTime"
           :date="selectedDate"
-          :max-date="latestHistoryDate"
+          :max-date="latestSelectableDate"
           :loading="dateLoading"
           :label="windowLabel"
           :empty-message="emptyMessage"
@@ -484,7 +481,7 @@ onUnmounted(() => {
           <section v-for="title in ['商品讲解', '录制分段', '商品视频片段']" :key="title"
             class="card card-border bg-base-100 live-content-card">
             <div class="live-content-card-heading"><h3>{{ title }}</h3></div>
-            <div class="live-card-empty"><strong>{{ recordingWindow.date ? '当天无录制' : '最近 24 小时无录制' }}</strong></div>
+            <div class="live-card-empty"><strong>{{ recordingWindow.date ? '当天无录制' : '今天无录制' }}</strong></div>
           </section>
         </div>
       </div>

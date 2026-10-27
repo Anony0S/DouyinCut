@@ -6,7 +6,6 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlparse
 
 from .domain import new_id
 
@@ -257,7 +256,7 @@ class Store:
                     raise ValueError("该素材已有活动分析任务，请先完成或取消后再重试")
                 previous = payload["config"]
                 selection_changed = any(previous[field] != retry_config[field]
-                                        for field in ("base_url", "asr_model", "planner_model"))
+                                        for field in ("base_url", "asr_base_url", "asr_model", "planner_model"))
                 if selection_changed:
                     if conn.execute("SELECT 1 FROM cache WHERE key=?", (f"job-result:{job_id}",)).fetchone():
                         raise ValueError("该任务已发布粗剪结果，修改模型后请从素材页创建新的分析")
@@ -274,8 +273,7 @@ class Store:
                     if asset is None:
                         raise KeyError(payload["asset_id"])
                     asset_body = json.loads(asset["body"])
-                    parsed = urlparse(previous["base_url"])
-                    asr_url = f"{parsed.scheme}://{parsed.netloc}/api/v1/services/aigc/multimodal-generation/generation"
+                    asr_url = f"{previous['asr_base_url']}/api/v1/services/aigc/multimodal-generation/generation"
                     prefix = f"qwen-audio-v1:{asset_body['sha256']}:{hashlib.sha256(asr_url.encode()).hexdigest()}:{previous['asr_model']}:"
                     conn.execute("DELETE FROM cache WHERE key LIKE ? AND json_extract(body, '$.status')='submitting'",
                                  (prefix + "%",))

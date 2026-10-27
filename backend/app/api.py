@@ -18,10 +18,11 @@ from .core.credentials import read_secret, secret_preview, write_secret
 from .core.domain import Asset, Candidate, Model, Plan, Product, Transcript
 from .media.editing import make_batches, remap_subtitles, validate_plan
 from .media.processing import diagnostics, probe_stream_timing
-from .ai.providers import CloudConfig, ProviderError, model_api_key
+from .ai.providers import CloudConfig, ProviderError, asr_api_key, model_api_key
+from .ai.connection import ModelConnectionTestRequest, check_model_connection
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
 from .core.storage import Store
-from .projects.service import (ProjectDraft, delete_plan, delete_project, job_summary,
+from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, ProjectDraft, delete_plan, delete_project, job_summary,
                        project_detail, project_list, save_draft)
 from .live_monitoring import (LiveClipOpen, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
 
@@ -35,7 +36,7 @@ class JianyingDraftRequest(Model):
 
 
 class SecretRequest(Model):
-    name: Literal["llm_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]
+    name: Literal["llm_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]
     value: str = Field(max_length=20000)
 
 
@@ -270,6 +271,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             raise ValueError("素材没有音轨，无法进行 ASR 粗剪")
         config = cloud_config()
         model_api_key(config)
+        asr_api_key(config)
         if not config.oss_bucket or not config.oss_endpoint:
             raise ValueError("Qwen 语音识别需要 OSS 上传配置")
         with store.connection() as conn:
@@ -410,10 +412,18 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         except KeyError:
             return CloudConfig()
 
+    @app.get("/api/v1/settings/editing-defaults")
+    def get_editing_defaults():
+        return editing_defaults(store)
+
+    @app.put("/api/v1/settings/editing-defaults")
+    def set_editing_defaults(body: EditingDefaults):
+        return save_editing_defaults(store, body)
+
     @app.get("/api/v1/settings/cloud")
     def get_cloud_config():
         values = {name: read_secret(name) for name in
-                  ["llm_api_key", "oss_access_key_id", "oss_access_key_secret"]}
+                  ["llm_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret"]}
         try:
             values["douyin_cookie"] = store.get("config", "douyin_cookie")["value"]
         except KeyError:
@@ -421,6 +431,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         return {"config": cloud_config().model_dump(),
                 "secrets": {name: bool(value) for name, value in values.items()},
                 "secret_previews": {name: secret_preview(value) for name, value in values.items()}}
+
+    @app.post("/api/v1/settings/cloud/test-model")
+    def test_cloud_model(body: ModelConnectionTestRequest):
+        return check_model_connection(body)
 
     @app.patch("/api/v1/settings/cloud")
     def set_cloud_config(body: CloudConfig):
@@ -449,7 +463,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         return {"saved": True, "preview": secret_preview(body.value)}
 
     @app.post("/api/v1/settings/secrets/{name}/reveal")
-    def reveal_secret(name: Literal["llm_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]):
+    def reveal_secret(name: Literal["llm_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]):
         if name == "douyin_cookie":
             try:
                 value = store.get("config", "douyin_cookie")["value"]

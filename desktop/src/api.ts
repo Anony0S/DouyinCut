@@ -6,9 +6,9 @@ export type Plan = { id: string; revision: number; product_id: string; target_du
 export type Job = { id: string; kind: string; state: string; progress: number; error: string | null; result: Record<string, unknown> | null; payload?: Record<string, unknown>; attempts?: number; has_error_detail?: boolean }
 export type JobErrorDetail = { summary?: string | null; error_source?: 'transport' | 'http_response' | 'response_validation'; exception_type?: string; stage?: string; endpoint?: string; model?: string | null; http_status?: number | null; request_id?: string | null; content_type?: string | null; request_method?: string | null; request_headers?: Record<string,string> | null; request_body?: string | null; reason?: string | null; response_body?: string | null }
 export type Artifact = { id: string; plan_id: string; revision: number; format: string; path: string; video_path: string; duration_us: number }
-export type CloudConfig = { region: 'cn'; base_url: string; planner_model: string; asr_model: string; oss_endpoint: string; oss_bucket: string; chat_timeout_seconds: number }
+export type CloudConfig = { region: 'cn'; base_url: string; planner_model: string; asr_base_url: string; asr_model: string; asr_timeout_seconds: number; oss_endpoint: string; oss_bucket: string; chat_timeout_seconds: number }
 
-export type ProjectDraft = { product_name: string; product_info: string; instructions: string; target_duration_us: number }
+export type ProjectDraft = { product_name: string; instructions: string; target_duration_us: number; duration_tolerance_us: number }
 export type VideoProject = { id: string; name: string; product_name: string; duration_us: number; width: number; height: number; status: string; updated_at: number; plan_id: string | null; output_duration_us: number | null }
 export type ProjectPage = { items: VideoProject[]; total: number; page: number; page_size: number; pages: number }
 export type ProjectDetail = { asset: Asset; draft: ProjectDraft; plans: Plan[]; candidates: Candidate[]; artifacts: Artifact[]; jobs: Job[]; latest_analysis: Job | null }

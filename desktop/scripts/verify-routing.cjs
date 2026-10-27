@@ -5,7 +5,7 @@ const {createPinia,setActivePinia}=require('pinia')
 const {createMemoryHistory,isNavigationFailure,NavigationFailureType}=require('vue-router')
 const {modules}=require('./test-modules.cjs')
 const copy=value=>JSON.parse(JSON.stringify(value))
-const draft={product_name:'奶黄千层',product_info:'柔软面料',instructions:'去掉价格',target_duration_us:60e6}
+const draft={product_name:'奶黄千层',instructions:'去掉价格',target_duration_us:60e6,duration_tolerance_us:15e6}
 const clip={candidate_id:'candidate',source_asset_id:'a',source_start_us:0,source_end_us:3e6,timeline_start_us:0,audio_gain_db:0}
 const plan={id:'plan-a',product_id:'product-a',revision:1,status:'needs_review',schema_version:'1.0',
   canvas:{width:160,height:288,fps:25},target_duration_us:60e6,instructions:'去掉价格',warnings:[],subtitles:[],clips:[clip]}
@@ -60,11 +60,11 @@ async function verify() {
   await workspace.openProject('a')
   assert.equal(router.currentRoute.value.fullPath,'/projects/a/edit')
   assert.equal(project.assetId,'a');assert.equal(project.selectedPlan.id,'plan-a')
-  project.productInfo='离开自动保存'
+  project.instructions='离开自动保存';project.toleranceSeconds=7
   project.selectedPlan.clips[0].source_end_us=2e6
   assert.equal(project.planDirty,true)
   await workspace.go('jobs')
-  assert.equal(drafts.a.product_info,'离开自动保存')
+  assert.equal(drafts.a.instructions,'离开自动保存')
   await travel(router,-1)
   assert.equal(router.currentRoute.value.fullPath,'/projects/a/edit')
   assert.equal(project.planDirty,true,'Returning with browser Back preserves the session draft')
@@ -111,7 +111,8 @@ async function verify() {
   const reopened=environment()
   await reopened.router.push('/projects/a/edit')
   assert.equal(reopened.project.productName,'保存失败时保留输入')
-  assert.equal(reopened.project.productInfo,'离开自动保存')
+  assert.equal(reopened.project.instructions,'离开自动保存')
+  assert.equal(reopened.project.toleranceSeconds,7,'Tolerance survives navigation and reload')
   assert.equal(reopened.project.selectedPlan.clips[0].source_end_us,3e6,'Reload restores only the saved cut')
   assert.ok(!requests.some(r=>r.url.endsWith('/analyze')),'Deep links/history must not trigger paid analysis')
   const invalid=loaded.load('stores/projects.ts').projectFilter({page:'-2',search:['ignored'],status:'toString'})

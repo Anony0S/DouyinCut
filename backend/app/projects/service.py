@@ -11,9 +11,34 @@ from ..ai.roughcut import DEFAULT_INSTRUCTIONS
 
 class ProjectDraft(Model):
     product_name: str = Field(default="", max_length=200)
-    product_info: str = Field(default="", max_length=4000)
     instructions: str = Field(default=DEFAULT_INSTRUCTIONS, max_length=4000)
     target_duration_us: int = Field(default=60_000_000, ge=15_000_000, le=180_000_000)
+    duration_tolerance_us: int = Field(default=15_000_000, ge=0, le=30_000_000)
+
+
+class EditingDefaults(Model):
+    instructions: str = Field(default=DEFAULT_INSTRUCTIONS, max_length=4000)
+
+
+def editing_defaults(store):
+    try:
+        return EditingDefaults.model_validate(store.get("config", "editing_defaults")["config"])
+    except KeyError:
+        return EditingDefaults()
+
+
+def save_editing_defaults(store, defaults):
+    normalized = EditingDefaults(instructions=defaults.instructions.strip() or DEFAULT_INSTRUCTIONS)
+    data = {"id": "editing_defaults", "config": normalized.model_dump()}
+    try:
+        store.next_revision("config", "editing_defaults", data)
+    except KeyError:
+        store.put("config", data)
+    return normalized
+
+
+def new_project_draft(store, **fields):
+    return ProjectDraft(**{"instructions": editing_defaults(store).instructions, **fields})
 
 
 # Each source video is one project. Read current revisions, never all revision bodies in Python.
@@ -121,7 +146,7 @@ def project_detail(store, asset_id):
         draft = (json.loads(row[0])["draft"] if row else
                  {field: latest_analysis["payload"][field] for field in ProjectDraft.model_fields
                   if latest_analysis and field in latest_analysis["payload"]})
-    return {"asset": json.loads(asset[0]), "draft": ProjectDraft.model_validate(draft).model_dump(),
+    return {"asset": json.loads(asset[0]), "draft": new_project_draft(store, **{field: draft[field] for field in ProjectDraft.model_fields if field in draft}).model_dump(),
             "plans": plans, "candidates": candidates, "artifacts": exports, "jobs": jobs,
             "latest_analysis": latest_analysis}
 

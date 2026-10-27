@@ -36,13 +36,15 @@ class QwenAudioTests(unittest.TestCase):
         self.store = Store(self.settings.database)
         self.asset = Asset(id="asset-test", sha256="digest", path="source.mp4", name="source",
                            duration_us=10_000_000, width=320, height=240, has_audio=True)
-        self.config = CloudConfig(base_url="https://llm-4xet6gf32m32iuj1.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+        self.config = CloudConfig(base_url="https://text.example/v1",
+                                  asr_base_url="https://llm-4xet6gf32m32iuj1.cn-beijing.maas.aliyuncs.com",
+                                  asr_timeout_seconds=420)
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         # Short segments keep recovery/boundary fixtures small; production 120s is tested separately.
         self.stack.enter_context(patch("app.ai.providers.ASR_CHUNK_US", 10_000_000))
         self.stack.enter_context(patch("app.ai.providers.read_secret", side_effect=lambda name:
-                                      {"llm_api_key": "mock-model-key"}.get(name)))
+                                      {"llm_api_key": "mock-text-key", "asr_api_key": "mock-asr-key"}.get(name)))
         self.extract = self.stack.enter_context(patch("app.ai.providers.extract_audio"))
         self.upload = self.stack.enter_context(patch("app.ai.providers.upload_audio", return_value="https://oss.example/audio"))
         self.network = self.stack.enter_context(patch("app.ai.providers.cloud_json", return_value=response("这件衣服")))
@@ -54,7 +56,7 @@ class QwenAudioTests(unittest.TestCase):
     def transcribe(self, checkpoint=lambda: None, progress=None):
         return transcribe(self.asset, self.config, self.settings, self.store, self.folder, checkpoint, progress)
 
-    def test_exact_native_endpoint_payload_and_shared_key(self):
+    def test_exact_native_endpoint_payload_and_independent_key_and_timeout(self):
         rows = self.transcribe()
         endpoint = "https://llm-4xet6gf32m32iuj1.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
         self.assertEqual(self.config.asr_url, endpoint)
@@ -63,7 +65,7 @@ class QwenAudioTests(unittest.TestCase):
             "input": {"messages": [{"role": "user", "content": [
                 {"type": "input_audio", "input_audio": {"data": "https://oss.example/audio"}}
             ]}]}, "parameters": {"format": "wav", "sample_rate": "16000"}
-        }, "mock-model-key", sse=False, operation="asr", timeout_seconds=300)
+        }, "mock-asr-key", sse=False, operation="asr", timeout_seconds=420)
         self.assertEqual(rows[0].timing, "audio_chunk")
         self.assertEqual(rows[0].text, "这件衣服")
 
@@ -103,7 +105,7 @@ class QwenAudioTests(unittest.TestCase):
     def test_finished_chunks_survive_rejection_and_retry(self):
         self.asset = self.asset.model_copy(update={"duration_us": 20_000_000})
         self.network.side_effect = [response("第一段"), ProviderHTTPError(401)]
-        with self.assertRaisesRegex(ProviderError, "模型连接中的百炼 API Key"):
+        with self.assertRaisesRegex(ProviderError, "语音识别模型卡片中的 API Key"):
             self.transcribe()
         self.network.side_effect = [response("第二段")]
         self.assertEqual([t.text for t in self.transcribe()], ["第一段", "第二段"])
@@ -167,11 +169,31 @@ class QwenAudioTests(unittest.TestCase):
         self.transcribe()
         self.config = self.config.model_copy(update={"asr_model": "custom-qwen-audio-v1"})
         self.transcribe()
-        self.config = self.config.model_copy(update={"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"})
+        self.config = self.config.model_copy(update={"asr_base_url": "https://dashscope.aliyuncs.com"})
         self.transcribe()
         self.assertEqual(self.network.call_count, 3)
         self.assertEqual(self.network.call_args.args[2]["model"], "custom-qwen-audio-v1")
         self.assertEqual(self.store.cached("asr-v1:digest:paraformer-v2:cn"), {"status": "submitting"})
+
+    def test_text_endpoint_changes_preserve_speech_cache_and_uncertain_guard(self):
+        self.transcribe()
+        self.config = self.config.model_copy(update={"base_url": "https://another-text.example/v1"})
+        self.transcribe()
+        self.network.assert_called_once()
+        self.store.cache(self.cache_key(), {"status": "submitting"})
+        self.config = self.config.model_copy(update={"base_url": "https://third-text.example/v1"})
+        with self.assertRaisesRegex(ProviderError, "请求结果不确定"):
+            self.transcribe()
+        self.network.assert_called_once()
+
+    def test_missing_speech_key_never_falls_back_to_text_key(self):
+        with patch("app.ai.providers.read_secret", side_effect=lambda name:
+                   {"llm_api_key": "text-only-key"}.get(name)) as secret:
+            with self.assertRaisesRegex(ProviderError, "语音识别模型卡片"):
+                self.transcribe()
+        secret.assert_called_once_with("asr_api_key")
+        self.upload.assert_not_called()
+        self.network.assert_not_called()
 
     def test_malformed_response_is_not_cached_as_success(self):
         for data in ({}, {"text": 123}, {"output": {"choices": []}}, response("x"*5001)):

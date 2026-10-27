@@ -512,7 +512,7 @@ main.workspace-main { padding-top: 26px; }
 .roughcut-controls .panel-title { margin-bottom: 10px; }
 .roughcut-controls .section-divider { margin: 18px 0; }
 .roughcut-controls label { margin-top: 12px; }
-.roughcut-controls input, .roughcut-controls select, .roughcut-controls textarea { padding: 9px 10px; }
+.roughcut-controls input:not([type="range"]), .roughcut-controls select, .roughcut-controls textarea { padding: 9px 10px; }
 .roughcut-controls .hint { margin: 9px 0; }
 .asset-list { max-height: 170px; overflow: auto; scrollbar-gutter: stable; }
 .asset-list:empty { display: none; }
@@ -715,17 +715,19 @@ main.workspace-main { padding-top: 26px; }
   margin-bottom: 22px;
 }
 
-.settings-step {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  flex-shrink: 0;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
+.settings-model-card {
+  height: 100%;
+}
+
+.settings-model-card > form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.settings-model-card .settings-actions {
+  margin-top: auto;
+  padding-top: 22px;
 }
 
 .settings-card-heading p {

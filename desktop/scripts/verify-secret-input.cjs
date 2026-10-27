@@ -181,7 +181,8 @@ async function verifySettings() {
     throw new Error(`Unexpected API route: ${url}`)
   }
   const appSource = fs.readFileSync(path.join(__dirname, '../src/views/SettingsView.vue'), 'utf8')
-  assert.ok(!appSource.includes('<h2>百炼 ASR</h2>'), 'Separate ASR card must be removed')
+  assert.ok(appSource.includes('<h2>语音识别模型</h2>'), 'Speech model has its own card')
+  assert.ok(!appSource.includes('settings-step'), 'Settings are not numbered steps')
   assert.ok(appSource.includes('qwen-audio-3.1-asr-flash'))
   const appScript = compileScript(parse(appSource).descriptor, { id: 'settings-save-check' })
   const appCode = ts.transpileModule(appScript.content, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
@@ -199,7 +200,7 @@ async function verifySettings() {
     if (name === '../components/SecretInput.vue') return { __esModule: true, default: component }
     return require(name)
   }, appModule, appModule.exports)
-  const fields = ['llm_api_key', 'oss_access_key_id', 'oss_access_key_secret']
+  const fields = ['llm_api_key', 'asr_api_key', 'oss_access_key_id', 'oss_access_key_secret']
   const root = node('root')
   const originalEventSource = global.EventSource
   global.EventSource = class { addEventListener() {} close() {} }
@@ -211,9 +212,10 @@ async function verifySettings() {
         id: name, secretName: name, disabled: bindings.busy.value,
         saved: name === 'llm_api_key' ? bindings.modelKeyConfigured.value : Boolean(bindings.secrets.value[name]),
         preview: name === 'llm_api_key' ? bindings.modelKeyPreview.value : bindings.secretPreviews.value[name] || '',
-        modelValue: name === 'llm_api_key' ? bindings.modelKey.value : bindings.secretDrafts.value[name],
+        modelValue: name === 'llm_api_key' ? bindings.modelKey.value : name === 'asr_api_key' ? bindings.asrKey.value : bindings.secretDrafts.value[name],
         'onUpdate:modelValue': value => {
           if (name === 'llm_api_key') bindings.modelKey.value = value
+          else if (name === 'asr_api_key') bindings.asrKey.value = value
           else bindings.secretDrafts.value[name] = value
         },
       })))
@@ -225,12 +227,13 @@ async function verifySettings() {
     await settle()
     assert.equal(bindings.error.value, '')
     const inputs = root.children[0].children.filter(child => child.type === 'div').map(child => child.children[0].children[0])
-    const keys = ['sk-model-example-1234', 'LTAI-example-9012', 'oss-example-3456']
+    const keys = ['sk-model-example-1234', 'sk-asr-example-5678', 'LTAI-example-9012', 'oss-example-3456']
     for (let i = 0; i < fields.length; i++) {
       inputs[i].props.onFocus()
       inputs[i].props.onInput({ target: { value: keys[i] } })
       await settle()
       if (i === 0) await bindings.saveModelConnection()
+      else if (i === 1) await bindings.saveAsrConnection()
       else await bindings.saveSecret(fields[i])
       await settle()
       assert.equal(bindings.error.value, '', 'Saving should not fail')
@@ -243,18 +246,39 @@ async function verifySettings() {
     bindings.secretPreviews.value = {}
     await bindings.loadSettings(); await settle()
     assert.deepEqual(inputs.map(input => input.props.value), keys.map(secretPreview), 'Saved keys reload from backend metadata')
-    assert.equal(submissions.length, 3)
+    assert.equal(submissions.length, 4)
     bindings.config.value.chat_timeout_seconds = 600
     bindings.config.value.asr_model = 'custom-qwen-audio-v1'
     bindings.config.value.oss_bucket = 'unsaved-oss-draft'
     bindings.secretDrafts.value.oss_access_key_id = 'unsaved-oss-id'
     const bucketBefore = savedConfig.oss_bucket
+    const asrBefore = savedConfig.asr_model
+    bindings.config.value.asr_base_url = 'https://speech.example/gateway'
+    bindings.config.value.asr_timeout_seconds = 420
+    bindings.asrKey.value = 'unsaved-speech-key'
+    const speechConfigBefore = structuredClone(savedConfig)
     await bindings.saveModelConnection(); await settle()
     assert.equal(savedConfig.chat_timeout_seconds, 600, 'Model connection saves chat timeout')
-    assert.equal(savedConfig.asr_model, 'custom-qwen-audio-v1', 'Model connection saves manual speech model')
+    assert.equal(savedConfig.asr_model, asrBefore, 'Text save must not persist speech draft')
+    assert.equal(savedConfig.asr_base_url, speechConfigBefore.asr_base_url)
+    assert.equal(savedConfig.asr_timeout_seconds, speechConfigBefore.asr_timeout_seconds)
+    assert.equal(bindings.asrKey.value, 'unsaved-speech-key')
+    assert.equal(values.asr_api_key, keys[1], 'Text save must not persist speech key draft')
     assert.equal(savedConfig.oss_bucket, bucketBefore, 'Model save must not persist OSS draft')
     assert.equal(bindings.config.value.oss_bucket, 'unsaved-oss-draft', 'Model save preserves OSS draft locally')
     assert.equal(bindings.secretDrafts.value.oss_access_key_id, 'unsaved-oss-id')
+    bindings.config.value.base_url = 'https://unsaved-text.example/v1'
+    bindings.modelKey.value = 'unsaved-text-key'
+    await bindings.saveAsrConnection(); await settle()
+    assert.equal(savedConfig.asr_model, 'custom-qwen-audio-v1')
+    assert.equal(savedConfig.asr_base_url, 'https://speech.example/gateway')
+    assert.equal(savedConfig.asr_timeout_seconds, 420)
+    assert.equal(savedConfig.base_url, speechConfigBefore.base_url, 'Speech save must not persist text URL draft')
+    assert.equal(bindings.config.value.base_url, 'https://unsaved-text.example/v1')
+    assert.equal(bindings.modelKey.value, 'unsaved-text-key')
+    assert.equal(values.llm_api_key, keys[0], 'Speech save must not persist text key draft')
+    assert.equal(bindings.config.value.oss_bucket, 'unsaved-oss-draft')
+    assert.equal(bindings.asrKey.value, '')
     bindings.config.value.asr_model = 'another-unsaved-model'
     await bindings.saveSettings(); await settle()
     assert.equal(savedConfig.oss_bucket, 'unsaved-oss-draft', 'OSS save persists its own fields')
@@ -263,15 +287,102 @@ async function verifySettings() {
     const configBeforeKeySave = structuredClone(savedConfig)
     await bindings.saveSecret('oss_access_key_id'); await settle()
     assert.deepEqual(savedConfig, configBeforeKeySave, 'OSS key save must not change model/OSS settings')
-    console.log('Settings save/reload checks passed (three mock credentials).')
+    console.log('Settings save/reload checks passed (four independent mock credentials and isolated card saves).')
   } finally {
     app.unmount()
     global.EventSource = originalEventSource
   }
 }
 
+async function verifyModelTestButton() {
+  const all = (el, predicate) => [...(predicate(el) ? [el] : []), ...el.children.flatMap(child => all(child, predicate))]
+  const text = el => el.type==='comment' ? '' : (el.text || '') + el.children.map(text).join('')
+  const settle = async () => { for (let i=0;i<16;i++) { await Promise.resolve(); await vue.nextTick() } }
+  const pending = () => { let resolve; const promise=new Promise(ok=>{resolve=ok}); return {promise,resolve} }
+  const config={region:'cn',base_url:'https://saved.example/v1',planner_model:'saved-model',
+    asr_base_url:'https://speech.example',asr_model:'qwen-audio-3.1-asr-flash',asr_timeout_seconds:300,oss_endpoint:'',oss_bucket:'',chat_timeout_seconds:300}
+  const requests=[]
+  let respond=body=>({ok:true,model:body.config.planner_model,elapsed_ms:250,message:'文本模型可用'})
+  const testApi=async (url,method='GET',body)=>{
+    if(url==='/settings/cloud' && method==='GET') return {config:{...config},secrets:{llm_api_key:true},secret_previews:{llm_api_key:'sk-sav*****1234'}}
+    if(url==='/settings/cloud/test-model' && method==='POST') {
+      requests.push(structuredClone(body));return respond(body)
+    }
+    throw new Error(`Unexpected model-test API route: ${url}`)
+  }
+  const loaded=modules({[path.resolve(__dirname,'../src/api.ts')]:{api:testApi}})
+  const pinia=createPinia();setActivePinia(pinia)
+  const session=loaded.load('stores/session.ts').useSessionStore(pinia)
+  session.connected=true
+  const source=fs.readFileSync(path.join(__dirname,'../src/views/SettingsView.vue'),'utf8')
+  const compiled=compileScript(parse(source).descriptor,{id:'settings-model-test',inlineTemplate:true})
+  const code=ts.transpileModule(compiled.content,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
+  const result={exports:{}}
+  new Function('require','module','exports',code)(name=>{
+    if(name==='vue') return {...vue,vModelText:{}}
+    if(name==='../services/cloud') return loaded.load('services/cloud.ts')
+    if(name==='../stores/session') return loaded.load('stores/session.ts')
+    if(name==='../components/SecretInput.vue') return {__esModule:true,default:component}
+    return require(name)
+  },result,result.exports)
+  const root=node('root'),app=renderer.createApp(result.exports.default)
+  let unmounted=false
+  try {
+    app.use(pinia);app.mount(root);await settle()
+    assert.deepEqual(all(root,el=>el.type==='h2').map(text), ['文本剪辑模型','语音识别模型','OSS 存储','抖音直播登录'])
+    const speechInput=all(root,el=>el.type==='input' && el.props.id==='asr-api-key')[0]
+    assert.ok(speechInput,'Speech card renders its independent credential input')
+    assert.ok(all(root,el=>el.type==='input' && el.props.id==='asr-base-url')[0])
+    const button=all(root,el=>el.type==='button' && text(el).trim()==='测试模型')[0]
+    assert.ok(button,'model card renders its test button')
+    assert.equal(button.props.type,'button','test button does not submit the settings form')
+    assert.equal(requests.length,0,'opening settings never calls the cloud model')
+    await button.props.onClick();await settle()
+    assert.equal(requests[0].api_key,'','blank draft delegates saved-key lookup to the backend')
+    assert.deepEqual(requests[0].config,{base_url:config.base_url,planner_model:config.planner_model,chat_timeout_seconds:300})
+    assert.ok(text(root).includes('文本模型可用'))
+    assert.ok(text(root).includes('0.25 秒'))
+    const planner=all(root,el=>el.type==='input' && el.props.id==='planner-model')[0]
+    planner.props['onUpdate:modelValue']('unsaved-model');await settle()
+    assert.ok(!text(root).includes('文本模型可用'),'editing configuration clears the old result')
+    const key=all(root,el=>el.type==='input' && el.props.id==='model-api-key')[0]
+    key.props.onInput({target:{value:'sk-draft-only-6789'}});await settle()
+    const delayed=pending();respond=()=>delayed.promise
+    const run=button.props.onClick();await settle()
+    assert.equal(button.props.disabled,true,'test is disabled while awaiting its result')
+    assert.ok(text(button).includes('测试中'))
+    assert.equal(session.busy,false,'model test does not lock the OSS card')
+    const count=requests.length
+    await button.props.onClick();await settle()
+    assert.equal(requests.length,count,'duplicate clicks do not submit another paid request')
+    assert.equal(requests.at(-1).api_key,'sk-draft-only-6789')
+    assert.equal(requests.at(-1).config.planner_model,'unsaved-model')
+    planner.props['onUpdate:modelValue']('newer-model');await settle()
+    delayed.resolve({ok:true,model:'unsaved-model',elapsed_ms:1,message:'stale-success'})
+    await run;await settle()
+    assert.ok(!text(root).includes('stale-success'),'late result cannot describe an edited configuration')
+    assert.equal(key.props.value,'sk-draft-only-6789','testing never saves or clears the replacement key')
+    respond=()=>({ok:false,model:'newer-model',elapsed_ms:5,message:'API Key 无效（HTTP 401）'})
+    await button.props.onClick();await settle()
+    assert.ok(all(root,el=>el.props.role==='alert').some(el=>text(el).includes('HTTP 401')))
+    assert.equal(button.props.disabled,false,'failure allows an explicit retry')
+    respond=()=>{throw new Error('本地服务连接失败')}
+    await button.props.onClick();await settle()
+    assert.ok(text(root).includes('本地服务连接失败'))
+    const afterUnmount=pending();respond=()=>afterUnmount.promise
+    const lastRun=button.props.onClick();await settle()
+    app.unmount();unmounted=true
+    afterUnmount.resolve({ok:true,model:'newer-model',elapsed_ms:5,message:'late-after-unmount'})
+    await lastRun;await settle()
+    assert.equal(session.error,'','unmounted tests do not publish global errors')
+    assert.ok(requests.every(request=>Object.keys(request).sort().join(',')==='api_key,config'))
+    console.log('Model test button checks passed: current drafts, saved-key fallback, status, duplicate guard, stale results and unmount.')
+  } finally { if(!unmounted) app.unmount() }
+}
+
 async function main() {
   await verify()
   await verifySettings()
+  await verifyModelTestButton()
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

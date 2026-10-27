@@ -16,7 +16,7 @@ function changeDate(event: Event) {
   const calendar = event.target as HTMLElement & { value: string }
   const date = calendar.value
   // Keep the applied value until the page successfully loads the new window.
-  calendar.value = props.value
+  calendar.value = props.value || props.max
   if (props.disabled || !date || date > props.max) return
   close(true)
   emit('change', date)
@@ -54,13 +54,13 @@ onUnmounted(() => {
     <summary ref="trigger" class="btn btn-sm" aria-label="录制日期"
       :aria-expanded="open" :aria-disabled="disabled" :tabindex="disabled ? -1 : undefined"
       @click="disabled && $event.preventDefault()">
-      {{ value || '选择日期' }}
+      {{ value || max }}
       <span aria-hidden="true">▾</span>
     </summary>
     <div class="dropdown-content z-50 mt-2 w-max max-w-[calc(100vw-2rem)] rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
       :inert="disabled || undefined" :aria-busy="disabled">
       <calendar-date class="cally" aria-label="录制日期" locale="zh-CN"
-        :value="value" :max="max" :focused-date="value || max" :first-day-of-week="1"
+        :value="value || max" :max="max" :focused-date="value || max" :first-day-of-week="1"
         @change="changeDate">
         <span slot="previous" aria-label="上个月">‹</span>
         <span slot="next" aria-label="下个月">›</span>

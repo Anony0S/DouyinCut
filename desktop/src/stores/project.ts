@@ -10,10 +10,10 @@ const savedDraft = ref('')
 let detailRequest=0
 const assets = ref<Asset[]>([]), candidates = ref<Candidate[]>([])
 const plans = ref<Plan[]>([]), jobs = ref<Job[]>([]), artifacts = ref<Artifact[]>([])
-const assetId = ref(''), productName = ref(''), productInfo = ref('')
+const assetId = ref(''), productName = ref('')
 const pendingAnalyzeId = ref('')
 const defaultInstructions = '保留上身效果、版型、面料和穿着感受的介绍，去掉价格、优惠、催单、无关互动及重复口播，保持表达完整，生成约 60 秒的视频。'
-const instructions = ref(defaultInstructions), targetSeconds = ref(60)
+const instructions = ref(defaultInstructions), targetSeconds = ref(60), toleranceSeconds = ref(15)
 const refreshAsr = ref(false)
 const transcript = ref<{ready:boolean;sentences:{start_us:number;end_us:number;text:string}[]} | null>(null)
 const transcriptVisible = ref(false)
@@ -32,8 +32,8 @@ const assetJobs = computed(() => jobs.value.filter(j => j.payload?.asset_id === 
 const analyzingAsset = computed(() => jobs.value.some(j => j.payload?.asset_id===assetId.value && j.kind === 'analyze' && ['queued','running','paused','pause_requested'].includes(j.state)))
 const latestAnalysis = computed(() => projectAnalysis.value)
 function currentDraft(): ProjectDraft {
-  return {product_name:productName.value,product_info:productInfo.value,instructions:instructions.value,
-    target_duration_us:Math.round(targetSeconds.value*1e6)}
+  return {product_name:productName.value,instructions:instructions.value,
+    target_duration_us:Math.round(targetSeconds.value*1e6),duration_tolerance_us:Math.round(toleranceSeconds.value*1e6)}
 }
 async function persistDraft() {
   if(!assetId.value || savedDraft.value===JSON.stringify(currentDraft())) return
@@ -47,8 +47,9 @@ function applyProject(detail: ProjectDetail, opening: boolean) {
   jobs.value=detail.jobs;artifacts.value=detail.artifacts;projectAnalysis.value=detail.latest_analysis
   if(opening) {
     assetId.value=detail.asset.id
-    productName.value=detail.draft.product_name;productInfo.value=detail.draft.product_info
+    productName.value=detail.draft.product_name
     instructions.value=detail.draft.instructions;targetSeconds.value=detail.draft.target_duration_us/1e6
+    toleranceSeconds.value=detail.draft.duration_tolerance_us/1e6
     savedDraft.value=JSON.stringify(detail.draft)
     selectedPlan.value=clonePlan(detail.plans[0]);refreshAsr.value=false;transcript.value=null;transcriptVisible.value=false
   }
@@ -73,7 +74,15 @@ async function refresh() {
   await load(id,()=>assetId.value===id && !session.navigating)
 }
 function invalidate() { detailRequest++ }
-async function saveProjectInfo() {await session.act(async()=>{await persistDraft();session.message='商品资料与剪辑要求已保存'})}
+async function saveProjectInfo() {await session.act(async()=>{await persistDraft();session.message='项目资料与剪辑设置已保存'})}
+async function saveDefaultInstructions() {await session.act(async()=>{
+  const id=assetId.value
+  const value=instructions.value.trim()||defaultInstructions
+  await persistDraft()
+  const saved=await projectsApi.saveEditingDefaults(value)
+  if(assetId.value===id && (instructions.value.trim()||defaultInstructions)===value) instructions.value=saved.instructions
+  session.message='剪辑要求已保存为默认；后续新项目自动使用，分析失败不会丢失'
+})}
 function checkSwitch(id?: string) {
   if((!id || id!==assetId.value) && planDirty.value) throw new Error('当前片段有未保存调整，请先保存，再打开其他项目或新建视频')
 }
@@ -87,8 +96,9 @@ async function analyze() { await session.act(async()=>{
   if(!productName.value.trim()) throw new Error('请先填写商品名称')
   await persistDraft()
   const job=await projectsApi.analyze(assetId.value,{
-    product_name:productName.value.trim(),product_info:productInfo.value.trim(),
+    product_name:productName.value.trim(),
     instructions:instructions.value.trim()||defaultInstructions,target_duration_us:Math.round(targetSeconds.value*1e6),
+    duration_tolerance_us:Math.round(toleranceSeconds.value*1e6),
   },refreshAsr.value)
   refreshAsr.value=false;transcript.value=null;transcriptVisible.value=false
   pendingAnalyzeId.value=job.id;session.message='已排队：完成全量转写 → 决策模型选择时间区间 → 裁剪拼接预览';await refresh()
@@ -141,9 +151,9 @@ function moveClip(index: number, delta: number) {
   ;[clips[index],clips[index+delta]]=[clips[index+delta],clips[index]]
 }
 
-return {projectAnalysis,savedDraft,assets,candidates,plans,jobs,artifacts,assetId,productName,productInfo,pendingAnalyzeId,
- defaultInstructions,instructions,targetSeconds,refreshAsr,transcript,transcriptVisible,selectedPlan,
+return {projectAnalysis,savedDraft,assets,candidates,plans,jobs,artifacts,assetId,productName,pendingAnalyzeId,
+ defaultInstructions,instructions,targetSeconds,toleranceSeconds,refreshAsr,transcript,transcriptVisible,selectedPlan,
  activeAsset,assetPlans,previewArtifact,projectExports,planDirty,assetJobs,analyzingAsset,latestAnalysis,
- currentDraft,persistDraft,saveProjectInfo,load,refresh,invalidate,checkSwitch,trackRetry,
+ currentDraft,persistDraft,saveProjectInfo,saveDefaultInstructions,load,refresh,invalidate,checkSwitch,trackRetry,
  analyze,loadTranscript,approveAndExport,createJianyingDraft,savePlan,deletePlan,moveClip}
 })

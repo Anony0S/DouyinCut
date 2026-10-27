@@ -10,7 +10,8 @@ const {modules}=require('./test-modules.cjs')
 const {createPinia,setActivePinia,storeToRefs}=require('pinia')
 const {createMemoryHistory}=require('vue-router')
 const copy = value => JSON.parse(JSON.stringify(value))
-let bindings, uploaded, analyzeBody, exported, savedDraft, approvalCount = 0
+let bindings, uploaded, analyzeBody, exported, savedDraft, savedDefaultInstructions, approvalCount = 0
+let failDefaultSave=false
 let releaseOtherProject
 const requests=[]
 const asset = { id: 'video', name: '奶黄千层.mp4', path: 'local.mp4', duration_us: 250e6, width: 160, height: 120 }
@@ -26,18 +27,19 @@ const api = async (url, method = 'GET', body) => {
   if (url.startsWith('/jobs/') && !url.endsWith('/retry') && !url.endsWith('/transcript')) return copy(lists['/jobs'].find(task=>url===`/jobs/${task.id}`))
   if (url === '/projects/video') {
     if(method==='PATCH') { savedDraft=copy(body); return copy(body) }
-    return copy({asset,draft:savedDraft||{product_name:'',product_info:'',instructions:bindings.defaultInstructions,target_duration_us:60e6},
+    return copy({asset,draft:savedDraft||{product_name:'',instructions:bindings.defaultInstructions,target_duration_us:60e6,duration_tolerance_us:15e6},
       plans:lists['/plans'],candidates:lists['/candidates'],artifacts:lists['/exports'],jobs:lists['/jobs'],latest_analysis:lists['/jobs'].find(task=>task.kind==='analyze')||null})
   }
   if (url === '/projects/other') {
     if(method==='GET') {
       await new Promise(resolve=>{releaseOtherProject=resolve})
       return copy({asset:{...asset,id:'other',name:'其他商品.mp4'},
-        draft:{product_name:'另一款商品',product_info:'另一份资料',instructions:'保留面料介绍',target_duration_us:90e6},
+        draft:{product_name:'另一款商品',instructions:'保留面料介绍',target_duration_us:90e6,duration_tolerance_us:10e6},
         plans:[],candidates:[],artifacts:[],jobs:[],latest_analysis:null})
     }
     return copy(body)
   }
+  if (url === '/settings/editing-defaults' && method === 'PUT') { if(failDefaultSave) throw new Error('默认要求保存失败');savedDefaultInstructions=body.instructions;return copy(body) }
   if (url === '/settings/cloud') return { config, secrets: {}, secret_previews: {} }
   if (url === '/jobs/analysis/transcript') return { ready: true, sentences: [
     {start_us: 0, end_us: 5e6, text: '上身显瘦。'}, {start_us: 20e6, end_us: 25e6, text: '面料柔软。'}] }
@@ -120,12 +122,13 @@ async function verify() {
     assert.equal(bindings.error.value, '请先填写商品名称')
     assert.equal(analyzeBody, undefined)
     bindings.productName.value = ' 奶黄千层 '
-    bindings.productInfo.value = '假两件针织开衫'
+    bindings.toleranceSeconds.value = 8
     bindings.instructions.value = ''
     bindings.refreshAsr.value = true
     await bindings.analyze()
     assert.equal(analyzeBody.product_name, '奶黄千层')
-    assert.equal(analyzeBody.product_info, '假两件针织开衫')
+    assert.ok(!('product_info' in analyzeBody))
+    assert.equal(analyzeBody.duration_tolerance_us,8e6)
     assert.equal(analyzeBody.target_duration_us, 60e6)
     assert.equal(analyzeBody.refresh_asr, true)
     assert.equal(bindings.refreshAsr.value, false, 'Explicit ASR refresh must not remain enabled for future tasks')
@@ -187,12 +190,15 @@ async function verify() {
     assert.equal(bindings.pendingAnalyzeId.value, 'analysis')
     assert.equal(bindings.transcript.value, null)
     assert.ok(bindings.message.value.includes('qwen-audio-3.1-asr-flash'), 'Retry reports the saved speech model actually used')
-    bindings.productInfo.value='已保存的补充资料'
+    bindings.instructions.value='已保存的剪辑要求'
+    await bindings.saveDefaultInstructions()
+    assert.equal(savedDefaultInstructions,'已保存的剪辑要求')
+    assert.ok(bindings.message.value.includes('保存为默认'))
     await bindings.navigate('projects')
-    assert.equal(savedDraft.product_info,'已保存的补充资料')
+    assert.equal(savedDraft.instructions,'已保存的剪辑要求')
     assert.equal(bindings.page.value,'projects')
     await bindings.openProject('video')
-    assert.equal(bindings.productInfo.value,'已保存的补充资料')
+    assert.equal(bindings.instructions.value,'已保存的剪辑要求')
     assert.equal(bindings.selectedPlan.value.id,'roughcut')
     bindings.moveClip(1,-1)
     await bindings.openProject('other')
@@ -210,15 +216,79 @@ async function verify() {
     assert.equal(bindings.assetId.value,'other','Background refresh cannot invalidate explicit project opening')
     assert.equal(bindings.productName.value,'另一款商品')
     assert.equal(bindings.targetSeconds.value,90)
+    assert.equal(bindings.toleranceSeconds.value,10,'Opening another project restores its own tolerance')
     assert.equal(bindings.selectedPlan.value,null,'New projects do not display another project’s plan')
     assert.equal(bindings.projectExports.value.length,0,'Switching projects clears previous deliveries')
     assert.equal(bindings.transcriptVisible.value,false)
     await bindings.openProject('video')
-    assert.equal(bindings.productInfo.value,'已保存的补充资料')
+    assert.equal(bindings.instructions.value,'已保存的剪辑要求')
     assert.equal(bindings.selectedPlan.value.id,'roughcut')
     assert.ok(!requests.includes('/assets') && !requests.includes('/plans') && !requests.includes('/candidates'), 'Editor must not fetch the full library')
     assert.ok(!requests.includes('/exports'),'Project deliveries must not fetch a global export list')
     console.log('ASR roughcut workflow checks passed (local file, product input, automatic preview, edit and export).')
   } finally { app.unmount() }
 }
-verify().catch(error => { console.error(error); process.exitCode = 1 })
+async function verifyEditingControls() {
+  const source=fs.readFileSync(path.join(__dirname,'../src/views/WorkspaceView.vue'),'utf8')
+  const compiled=compileScript(parse(source).descriptor,{id:'editing-controls-check',inlineTemplate:true})
+  const code=ts.transpileModule(compiled.content,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
+  const componentModule={exports:{}}
+  const split={setup(_, {slots}) { return ()=>vue.h('div',[slots.left?.(),slots.right?.()]) }}
+  const empty={render(){return null}}
+  new Function('require','module','exports',code)(name=>{
+    if(name==='vue') return {...vue,vModelText:{},vModelSelect:{},vModelCheckbox:{}}
+    if(name==='vue-router') return {...require(name),useRoute:()=>router.currentRoute.value}
+    if(name==='../api') return {duration:value=>String(value/1e6),seconds:value=>String(value/1e6)}
+    if(name==='../stores/project') return loaded.load('stores/project.ts')
+    if(name==='../stores/session') return loaded.load('stores/session.ts')
+    if(name==='../presentation') return loaded.load('presentation.ts')
+    if(name==='../workspace') return {useWorkspace:()=>workspace}
+    if(name==='../composables/useVideoImport') return {useVideoImport:()=>({chooseNewVideo(){}})}
+    if(name.endsWith('WorkspaceSplit.vue')) return {__esModule:true,default:split}
+    if(name.endsWith('.vue')) return {__esModule:true,default:empty}
+    return require(name)
+  },componentModule,componentModule.exports)
+  const element=type=>({type,props:{},children:[],parent:null,text:''})
+  const native=vue.createRenderer({
+    createElement:element,createText:text=>({...element('text'),text}),createComment:()=>element('comment'),
+    setText(el,text){el.text=text},setElementText(el,text){el.text=text;el.children=[]},
+    patchProp(el,key,previous,value){el.props[key]=value},
+    insert(el,parent,anchor){if(el.parent){const index=el.parent.children.indexOf(el);if(index>=0)el.parent.children.splice(index,1)}
+      const index=anchor?parent.children.indexOf(anchor):-1;if(index<0)parent.children.push(el);else parent.children.splice(index,0,el);el.parent=parent},
+    remove(el){if(el.parent){const index=el.parent.children.indexOf(el);if(index>=0)el.parent.children.splice(index,1)}},
+    parentNode:el=>el.parent,nextSibling:el=>el.parent?.children[el.parent.children.indexOf(el)+1]||null,
+  })
+  const all=(el,predicate)=>[...(predicate(el)?[el]:[]),...el.children.flatMap(child=>all(child,predicate))]
+  const text=el=>el.type==='comment'?'':el.text+el.children.map(text).join('')
+  project.jobs=[];project.projectAnalysis=null;session.connected=true
+  const root=element('root'),app=native.createApp(componentModule.exports.default)
+  const paidBefore=requests.filter(url=>url.endsWith('/analyze')).length
+  try {
+    app.use(pinia);app.mount(root);await settle()
+    assert.equal(all(root,el=>el.props.id==='product-info').length,0,'Supplementary-info control is removed')
+    const range=all(root,el=>el.props.id==='duration-tolerance')[0]
+    assert.equal(range.props.type,'range')
+    assert.equal(range.props.min,'0');assert.equal(range.props.max,'30');assert.equal(range.props.step,'1')
+    assert.equal(range.props.disabled,false)
+    range.props['onUpdate:modelValue'](0);await settle()
+    assert.equal(project.toleranceSeconds,0)
+    assert.ok(text(root).includes('± 0 秒'),'Slider output shows zero without restoring a fallback')
+    range.props['onUpdate:modelValue'](30);await settle()
+    assert.ok(text(root).includes(String(project.targetSeconds+30)+' 秒'))
+    const save=all(root,el=>el.type==='button'&&text(el).trim()==='保存为默认')[0]
+    assert.equal(save.props.type,'button','Saving requirements must not submit analysis')
+    project.instructions='保留领口和面料介绍';await settle()
+    await save.props.onClick();await settle()
+    assert.equal(savedDefaultInstructions,'保留领口和面料介绍')
+    assert.equal(savedDraft.duration_tolerance_us,30e6)
+    assert.ok(!('product_info' in savedDraft))
+    failDefaultSave=true;project.instructions='失败时保留的要求'
+    await save.props.onClick();await settle()
+    assert.equal(savedDefaultInstructions,'保留领口和面料介绍')
+    assert.equal(project.instructions,'失败时保留的要求')
+    assert.equal(session.error,'默认要求保存失败')
+    assert.equal(requests.filter(url=>url.endsWith('/analyze')).length,paidBefore,'Saving requirements never creates paid analysis')
+    console.log('Editing controls passed: removed info, real template save button, slider endpoints, isolated persistence and failed-save recovery.')
+  } finally {failDefaultSave=false;app.unmount()}
+}
+verify().then(verifyEditingControls).catch(error => { console.error(error); process.exitCode = 1 })

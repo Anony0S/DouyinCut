@@ -126,7 +126,9 @@ class DesktopSession:
         # Initialize the current schema before concurrent service construction.
         from .core.storage import Store
         from .live_monitoring import LiveStore
-        LiveStore(Store(self.settings.database))
+        store = Store(self.settings.database)
+        LiveStore(store)
+        store.start_session()
         self._stop.clear()
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._listener = listener
@@ -182,6 +184,9 @@ class DesktopSession:
                 for role, state in self._roles.items()}
 
     def close(self):
+        if self._roles:
+            from .core.storage import Store
+            Store(self.settings.database).pause_for_shutdown()
         self._stop.set()
         deadline = time.monotonic() + 30
         for state in self._roles.values():

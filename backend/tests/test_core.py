@@ -215,6 +215,32 @@ class StoreTests(unittest.TestCase):
         restarted.finish(job["id"],"worker2","succeeded",result={"output":"saved"})
         self.assertEqual(restarted.job(job["id"])["state"],"cancelled")
 
+    def test_shutdown_pauses_queued_jobs_and_requests_checkpoint_for_running_jobs(self):
+        active = self.store.enqueue("import", {"path": "active.mp4"})
+        waiting = self.store.enqueue("import", {"path": "waiting.mp4"})
+        cloud = self.store.enqueue("analyze", {"asset_id": "cloud"})
+        claimed = self.store.claim("worker-owner")
+        self.assertEqual(claimed["id"], active["id"])
+
+        self.store.pause_for_shutdown()
+
+        self.assertEqual(self.store.job(active["id"])["state"], "pause_requested")
+        self.assertEqual(self.store.job(waiting["id"])["state"], "paused")
+        self.assertEqual(self.store.job(cloud["id"])["state"], "queued", "cloud retry lifecycle belongs to its own tickets")
+        self.assertEqual(self.store.job(active["id"])["payload"], {"path": "active.mp4"})
+        self.assertIsNone(self.store.claim("another-worker"))
+        with self.assertRaisesRegex(RuntimeError, "正在退出"):
+            self.store.enqueue("preview", {"plan_id": "new"})
+        with self.assertRaisesRegex(RuntimeError, "正在退出"):
+            self.store.control(waiting["id"], "resume")
+
+        restarted = Store(self.store.path)
+        restarted.start_session()
+        self.assertEqual(restarted.job(waiting["id"])["state"], "paused",
+                         "Local work remains paused when a new session starts")
+        restarted.control(waiting["id"], "resume")
+        self.assertEqual(restarted.job(waiting["id"])["state"], "queued")
+
     def test_revision_compare_and_swap_preserves_history(self):
         self.store.put("plan",{"id":"p","revision":1,"value":"original"})
         new=self.store.next_revision("plan","p",{"id":"p","value":"edited"},expected_revision=1)

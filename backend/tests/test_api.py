@@ -26,6 +26,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/assets',headers={**self.headers,'Origin':'https://untrusted.example'}).status_code,401)
         self.assertEqual(self.client.get('/api/v1/assets/unknown/media',headers=self.headers).status_code,404)
 
+    def test_shutdown_keeps_status_readable_but_rejects_mutations(self):
+        store = self.app.state.store
+        job = store.enqueue('import', {'path': 'queued.mp4'})
+        store.control(job['id'], 'pause')
+        store.pause_for_shutdown()
+
+        status = self.client.get('/api/v1/jobs', headers=self.headers)
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()[0]['state'], 'paused')
+        self.assertEqual(self.client.put('/api/v1/settings/editing-defaults', json={},
+                                         headers=self.headers).status_code, 503)
+        self.assertEqual(self.client.post(f"/api/v1/jobs/{job['id']}/resume",
+                                          headers=self.headers).status_code, 503)
+
     def test_cloud_error_detail_is_authenticated_complete_and_not_in_job_list(self):
         store = self.app.state.store
         job = store.enqueue('analyze', {})

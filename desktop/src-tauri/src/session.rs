@@ -4,7 +4,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Mutex,
+        mpsc, Arc, Condvar, Mutex,
     },
     thread,
     time::{Duration, Instant},
@@ -20,6 +20,7 @@ pub struct SessionInfo {
 pub struct SessionHost {
     child: Arc<Mutex<Child>>,
     stopping: Arc<AtomicBool>,
+    shutdown_result: Arc<(Mutex<Option<Result<(), String>>>, Condvar)>,
     #[cfg(windows)]
     _job: ProcessJob,
 }
@@ -41,7 +42,10 @@ impl SessionHost {
             ));
         }
         // Diagnostics stay outside the data root until Python preflight passes.
-        let logs = workspace_config.and_then(Path::parent).unwrap_or(work).join("logs");
+        let logs = workspace_config
+            .and_then(Path::parent)
+            .unwrap_or(work)
+            .join("logs");
         std::fs::create_dir_all(&logs).map_err(|e| format!("无法准备诊断日志：{e}"))?;
         let log_path = logs.join("desktop-runtime.log");
         let log = std::fs::OpenOptions::new()
@@ -60,7 +64,9 @@ impl SessionHost {
         if let Some(config) = workspace_config {
             command.arg("--workspace-config").arg(config);
             let application = std::env::current_exe().map_err(|e| e.to_string())?;
-            command.arg("--application-dir").arg(application.parent().ok_or("无法定位程序目录")?);
+            command
+                .arg("--application-dir")
+                .arg(application.parent().ok_or("无法定位程序目录")?);
         }
         #[cfg(windows)]
         {
@@ -89,6 +95,7 @@ impl SessionHost {
         let host = Self {
             child: Arc::new(Mutex::new(child)),
             stopping: Arc::new(AtomicBool::new(false)),
+            shutdown_result: Arc::new((Mutex::new(None), Condvar::new())),
             #[cfg(windows)]
             _job: job,
         };
@@ -134,43 +141,71 @@ impl SessionHost {
                 }
             }
             if ready && !stopping.load(Ordering::SeqCst) {
-                on_failure(&format!("桌面运行时已意外退出，请检查诊断日志：{}。", failure_log.display()));
+                on_failure(&format!(
+                    "桌面运行时已意外退出，请检查诊断日志：{}。",
+                    failure_log.display()
+                ));
             }
         });
         match receive.recv_timeout(Duration::from_secs(45)) {
             Ok(Ok(info)) => Ok((host, info)),
             Ok(Err(error)) => Err(error),
-            Err(_) => Err(format!("桌面会话未能就绪，请检查诊断日志：{}。", log_path.display())),
+            Err(_) => Err(format!(
+                "桌面会话未能就绪，请检查诊断日志：{}。",
+                log_path.display()
+            )),
         }
     }
 
     pub fn shutdown(&self) -> Result<(), String> {
         if self.stopping.swap(true, Ordering::SeqCst) {
-            return Ok(());
+            let (result, changed) = &*self.shutdown_result;
+            let result = result.lock().map_err(|_| "退出状态已中断")?;
+            let result = changed
+                .wait_while(result, |result| result.is_none())
+                .map_err(|_| "退出状态已中断")?;
+            return result
+                .clone()
+                .unwrap_or_else(|| Err("退出状态已中断".into()));
         }
-        if let Ok(mut child) = self.child.lock() {
+        let result = if let Ok(mut child) = self.child.lock() {
             if let Some(mut input) = child.stdin.take() {
                 let _ = input.write_all(b"shutdown\n");
             }
             let deadline = Instant::now() + Duration::from_secs(70);
-            while Instant::now() < deadline {
+            let result = loop {
+                if Instant::now() >= deadline {
+                    break Err(
+                        "桌面运行时未能正常收尾，已终止本地进程。请检查 desktop-runtime.log。"
+                            .into(),
+                    );
+                }
                 match child.try_wait() {
                     Ok(Some(status)) => {
-                        return if status.success() {
+                        break if status.success() {
                             Ok(())
                         } else {
                             Err(format!("桌面运行时异常退出：{status}"))
                         }
                     }
-                    Err(_) => break,
+                    Err(error) => break Err(format!("无法检查桌面运行时退出状态：{error}")),
                     _ => thread::sleep(Duration::from_millis(50)),
                 }
+            };
+            if result.is_err() {
+                let _ = child.kill();
+                let _ = child.wait();
             }
-            let _ = child.kill();
-            let _ = child.wait();
+            result
+        } else {
+            Err("桌面运行时控制已中断。".into())
+        };
+        let (shutdown_result, changed) = &*self.shutdown_result;
+        if let Ok(mut shutdown_result) = shutdown_result.lock() {
+            *shutdown_result = Some(result.clone());
+            changed.notify_all();
         }
-        // Closing the Windows job when this owner drops reaps its process tree.
-        Err("桌面运行时未能正常收尾，已终止本地进程。请检查 desktop-runtime.log。".into())
+        result
     }
 }
 
@@ -268,9 +303,12 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         return Err(std::io::Error::other(
             "不支持这些启动参数。隔离验证可使用 --workspace-config <定位配置绝对路径>。",
-        ).into());
+        )
+        .into());
     };
-    if !config.is_absolute() { return Err(std::io::Error::other("定位配置必须为绝对路径").into()); }
+    if !config.is_absolute() {
+        return Err(std::io::Error::other("定位配置必须为绝对路径").into());
+    }
     let executable = app
         .path()
         .resource_dir()?
@@ -322,10 +360,45 @@ fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => restore_main_window(app),
-            "exit" => app.exit(0),
+            "exit" => request_exit(app),
             _ => {}
         })
         .build(app)?;
+    Ok(())
+}
+
+#[cfg(all(windows, not(debug_assertions)))]
+fn request_exit(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("workbench") {
+        restore_main_window(app);
+        let _ = window.eval("window.dispatchEvent(new Event('douyincut-exit-request'))");
+    } else {
+        app.exit(0);
+    }
+}
+
+#[tauri::command]
+pub fn complete_exit(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
+    let url = window.url().map_err(|error| error.to_string())?;
+    if window.label() != "workbench"
+        || url.scheme() != "http"
+        || url.host_str() != Some("127.0.0.1")
+        || url.port().is_none()
+    {
+        return Err("退出操作仅允许从本机工作台执行。".into());
+    }
+    if app.try_state::<SessionHost>().is_none() {
+        return Err("当前桌面会话尚未启动。".into());
+    }
+    thread::spawn(move || {
+        let result = app.state::<SessionHost>().shutdown();
+        if let Err(message) = result {
+            show_error(&message);
+            app.exit(1);
+        } else {
+            app.exit(0);
+        }
+    });
     Ok(())
 }
 
@@ -363,8 +436,12 @@ fn show_tray_notice() {
     }
 }
 
-pub fn open_workbench(app: &tauri::AppHandle, executable: &Path, work: &Path,
-                      workspace_config: Option<&Path>) -> Result<(), String> {
+pub fn open_workbench(
+    app: &tauri::AppHandle,
+    executable: &Path,
+    work: &Path,
+    workspace_config: Option<&Path>,
+) -> Result<(), String> {
     let handle = app.clone();
     let (host, info) = SessionHost::start(executable, work, workspace_config, move |message| {
         show_error(message);
@@ -389,10 +466,12 @@ pub fn open_workbench(app: &tauri::AppHandle, executable: &Path, work: &Path,
     let mut config = app.config().app.windows[0].clone();
     config.url = tauri::WebviewUrl::External(url);
     config.label = "workbench".into();
-    tauri::WebviewWindowBuilder::from_config(app, &config).map_err(|e| e.to_string())?
+    tauri::WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|e| e.to_string())?
         .initialization_script(script)
         .on_navigation(move |url| url.origin().ascii_serialization() == origin)
-        .build().map_err(|e| e.to_string())?;
+        .build()
+        .map_err(|e| e.to_string())?;
     app.manage(host);
     Ok(())
 }

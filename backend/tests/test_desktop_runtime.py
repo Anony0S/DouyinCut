@@ -485,3 +485,43 @@ WorkDirectoryRegistry(sys.argv[1]).select(sys.argv[2])
                 session.close()
             self.assertTrue(all(role['exitcode'] == 0 for role in session.status().values()))
             self.assertTrue(all(not role['alive'] for role in session.status().values()))
+
+    def test_local_jobs_stay_paused_across_runtime_restart_until_authenticated_resume(self):
+        from fastapi.testclient import TestClient
+        from app.api import create_app
+        from app.core.storage import Store
+        from app.desktop_runtime import DesktopSession
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            frontend = root / 'frontend'
+            frontend.mkdir()
+            (frontend / 'index.html').write_text('<html>exit recovery</html>', encoding='utf-8')
+            settings = Settings(root / 'work')
+            settings.prepare()
+            store = Store(settings.database)
+            queued = store.enqueue('import', {'path': str(root / 'queued.mp4')})
+            running = store.enqueue('export', {'plan_id': 'not-run-before-resume'})
+            store.control(queued['id'], 'pause')
+            store.control(running['id'], 'pause')
+
+            first = DesktopSession(settings, frontend)
+            first.start()
+            first.close()
+
+            self.assertEqual(store.job(queued['id'])['state'], 'paused')
+            self.assertEqual(store.job(running['id'])['state'], 'paused')
+            self.assertTrue(all(role['exitcode'] == 0 for role in first.status().values()))
+
+            second = DesktopSession(settings, frontend)
+            try:
+                info = second.start()
+                self.assertIsNone(store.claim('must-not-auto-resume'))
+                app = create_app(settings, info.token, frontend_dir=frontend)
+                with TestClient(app, base_url=info.url) as client:
+                    resumed = client.post(f"/api/v1/jobs/{running['id']}/resume",
+                                          headers={'X-Session-Token': info.token})
+                    self.assertEqual(resumed.status_code, 200, resumed.text)
+                    self.assertEqual(resumed.json()['state'], 'queued')
+            finally:
+                second.close()

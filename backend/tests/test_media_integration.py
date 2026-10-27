@@ -2,6 +2,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 import wave
 from array import array
@@ -19,6 +20,61 @@ from app.worker import Worker
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "需要 FFmpeg 与 ffprobe")
 class MediaIntegrationTests(unittest.TestCase):
+    def test_shutdown_pauses_real_ffmpeg_export_at_checkpoint_and_preserves_published_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            settings = Settings(root / 'work')
+            settings.prepare()
+            source = root / 'source.mp4'
+            run_process([settings.ffmpeg, '-hide_banner', '-loglevel', 'error', '-y',
+                         '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=2',
+                         '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=2',
+                         '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', str(source)])
+            source_bytes = source.read_bytes()
+            asset = import_asset(source, settings)
+            product = Product(name='退出检查点', confirmed=True)
+            candidate = Candidate(product_id=product.id, source_asset_id=asset.id,
+                                  start_us=0, end_us=2_000_000)
+            plan = build_plan(product, [candidate], {asset.id: asset}, [], target_us=2_000_000)
+            plan = plan.model_copy(update={'status': 'approved'})
+            completed = export_plan(plan, {asset.id: asset}, settings, 'already-published', package=False)
+            completed_video = Path(completed['video_path']).read_bytes()
+            store = Store(settings.database)
+            store.put('asset', asset.model_dump())
+            store.put('product', product.model_dump())
+            store.put('candidate', candidate.model_dump())
+            store.put('plan', plan.model_dump())
+            job = store.enqueue('export', {'plan_id': plan.id, 'revision': plan.revision, 'format': 'mp4'})
+            worker = Worker(settings)
+            ffmpeg_started = threading.Event()
+            allow_checkpoint = threading.Event()
+            original_run_process = __import__('app.media.processing', fromlist=['run_process']).run_process
+
+            def controlled_run_process(args, checkpoint=None, **kwargs):
+                if Path(args[0]).name.lower().startswith('ffmpeg') and checkpoint:
+                    def controlled_checkpoint():
+                        ffmpeg_started.set()
+                        if not allow_checkpoint.wait(10):
+                            raise AssertionError('test did not release the media checkpoint')
+                        checkpoint()
+                    return original_run_process(args, checkpoint=controlled_checkpoint, **kwargs)
+                return original_run_process(args, checkpoint=checkpoint, **kwargs)
+
+            with patch('app.media.exporting.run_process', side_effect=controlled_run_process):
+                execution = threading.Thread(target=worker.run_once)
+                execution.start()
+                self.assertTrue(ffmpeg_started.wait(10), 'real FFmpeg export did not start')
+                store.pause_for_shutdown()
+                allow_checkpoint.set()
+                execution.join(15)
+
+            self.assertFalse(execution.is_alive(), 'worker must finish its safe stop')
+            self.assertEqual(store.job(job['id'])['state'], 'paused')
+            self.assertEqual(source.read_bytes(), source_bytes)
+            self.assertEqual(Path(completed['video_path']).read_bytes(), completed_video)
+            self.assertEqual(list((settings.data_dir / 'exports').glob('*.partial')), [])
+            self.assertEqual(list((settings.data_dir / 'exports').glob('.*.partial')), [])
+
     def test_asr_roughcut_automatically_stitches_selected_sentences_and_subtitles(self):
         from app.ai.providers import CloudConfig
         from app.ai.roughcut import TimeSelection

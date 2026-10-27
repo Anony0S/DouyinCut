@@ -21,7 +21,7 @@ from .media.processing import diagnostics, probe_stream_timing
 from .ai.providers import CloudConfig, ProviderError, asr_api_key, model_api_key
 from .ai.connection import ModelConnectionTestRequest, check_model_connection
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
-from .core.storage import Store
+from .core.storage import SessionStopping, Store
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, ProjectDraft, delete_plan, delete_project, job_summary,
                        project_detail, project_list, save_draft)
 from .live_monitoring import (LiveClipOpen, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
@@ -64,6 +64,8 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             provided = request.headers.get("x-session-token") or request.cookies.get("douyincut_session", "")
             if (origin is not None and origin not in allowed) or not hmac.compare_digest(provided.encode(), token.encode()):
                 return JSONResponse({"detail": "本地会话未授权，请通过项目启动器打开界面"}, status_code=401)
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and store.is_shutting_down():
+                return JSONResponse({"detail": "桌面会话正在退出，不再接受新操作"}, status_code=503)
         response = await call_next(request)
         response.headers["X-Request-ID"] = trace
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -85,6 +87,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.exception_handler(ProviderError)
     async def provider_error(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=422)
+
+    @app.exception_handler(SessionStopping)
+    async def runtime_error(request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=503)
 
     @app.exception_handler(RequestValidationError)
     async def bad_input(request, exc):

@@ -10,8 +10,14 @@ from pathlib import Path
 from .domain import new_id
 
 
+class SessionStopping(RuntimeError):
+    """Raised when a new operation arrives after desktop shutdown begins."""
+
+
 class Store:
     """Short, per-operation SQLite transactions; no network work inside them."""
+
+    _SHUTDOWN_KEY = "desktop-session:shutting-down"
 
     def __init__(self, path: Path):
         self.path = path
@@ -32,6 +38,9 @@ class Store:
                 );
                 CREATE TABLE IF NOT EXISTS cache (
                     key TEXT PRIMARY KEY, body TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS runtime_state (
+                    key TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS attempts (
                     job_id TEXT NOT NULL, attempt INTEGER NOT NULL, owner TEXT NOT NULL,
@@ -125,8 +134,8 @@ class Store:
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if job_id is not None:
-                row = conn.execute("SELECT owner,lease FROM jobs WHERE id=?", (job_id,)).fetchone()
-                if row is None or row["owner"] != owner or row["lease"] < now:
+                row = conn.execute("SELECT owner,lease,state FROM jobs WHERE id=?", (job_id,)).fetchone()
+                if row is None or row["owner"] != owner or row["lease"] < now or row["state"] != "running":
                     raise RuntimeError("任务租约已失效，拒绝发布结果")
             if conn.execute("SELECT 1 FROM cache WHERE key=?", (cache_key,)).fetchone():
                 return
@@ -139,12 +148,18 @@ class Store:
             conn.execute("INSERT INTO cache VALUES(?,?)", (cache_key, json.dumps(result, ensure_ascii=False)))
             if followup:
                 kind, payload = followup
-                conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
-                             (new_id("job"), kind, json.dumps(payload), now, now))
+                stopping = conn.execute("SELECT 1 FROM runtime_state WHERE key=?",
+                                        (self._SHUTDOWN_KEY,)).fetchone()
+                state = "paused" if stopping else "queued"
+                conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,?,?,?)",
+                             (new_id("job"), kind, json.dumps(payload), state, now, now))
 
     def enqueue(self, kind: str, payload: dict):
         job_id, now = new_id("job"), time.time()
         with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,)).fetchone():
+                raise SessionStopping("桌面会话正在退出，不再接收新任务")
             conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
                          (job_id, kind, json.dumps(payload, ensure_ascii=False), now, now))
         return self.job(job_id)
@@ -187,6 +202,8 @@ class Store:
         now = time.time()
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,)).fetchone():
+                return None
             # Recovery never resubmits an uncertain cloud operation: the handler uses stage cache.
             conn.execute("""UPDATE attempts SET ended=?,state='interrupted'
                 WHERE ended IS NULL AND job_id IN
@@ -230,9 +247,34 @@ class Store:
             conn.execute("UPDATE attempts SET ended=?,state=?,error=?,error_detail=? WHERE job_id=? AND attempt=?",
                          (now, state, error, encoded_detail, job_id, row["attempts"]))
 
+    def pause_for_shutdown(self):
+        """Persist queued work as paused and ask current owners to stop at a checkpoint."""
+        now = time.time()
+        local_kinds = ("import", "preview", "export", "jianying", "live_product_clips")
+        kinds = ",".join("?" for _ in local_kinds)
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("INSERT OR REPLACE INTO runtime_state(key,value) VALUES(?, 'stopping')",
+                         (self._SHUTDOWN_KEY,))
+            conn.execute(f"UPDATE jobs SET state='paused',owner=NULL,lease=NULL,updated=? "
+                         f"WHERE state='queued' AND kind IN ({kinds})", (now, *local_kinds))
+            conn.execute(f"UPDATE jobs SET state='pause_requested',updated=? "
+                         f"WHERE state='running' AND kind IN ({kinds})", (now, *local_kinds))
+
+    def start_session(self):
+        with self.connection() as conn:
+            conn.execute("DELETE FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,))
+
+    def is_shutting_down(self):
+        with self.connection() as conn:
+            return conn.execute("SELECT 1 FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,)).fetchone() is not None
+
     def control(self, job_id: str, action: str, *, retry_config: dict | None = None):
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if action in {"resume", "retry", "acknowledge_asr_uncertain"} and conn.execute(
+                    "SELECT 1 FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,)).fetchone():
+                raise SessionStopping("桌面会话正在退出，不再接受新任务")
             row = conn.execute("SELECT state,kind,payload FROM jobs WHERE id=?", (job_id,)).fetchone()
             if row is None:
                 raise KeyError(job_id)

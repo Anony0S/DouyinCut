@@ -21,7 +21,10 @@ fn main() {
     };
     let application = tauri::Builder::default()
         .manage(instance)
-        .invoke_handler(tauri::generate_handler![workspace::workspace_action])
+        .invoke_handler(tauri::generate_handler![
+            workspace::workspace_action,
+            session::complete_exit
+        ])
         .on_window_event(session::handle_window_event)
         .setup(session::setup)
         .build(context);

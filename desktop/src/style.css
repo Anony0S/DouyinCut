@@ -45,6 +45,25 @@ body {
   margin:0
 }
 
+.exit-modal {
+  z-index: 100;
+}
+
+.exit-modal .modal-box {
+  max-width: 520px;
+}
+
+.exit-progress {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.exit-progress p {
+  margin: 0;
+}
+
 button,input,select,textarea {
   font:inherit
 }

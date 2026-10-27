@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from './stores/session'
@@ -8,8 +8,16 @@ import { createWorkspace, provideWorkspace } from './workspace'
 import { provideVideoImport } from './composables/useVideoImport'
 import LiveIcon from './components/live/LiveIcon.vue'
 import { appearance, setAppearance, type Appearance } from './appearance'
+import { hasUnsavedChanges as hasRegisteredUnsavedChanges } from './exit-guards'
+import { jobsApi } from './services/jobs'
 const route=useRoute(),router=useRouter(),session=useSessionStore(),project=useProjectStore()
 const {busy,connected,activeJobs,error,message}=storeToRefs(session)
+const {savedDraft,planDirty}=storeToRefs(project)
+const exitPrompt=ref<'drafts'|'activity'|null>(null), exiting=ref(false)
+const exitRequestActive=ref(false), activeLocalJobs=ref(0)
+const hasUnsavedChanges=computed(()=>busy.value || planDirty.value ||
+  (Boolean(project.assetId) && savedDraft.value!==JSON.stringify(project.currentDraft())) ||
+  hasRegisteredUnsavedChanges())
 type ToastKind = 'success' | 'error'
 type ToastMessage = { id: number; kind: ToastKind; text: string }
 const toasts=ref<ToastMessage[]>([])
@@ -33,7 +41,53 @@ function pushToast(kind:ToastKind,text:string) {
 watch(error,value=>{if(value) pushToast('error',value)})
 watch(message,value=>{if(value) pushToast('success',value)})
 onMounted(workspace.start)
-onUnmounted(()=>{workspace.stop();for(const timer of toastTimers.values()) window.clearTimeout(timer);toastTimers.clear()})
+async function inspectExitRequest() {
+  if(exitRequestActive.value || exiting.value) return
+  exitRequestActive.value=true
+  try {
+    if(hasUnsavedChanges.value) {exitPrompt.value='drafts';return}
+    await confirmActivityExit()
+  } catch(cause) {
+    session.report(cause)
+    exitRequestActive.value=false
+  }
+}
+async function confirmActivityExit() {
+  const jobs=await jobsApi.list()
+  activeLocalJobs.value=jobs.filter(job=>['import','preview','export','jianying','live_product_clips'].includes(job.kind) &&
+    ['queued','running','pause_requested','cancel_requested'].includes(job.state)).length
+  if(activeLocalJobs.value) {exitPrompt.value='activity';return}
+  await beginExit()
+}
+async function beginExit() {
+  exitPrompt.value=null
+  exiting.value=true
+  try {
+    await nextTick()
+    const invoke=(window as Window & {__TAURI_INTERNALS__?:{invoke:(command:string,args?:Record<string,unknown>)=>Promise<unknown>}}).__TAURI_INTERNALS__?.invoke
+    if(!invoke) throw new Error('无法连接桌面退出控制')
+    await invoke('complete_exit')
+  } catch(cause) {
+    exiting.value=false
+    exitRequestActive.value=false
+    session.report(cause)
+  }
+}
+function cancelExit() {
+  exitPrompt.value=null
+  exitRequestActive.value=false
+}
+function returnToSave() {
+  exitPrompt.value=null
+  exitRequestActive.value=false
+}
+function continueExit() {
+  exitPrompt.value=null
+  void confirmActivityExit().catch(cause=>{session.report(cause);cancelExit()})
+}
+function onExitRequest() { void inspectExitRequest() }
+onMounted(()=>window.addEventListener('douyincut-exit-request',onExitRequest))
+onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitRequest);workspace.stop();for(const timer of toastTimers.values()) window.clearTimeout(timer);toastTimers.clear()})
 </script>
 <template>
   <div class="app-shell">
@@ -70,6 +124,27 @@ onUnmounted(()=>{workspace.stop();for(const timer of toastTimers.values()) windo
           <LiveIcon name="close" />
         </button>
       </div>
+    </div>
+    <div v-if="exitPrompt" class="modal modal-open exit-modal" role="presentation">
+      <section class="modal-box" role="dialog" aria-modal="true" aria-labelledby="exit-title" aria-describedby="exit-description">
+        <h2 id="exit-title">{{ exitPrompt==='drafts'?'有未保存的修改':'退出并暂停本地任务？' }}</h2>
+        <p id="exit-description" v-if="exitPrompt==='drafts'">当前项目、片段方案或设置中有未保存内容。可以返回保存，或明确放弃这些修改后退出。</p>
+        <p id="exit-description" v-else>当前有 {{ activeLocalJobs }} 项本地导入、预览或导出工作。退出后会在安全检查点暂停，重新打开应用后可手动恢复。</p>
+        <div class="modal-action">
+          <button v-if="exitPrompt==='drafts'" class="btn btn-primary" autofocus @click="returnToSave">返回保存</button>
+          <button v-else class="btn" @click="cancelExit">继续使用</button>
+          <button v-if="exitPrompt==='drafts'" class="btn btn-error" @click="continueExit">放弃并退出</button>
+          <button v-else class="btn btn-error" @click="beginExit">退出并暂停</button>
+        </div>
+        <p v-if="exitPrompt==='drafts'" class="hint">选择“返回保存”不会自动保存或清除草稿。</p>
+      </section>
+    </div>
+    <div v-if="exiting" class="modal modal-open exit-modal" role="status" aria-live="polite">
+      <section class="modal-box exit-progress">
+        <span class="loading loading-spinner loading-md" aria-hidden="true"></span>
+        <h2>正在安全退出</h2>
+        <p>正在暂停本地任务并关闭应用自己的后台进程…</p>
+      </section>
     </div>
   </div>
 </template>

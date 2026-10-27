@@ -194,6 +194,7 @@ async function verifySettings() {
     if (name === 'vue') return vue
     if (name === '../services/cloud') return loaded.load('services/cloud.ts')
     if (name === '../stores/session') return loaded.load('stores/session.ts')
+    if (name === '../exit-guards') return loaded.load('exit-guards.ts')
     if (name === './events') return { subscribeJobEvents: () => () => {} }
     if (name === '../components/JobErrorDetails.vue') return { __esModule: true, default: {} }
     if (name === '../components/WorkspaceSplit.vue') return { __esModule: true, default: {} }
@@ -322,6 +323,7 @@ async function verifyModelTestButton() {
     if(name==='vue') return {...vue,vModelText:{}}
     if(name==='../services/cloud') return loaded.load('services/cloud.ts')
     if(name==='../stores/session') return loaded.load('stores/session.ts')
+    if(name==='../exit-guards') return loaded.load('exit-guards.ts')
     if(name==='../components/SecretInput.vue') return {__esModule:true,default:component}
     return require(name)
   },result,result.exports)

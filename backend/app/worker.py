@@ -194,6 +194,9 @@ class Worker:
                     from .live_monitoring import LiveStore
                     LiveStore(self.store).retry_product_clip_import(job["payload"]["live_product_clip_id"])
         except Exception as exc:
+            if self.store.is_shutting_down() and self.store.job(job["id"])["state"] == "pause_requested":
+                self.store.finish(job["id"], self.owner, "paused")
+                return True
             # Expected errors are sanitized by providers and media handlers.
             message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else f"任务失败（{type(exc).__name__}）"
             if isinstance(exc, OSError) and job['kind'] in {'export', 'preview'}:

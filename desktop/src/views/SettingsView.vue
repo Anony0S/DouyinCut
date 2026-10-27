@@ -5,6 +5,7 @@ import type { CloudConfig } from "../api";
 import { cloudApi, type ModelConnectionTestResult } from "../services/cloud";
 import { useSessionStore } from "../stores/session";
 import SecretInput from "../components/SecretInput.vue";
+import { registerExitGuard } from "../exit-guards";
 const session = useSessionStore();
 const { busy, connected, error } = storeToRefs(session);
 const config = ref<CloudConfig>({
@@ -18,6 +19,7 @@ const config = ref<CloudConfig>({
   oss_bucket: "",
   chat_timeout_seconds: 300,
 });
+const savedConfig = ref<CloudConfig | null>(null);
 const secrets = ref<Record<string, boolean>>({});
 const secretPreviews = ref<Record<string, string>>({});
 type ServiceSecretName = "oss_access_key_id" | "oss_access_key_secret";
@@ -67,6 +69,11 @@ const canTestModel = computed(
     ),
 );
 let modelTestVersion = 0;
+const hasUnsavedChanges = computed(() => Boolean(savedConfig.value &&
+  JSON.stringify(config.value) !== JSON.stringify(savedConfig.value)) ||
+  Boolean(modelKey.value.trim() || asrKey.value.trim() || douyinCookie.value.trim() ||
+    Object.values(secretDrafts.value).some(value => value.trim())));
+let unregisterExitGuard: (() => void) | undefined;
 watch(
   [
     () => config.value.base_url,
@@ -112,6 +119,7 @@ async function loadSettings() {
   const result = await cloudApi.load();
   if (disposed) return;
   config.value = result.config;
+  savedConfig.value = result.config;
   secrets.value = result.secrets;
   secretPreviews.value = result.secret_previews;
 }
@@ -125,6 +133,10 @@ async function saveConfigFields(fields: (keyof CloudConfig)[]) {
     ...config.value,
     ...Object.fromEntries(fields.map((name) => [name, saved[name]])),
   };
+  savedConfig.value = {
+    ...(savedConfig.value || config.value),
+    ...Object.fromEntries(fields.map(name => [name, saved[name]])),
+  } as CloudConfig;
 }
 async function saveSettings() {
   await session.act(async () => {
@@ -186,9 +198,11 @@ async function saveDouyinCookie() {
 }
 
 onMounted(() => {
+  unregisterExitGuard = registerExitGuard(() => hasUnsavedChanges.value);
   void session.act(loadSettings);
 });
 onUnmounted(() => {
+  unregisterExitGuard?.();
   disposed = true;
   modelKey.value = "";
   asrKey.value = "";

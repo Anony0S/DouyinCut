@@ -40,9 +40,9 @@ onUnmounted(()=>{workspace.stop();for(const timer of toastTimers.values()) windo
     <aside class="sidebar">
       <div class="brand"><span class="brand-icon">D</span><div>DouyinCut<small>服装直播剪辑工作台</small></div></div>
       <div class="nav-label">工作空间</div>
-      <button :class="{active:route.name==='projects'}" :disabled="busy" @click="workspace.goProjects()">视频项目</button>
-      <button :class="{active:route.name==='workspace'}" :disabled="!project.assetId || busy" @click="workspace.goEditor()">素材与粗剪 <span>01</span></button>
       <button :class="{active:route.name==='live-monitoring'}" :disabled="busy" @click="workspace.go('live-monitoring')">直播监控</button>
+      <button :class="{active:route.name==='workspace'}" :disabled="!project.assetId || busy" @click="workspace.goEditor()">素材与粗剪 <span>01</span></button>
+      <button :class="{active:route.name==='projects'}" :disabled="busy" @click="workspace.goProjects()">视频项目</button>
       <button :class="{active:route.name==='jobs'}" :disabled="busy" @click="workspace.go('jobs')">后台任务 <span>{{ activeJobs }}</span></button>
       <button :class="{active:route.name==='settings'}" :disabled="busy" @click="workspace.go('settings')">云端设置 <span>↗</span></button>
       <div class="sidebar-bottom">

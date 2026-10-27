@@ -2,6 +2,8 @@
 
 本页对应 .scratch/windows-packaging/issues/01-production-desktop-session.md 和 02-work-directory-setup.md。当前交付边界是带工作目录选择 / 原位置恢复的桌面测试程序，不是安装包，也不代表全部业务已通过冻结验收。
 
+托盘、窗口生命周期与单实例的实现及人工验收步骤见 [Windows 托盘与单实例](windows-tray.md)。
+
 ## 构建
 
 在 Windows x64 构建机的项目根目录运行：

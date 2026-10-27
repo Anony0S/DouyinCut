@@ -246,6 +246,16 @@ pub fn show_error(message: &str) {
 }
 
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(all(windows, not(debug_assertions)))]
+    create_tray(app)?;
+    let activation_app = app.handle().clone();
+    app.state::<crate::instance::CurrentUserInstance>()
+        .listen_for_activation(move || {
+            let restore_app = activation_app.clone();
+            let main_thread_app = activation_app.clone();
+            let _ = main_thread_app.run_on_main_thread(move || restore_main_window(&restore_app));
+        })
+        .map_err(std::io::Error::other)?;
     if cfg!(debug_assertions) {
         tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
         return Ok(());
@@ -270,6 +280,87 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     config.url = tauri::WebviewUrl::App("setup.html".into());
     tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
     Ok(())
+}
+
+#[cfg(all(windows, not(debug_assertions)))]
+static TRAY_CLOSE_NOTICE_SHOWN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(all(windows, not(debug_assertions)))]
+pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if !matches!(window.label(), "main" | "workbench") {
+        return;
+    }
+    let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+        return;
+    };
+    api.prevent_close();
+    let _ = window.hide();
+    if !TRAY_CLOSE_NOTICE_SHOWN.swap(true, Ordering::SeqCst) {
+        show_tray_notice();
+    }
+}
+
+#[cfg(any(not(windows), debug_assertions))]
+pub fn handle_window_event(_: &tauri::Window, _: &tauri::WindowEvent) {}
+
+#[cfg(all(windows, not(debug_assertions)))]
+fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::{
+        menu::{Menu, MenuItem, PredefinedMenuItem},
+        tray::TrayIconBuilder,
+    };
+
+    let open = MenuItem::with_id(app, "open", "打开 DouyinCut", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let exit = MenuItem::with_id(app, "exit", "退出 DouyinCut", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &separator, &exit])?;
+    let icon = tauri::image::Image::from_app_icon_resource(32)?;
+
+    let _tray = TrayIconBuilder::with_id("douyincut-tray")
+        .icon(icon)
+        .tooltip("DouyinCut 正在后台运行")
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => restore_main_window(app),
+            "exit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+    Ok(())
+}
+
+fn restore_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app
+        .get_webview_window("workbench")
+        .or_else(|| app.get_webview_window("main"))
+    {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(all(windows, not(debug_assertions)))]
+fn show_tray_notice() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MB_TOPMOST,
+    };
+    let message: Vec<u16> = "关闭窗口只会将 DouyinCut 收起到系统托盘；已启动的后台工作会继续运行。单击或右键托盘图标，在菜单中选择“打开 DouyinCut”或“退出 DouyinCut”。图标也可能位于任务栏的隐藏图标列表中。尚未选择工作数据目录时，后台服务不会启动。"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let title: Vec<u16> = "DouyinCut 正在后台运行"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST,
+        );
+    }
 }
 
 pub fn open_workbench(app: &tauri::AppHandle, executable: &Path, work: &Path,

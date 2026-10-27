@@ -28,6 +28,7 @@ impl SessionHost {
     pub fn start(
         executable: &Path,
         work: &Path,
+        workspace_config: Option<&Path>,
         on_failure: impl Fn(&str) + Send + 'static,
     ) -> Result<(Self, SessionInfo), String> {
         if !executable.is_file() {
@@ -39,12 +40,14 @@ impl SessionHost {
                 work.display()
             ));
         }
-        let logs = work.join("logs");
+        // Diagnostics stay outside the data root until Python preflight passes.
+        let logs = workspace_config.and_then(Path::parent).unwrap_or(work).join("logs");
         std::fs::create_dir_all(&logs).map_err(|e| format!("无法准备诊断日志：{e}"))?;
+        let log_path = logs.join("desktop-runtime.log");
         let log = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(logs.join("desktop-runtime.log"))
+            .open(&log_path)
             .map_err(|e| format!("无法写入诊断日志：{e}"))?;
         let mut command = Command::new(executable);
         command
@@ -54,6 +57,11 @@ impl SessionHost {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(log));
+        if let Some(config) = workspace_config {
+            command.arg("--workspace-config").arg(config);
+            let application = std::env::current_exe().map_err(|e| e.to_string())?;
+            command.arg("--application-dir").arg(application.parent().ok_or("无法定位程序目录")?);
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -86,6 +94,7 @@ impl SessionHost {
         };
         let (send, receive) = mpsc::channel();
         let stopping = Arc::clone(&host.stopping);
+        let failure_log = log_path.clone();
         thread::spawn(move || {
             let mut ready = false;
             for line in BufReader::new(stdout).lines() {
@@ -125,13 +134,13 @@ impl SessionHost {
                 }
             }
             if ready && !stopping.load(Ordering::SeqCst) {
-                on_failure("桌面运行时已意外退出，请检查工作目录中的 logs/desktop-runtime.log。");
+                on_failure(&format!("桌面运行时已意外退出，请检查诊断日志：{}。", failure_log.display()));
             }
         });
         match receive.recv_timeout(Duration::from_secs(45)) {
             Ok(Ok(info)) => Ok((host, info)),
             Ok(Err(error)) => Err(error),
-            Err(_) => Err("桌面会话未能就绪，请检查工作目录中的 logs/desktop-runtime.log。".into()),
+            Err(_) => Err(format!("桌面会话未能就绪，请检查诊断日志：{}。", log_path.display())),
         }
     }
 
@@ -172,11 +181,11 @@ impl Drop for SessionHost {
 }
 
 #[cfg(windows)]
-struct ProcessJob(isize);
+pub(crate) struct ProcessJob(isize);
 
 #[cfg(windows)]
 impl ProcessJob {
-    fn attach(child: &Child) -> Result<Self, String> {
+    pub(crate) fn attach(child: &Child) -> Result<Self, String> {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::{Foundation::CloseHandle, System::JobObjects::*};
         unsafe {
@@ -242,23 +251,35 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 || args[0] != "--work-dir" {
+    let config = if args.is_empty() {
+        app.path().app_config_dir()?.join("workspace.json")
+    } else if args.len() == 2 && args[0] == "--workspace-config" {
+        std::path::PathBuf::from(&args[1])
+    } else {
         return Err(std::io::Error::other(
-            "最小桌面测试程序需要 --work-dir <已存在的隔离工作目录>。首次目录选择由后续工单提供。",
-        )
-        .into());
-    }
+            "不支持这些启动参数。隔离验证可使用 --workspace-config <定位配置绝对路径>。",
+        ).into());
+    };
+    if !config.is_absolute() { return Err(std::io::Error::other("定位配置必须为绝对路径").into()); }
     let executable = app
         .path()
         .resource_dir()?
         .join("runtime/DouyinCutRuntime.exe");
-    let handle = app.handle().clone();
-    let (host, info) = SessionHost::start(&executable, Path::new(&args[1]), move |message| {
+    app.manage(crate::workspace::WorkDirectoryHost::new(executable, config));
+    let mut config = app.config().app.windows[0].clone();
+    config.url = tauri::WebviewUrl::App("setup.html".into());
+    tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
+    Ok(())
+}
+
+pub fn open_workbench(app: &tauri::AppHandle, executable: &Path, work: &Path,
+                      workspace_config: Option<&Path>) -> Result<(), String> {
+    let handle = app.clone();
+    let (host, info) = SessionHost::start(executable, work, workspace_config, move |message| {
         show_error(message);
         handle.exit(1);
-    })
-    .map_err(std::io::Error::other)?;
-    let url: tauri::Url = info.url.parse()?;
+    })?;
+    let url: tauri::Url = info.url.parse().map_err(|e| format!("无效会话地址：{e}"))?;
     if url.scheme() != "http"
         || url.host_str() != Some("127.0.0.1")
         || url.port().is_none()
@@ -267,20 +288,21 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         || url.fragment().is_some()
         || info.token.len() < 32
     {
-        return Err(std::io::Error::other("运行时返回了无效的本机会话地址。").into());
+        return Err("运行时返回了无效的本机会话地址。".into());
     }
     let origin = url.origin().ascii_serialization();
     let script = format!(
         "if (window.location.origin === {}) {{ Object.defineProperty(globalThis, '__DOUYINCUT_SESSION_TOKEN__', {{ value: {}, configurable: true }}); }}",
-        serde_json::to_string(&origin)?, serde_json::to_string(&info.token)?
+        serde_json::to_string(&origin).map_err(|e| e.to_string())?, serde_json::to_string(&info.token).map_err(|e| e.to_string())?
     );
     let mut config = app.config().app.windows[0].clone();
     config.url = tauri::WebviewUrl::External(url);
-    app.manage(host);
-    tauri::WebviewWindowBuilder::from_config(app, &config)?
+    config.label = "workbench".into();
+    tauri::WebviewWindowBuilder::from_config(app, &config).map_err(|e| e.to_string())?
         .initialization_script(script)
         .on_navigation(move |url| url.origin().ascii_serialization() == origin)
-        .build()?;
+        .build().map_err(|e| e.to_string())?;
+    app.manage(host);
     Ok(())
 }
 
@@ -313,7 +335,7 @@ mod tests {
         fs::create_dir(&work).unwrap();
         let (failure_send, failure_receive) = std::sync::mpsc::channel();
         let result = (|| {
-            let (host, info) = SessionHost::start(&executable, &work, move |message| {
+            let (host, info) = SessionHost::start(&executable, &work, None, move |message| {
                 let _ = failure_send.send(message.to_owned());
             })
             .expect("Native owner must start the real frozen session");

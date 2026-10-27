@@ -13,14 +13,43 @@ from .desktop_runtime import DesktopSession
 
 
 def main() -> int:
+    # The native owner decodes private stdout and diagnostics as UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description='DouyinCut production runtime')
-    parser.add_argument('--work-dir', type=Path, required=True)
+    parser.add_argument('--work-dir', type=Path)
     parser.add_argument('--frontend-dir', type=Path)
     parser.add_argument('--host-controlled', action='store_true')
+    parser.add_argument('--workspace-config', type=Path)
+    parser.add_argument('--workspace-action', choices=('inspect', 'select'))
+    parser.add_argument('--application-dir', type=Path)
     args = parser.parse_args()
+    if args.workspace_action:
+        if args.workspace_config is None:
+            parser.error('--workspace-action requires --workspace-config')
+        if args.host_controlled and sys.stdin.readline().strip() != 'start':
+            return 1
+        from .work_directory import WorkDirectoryRegistry
+        registry = WorkDirectoryRegistry(args.workspace_config, application_dir=args.application_dir)
+        try:
+            if args.workspace_action == 'select':
+                if args.work_dir is None:
+                    parser.error('select requires --work-dir')
+                state = registry.select(args.work_dir)
+            else:
+                state = registry.inspect()
+        except (RuntimeError, OSError) as exc:
+            state = {'state': 'repair_required', 'path': str(args.work_dir) if args.work_dir else None,
+                     'message': str(exc)}
+        print(json.dumps(state, ensure_ascii=True), flush=True)
+        return 0
+    if args.work_dir is None:
+        parser.error('session startup requires --work-dir')
     resources = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[2]))
     frontend = args.frontend_dir or resources / 'frontend'
-    session = DesktopSession(Settings(args.work_dir.resolve()), frontend)
+    session = DesktopSession(Settings(args.work_dir.absolute()), frontend,
+                             workspace_config=args.workspace_config, application_dir=args.application_dir)
     shutdown = threading.Event()
 
     def read_control():

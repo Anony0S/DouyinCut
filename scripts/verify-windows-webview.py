@@ -22,6 +22,7 @@ sys.path[:0] = [str(repo / 'backend'), str(repo / 'scripts')]
 from app.core.config import Settings
 from app.core.domain import Asset
 from app.core.storage import Store
+from app.work_directory import WorkDirectoryRegistry
 from runtime_process import assert_process_exited
 
 root = repo / ('.runtime/windows-packaging/native 中文 测试 ' + str(time.time_ns()))
@@ -31,7 +32,9 @@ shutil.copy2(repo / 'desktop/src-tauri/target/release/douyincut.exe', appdir)
 shutil.copytree(repo / 'desktop/src-tauri/target/release/runtime', appdir / 'runtime', dirs_exist_ok=True)
 work = root / '工作目录'
 settings = Settings(work)
-settings.prepare()
+work.mkdir()
+config = root / '用户配置' / 'workspace.json'
+WorkDirectoryRegistry(config).select(work)
 Store(settings.database).put('asset', Asset(
     id='native-session-fixture', path=str(work / 'source.mp4'), name='Windows 桌面会话验收.mp4',
     sha256='native-session', duration_us=3_000_000, width=160, height=120, has_audio=True,
@@ -41,8 +44,12 @@ with socket.socket() as listener:
     debug_port = listener.getsockname()[1]
 env = {k: v for k, v in os.environ.items() if not k.upper().startswith(('PYTHON', 'VITE_', 'DOUYINCUT_', 'UV_', 'VIRTUAL_ENV'))}
 env['PATH'] = os.pathsep.join([str(Path(os.environ['SystemRoot']) / 'System32'), os.environ['SystemRoot']])
-env['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = f'--remote-debugging-port={debug_port}'
-process = subprocess.Popen([str(appdir / 'douyincut.exe'), '--work-dir', str(work)], env=env, cwd=root)
+env['WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS'] = (
+    f'--remote-debugging-port={debug_port} --enable-logging --log-file="{root / "browser.log"}"')
+env['WEBVIEW2_USER_DATA_FOLDER'] = str(root / 'webview-data')
+native_log = (root / 'native-host.log').open('wb')
+process = subprocess.Popen([str(appdir / 'douyincut.exe'), '--workspace-config', str(config)], env=env, cwd=root,
+                           stdout=native_log, stderr=native_log)
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 connection = None
 sequence = 0
@@ -61,24 +68,42 @@ def cdp(method, params=None):
 try:
     deadline = time.monotonic() + 50
     target = None
+    targets = []
+    last_debug_error = None
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise AssertionError(f'Native host exited {process.returncode}')
+            native_log.flush()
+            raise AssertionError(f'Native host exited {process.returncode}; diagnostics: {root / "native-host.log"}')
         try:
             with opener.open(f'http://127.0.0.1:{debug_port}/json/list', timeout=1) as response:
                 targets = json.load(response)
             target = next((t for t in targets if t.get('type') == 'page' and t.get('url', '').startswith('http://127.0.0.1:')), None)
             if target:
                 break
-        except OSError:
-            pass
+        except OSError as exc:
+            last_debug_error = str(exc)
         time.sleep(0.2)
-    assert target, 'WebView did not expose the loopback workbench'
+    if not target:
+        (root / 'debug-discovery.json').write_text(json.dumps(
+            {'targets': targets, 'last_error': last_debug_error, 'browser_log': str(root / 'browser.log')},
+            ensure_ascii=False, indent=2), encoding='utf-8')
+        setup = next((t for t in targets if t.get('type') == 'page' and t.get('url', '').endswith('/setup.html')), None)
+        if setup:
+            connection = websocket.create_connection(setup['webSocketDebuggerUrl'], timeout=10, suppress_origin=True)
+            observed = cdp('Runtime.evaluate', {'expression': 'document.body?.innerText', 'returnByValue': True})
+            text = observed.get('result', {}).get('value', '')
+            (root / 'setup-error.txt').write_text(text, encoding='utf-8')
+            print('Setup page: ' + text, flush=True)
+        raise AssertionError(f'WebView did not expose the loopback workbench; evidence: {root}')
     connection = websocket.create_connection(target['webSocketDebuggerUrl'], timeout=10, suppress_origin=True)
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
-        observed = cdp('Runtime.evaluate', {'expression': 'JSON.stringify({text:document.body.innerText, url:location.href, injected:typeof globalThis.__DOUYINCUT_SESSION_TOKEN__, local:JSON.stringify(localStorage), session:JSON.stringify(sessionStorage)})', 'returnByValue': True})
-        page = json.loads(observed['result']['value'])
+        observed = cdp('Runtime.evaluate', {'expression': 'document.body && JSON.stringify({text:document.body.innerText, url:location.href, injected:typeof globalThis.__DOUYINCUT_SESSION_TOKEN__, local:JSON.stringify(localStorage), session:JSON.stringify(sessionStorage)})', 'returnByValue': True})
+        value = observed.get('result', {}).get('value')
+        if not isinstance(value, str):
+            time.sleep(0.1)
+            continue
+        page = json.loads(value)
         if 'Windows 桌面会话验收.mp4' in page['text']:
             break
         time.sleep(0.2)
@@ -132,3 +157,4 @@ finally:
         process.kill()
         process.wait(10)
     assert_process_exited(process.pid)
+    native_log.close()

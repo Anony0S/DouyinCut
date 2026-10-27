@@ -99,10 +99,13 @@ class DesktopSession:
     existing directory and never substitutes another path.
     """
 
-    def __init__(self, settings: Settings, frontend_dir: Path, *, startup_timeout: float = 30):
+    def __init__(self, settings: Settings, frontend_dir: Path, *, startup_timeout: float = 30,
+                 workspace_config: Path | None = None, application_dir: Path | None = None):
         self.settings = settings
         self.frontend_dir = Path(frontend_dir).resolve()
         self.startup_timeout = startup_timeout
+        self.workspace_config = workspace_config
+        self.application_dir = application_dir
         self._context = multiprocessing.get_context('spawn')
         self._stop = StopSignal(self._context)
         self._roles = {}
@@ -116,6 +119,9 @@ class DesktopSession:
             raise RuntimeError(f'缺少工作台资源：{self.frontend_dir / "index.html"}')
         if not self.settings.data_dir.is_dir():
             raise RuntimeError(f'工作目录不可用：{self.settings.data_dir}')
+        if self.workspace_config is not None:
+            from .work_directory import WorkDirectoryRegistry
+            WorkDirectoryRegistry(self.workspace_config, application_dir=self.application_dir).require(self.settings.data_dir)
         self.settings.prepare()
         # Initialize the current schema before concurrent service construction.
         from .core.storage import Store

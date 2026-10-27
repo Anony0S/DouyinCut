@@ -24,6 +24,7 @@ def main():
     from app.core.config import Settings
     from app.core.domain import Asset
     from app.core.storage import Store
+    from app.work_directory import WorkDirectoryRegistry
 
     with tempfile.TemporaryDirectory(prefix='DouyinCut 中文 空格 ') as temporary:
         root = Path(temporary)
@@ -32,7 +33,9 @@ def main():
         executable = copied / args.runtime.name
         work = root / '工作 data'
         settings = Settings(work)
-        settings.prepare()
+        work.mkdir()
+        config = root / 'user config' / 'workspace.json'
+        WorkDirectoryRegistry(config).select(work)
         Store(settings.database).put('asset', Asset(
             id='frozen-fixture', path=str(work / 'source.mp4'), name='冻结会话项目.mp4',
             sha256='fixture', duration_us=1_000_000, width=160, height=120, has_audio=True,
@@ -43,7 +46,8 @@ def main():
         env['PATH'] = os.pathsep.join([str(Path(system_root) / 'System32'), system_root])
         messages = queue.Queue()
         with (root / 'stderr.log').open('w+', encoding='utf-8') as errors:
-            process = subprocess.Popen([str(executable), '--work-dir', str(work), '--host-controlled'], cwd=root, env=env,
+            process = subprocess.Popen([str(executable), '--work-dir', str(work), '--host-controlled',
+                '--workspace-config', str(config)], cwd=root, env=env,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True, encoding='utf-8')
 
             def read_messages():
@@ -97,6 +101,18 @@ def main():
                     'roles_exited': list(stopped['roles'])}, ensure_ascii=False))
             finally:
                 stop_owned_process(process)
+        settings.database.unlink()
+        inspection = subprocess.run([str(executable), '--workspace-action', 'inspect',
+            '--workspace-config', str(config)], cwd=root, env=env,
+            capture_output=True, text=True, encoding='utf-8', timeout=20, check=True)
+        assert json.loads(inspection.stdout)['state'] == 'repair_required'
+        rejected = subprocess.run([str(executable), '--work-dir', str(work), '--workspace-config', str(config)],
+            cwd=root, env=env, input='', capture_output=True, text=True, encoding='utf-8', timeout=20)
+        assert rejected.returncode == 1
+        failure = json.loads(rejected.stdout)
+        assert failure['event'] == 'error' and failure['roles'] == {}, failure
+        assert not settings.database.exists(), 'Missing data must never become a replacement empty database'
+        print('Frozen workspace preflight rejected missing database without starting background roles.')
 
 
 if __name__ == '__main__':

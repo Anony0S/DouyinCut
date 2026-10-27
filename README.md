@@ -118,7 +118,7 @@ Pop-Location
 
 合成离线媒体演示可运行 `uv run python scripts/offline_demo.py`，产物位置记录在 `.runtime/offline-demo/result.json`；该配方演示不代表云端识别效果。
 
-Tauri 开发模式仍先启动统一启动器，再在 desktop 执行 `pnpm run tauri dev`。已交付生产桌面会话与 PyInstaller / Tauri 最小测试程序，实际 WebView 项目列表和空闲生命周期通过验证；构建 / 验证入口见 [Windows 生产桌面会话](docs/windows-session.md)。完整业务及 Windows 生产安装包尚未完成。
+Tauri 开发模式仍先启动统一启动器，再在 desktop 执行 `pnpm run tauri dev`。已交付生产桌面会话与 PyInstaller / Tauri 最小测试程序，实际 WebView 项目列表和空闲生命周期通过验证；生产入口新增首次选择工作目录与原位置失效恢复，启动前验证数据身份和数据库，不创建替代空库。构建 / 验证入口及固定路径约束见 [Windows 生产桌面会话](docs/windows-session.md)。完整业务及 Windows 生产安装包尚未完成。
 
 ## 开发约定与本次数据清理
 

@@ -202,6 +202,7 @@ def main():
         # Controlled cloud-success fixture at the durable filesystem boundary.
         # Invalid hosts and dummy process credentials prevent accidental paid calls.
         store = Store(tools.database)
+        store.start_session()
         config = CloudConfig(base_url='https://offline-fixture.invalid/v1', asr_base_url='https://offline-fixture.invalid')
         endpoint = hashlib.sha256(config.asr_url.encode()).hexdigest()
         response = {'output': {'sentence': {'begin_time': 0, 'end_time': 6000,

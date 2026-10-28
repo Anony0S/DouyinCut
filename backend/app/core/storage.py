@@ -153,7 +153,9 @@ class Store:
     def complete_cloud_operation(self, operation_id: str, cache_key: str | None = None, cache_body=None):
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT status FROM cloud_operations WHERE id=?", (operation_id,)).fetchone()
+            row = conn.execute("""SELECT op.status FROM cloud_operations op JOIN jobs ON jobs.id=op.job_id
+                WHERE op.id=? AND jobs.attempts=op.attempt""", (operation_id,)).fetchone()
+            # A reply for an attempt that has since been reclaimed must not replace the newer execution's state.
             if row is None or row["status"] != "active":
                 return False
             if cache_key and cache_body is not None:

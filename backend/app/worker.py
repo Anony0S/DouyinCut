@@ -130,7 +130,9 @@ class Worker:
             selection_key = f"roughcut-timestamps-v1:{job['id']}"
             selected = store.cached(selection_key)
             if selected is None:
-                selected = select_intervals(transcripts, request, config, asset.duration_us).model_dump()
+                operation = (store, job["id"], ctx.checkpoint) if self.interruptible_cloud else None
+                selected = select_intervals(transcripts, request, config, asset.duration_us,
+                                            operation=operation).model_dump()
                 store.cache(selection_key, selected)
             ctx.checkpoint()
             product = Product(name=request.product_name, confirmed=True)
@@ -196,7 +198,10 @@ class Worker:
                     from .live_monitoring import LiveStore
                     LiveStore(self.store).retry_product_clip_import(job["payload"]["live_product_clip_id"])
         except Exception as exc:
-            if self.store.is_shutting_down() and self.store.job(job["id"])["state"] == "pause_requested":
+            from .ai.providers import ProviderError
+            # A cloud reply that already failed is a real failure, even if exit was confirmed meanwhile.
+            if (not isinstance(exc, ProviderError) and self.store.is_shutting_down()
+                    and self.store.job(job["id"])["state"] == "pause_requested"):
                 self.store.finish(job["id"], self.owner, "paused")
                 return True
             # Expected errors are sanitized by providers and media handlers.

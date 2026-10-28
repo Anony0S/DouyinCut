@@ -96,7 +96,7 @@ class ExitInterrupted(RuntimeError):
 
 def _network_child(pipe, kind, args, kwargs):
     try:
-        if kind == "asr":
+        if kind in {"asr", "planner"}:
             result = cloud_json(*args, **kwargs)
         else:
             result = _upload_audio_request(*args, **kwargs)
@@ -131,14 +131,15 @@ def _interruptible_network_call(kind, args, *, store, operation_id, cache_key=No
                 message = receive.recv()
                 process.join(2)
                 if message[0] == "ok":
+                    body = None
                     if kind == "asr":
                         body = {"status": "response_received", "response": cached_audio_response(message[1], args[3])}
-                    else:
+                    elif kind == "upload":
                         config, object_id = args[1], args[2]
                         body = {"status": "succeeded", "object_id": object_id,
                                 "endpoint": config.oss_endpoint, "bucket": config.oss_bucket}
                     if not store.complete_cloud_operation(operation_id, cache_key, body):
-                        raise ExitInterrupted("退出时 ASR 响应尚未持久化")
+                        raise ExitInterrupted("云端响应未被采用：会话正在退出，或任务已由新的执行接管")
                     return message[1]
                 store.fail_cloud_operation(operation_id)
                 if message[0] == "http":

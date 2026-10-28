@@ -60,6 +60,8 @@ uv run python scripts/prepare-windows-cloud-exit-check.py
 
 脚本生成 `.runtime/windows-packaging/cloud-exit-check/<时间戳>/`，内含用 Windows 中文语音合成的 7 分钟口播测试视频（`--minutes` 可调，ASR 每 2 分钟一段）、启动器、`README.txt` 和只读检查入口 `inspect.cmd`（调用 `scripts/inspect-windows-cloud-exit-check.py` 打印分析任务、云端操作记录与分段缓存）。该夹具调用真实 OSS / ASR 并产生少量费用；云端密钥存于 Windows 凭据管理器，与正式应用共用。上传中退出、成功响应竞态与普通超时无法稳定手动触发，由后端受控阻塞测试覆盖。
 
+工单 07 的文本选片退出重发复用同一夹具：等 `inspect.cmd` 显示全部 ASR 分段为 succeeded 且出现 `planner` 操作后从托盘退出；重启后应只新增一次 `planner` 操作、不新增 asr 操作，完成后在项目中核对方案、片段理由和拼接预览。后端已用本地阻塞文本模型服务覆盖退出不等待、采纳后退出竞态、退出窗口内的普通失败及旧执行者迟到响应（`backend/tests/test_planner_recovery.py`）。
+
 记录 Windows 版本、各步骤结果和进程数量，再将工单状态从 `ready-for-human` 更新为实际验收结果。
 
 用户于 2026-10-28 确认退出命令问题已修复，并在 Windows 隔离程序中手动验证“退出并暂停”运行正常，工单 05 据此标记为 `resolved`。用户未提供 Windows 版本或进程快照；保存失败分支未单独触发，不能视为单独验收通过。

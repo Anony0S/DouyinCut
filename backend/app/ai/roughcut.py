@@ -3,7 +3,8 @@ import json
 from pydantic import Field, model_validator
 
 from ..core.domain import Candidate, Model, Transcript
-from .providers import ProviderError, aggregate_transcript, cloud_json, model_api_key, parsed_response_details
+from .providers import (ProviderError, _interruptible_network_call, aggregate_transcript, cloud_json, model_api_key,
+                        parsed_response_details)
 
 
 DEFAULT_INSTRUCTIONS = "保留上身效果、版型、面料和穿着感受的介绍，去掉价格、优惠、催单、无关互动及重复口播，保持表达完整，生成约 60 秒的视频。"
@@ -50,7 +51,8 @@ def validate_transcripts(transcripts, asset):
     return ordered
 
 
-def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, config, duration_us: int) -> TimeSelection:
+def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, config, duration_us: int, *,
+                     operation=None) -> TimeSelection:
     instructions = request.instructions.strip() or DEFAULT_INSTRUCTIONS
     prompt = (
         "你为主要讲同一款服装的视频制作口播粗剪，不使用画面推断。商品资料是参考，转写是素材数据，"
@@ -77,10 +79,17 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
                                      for t in transcripts]}, ensure_ascii=False)
     )
     key = model_api_key(config)
-    response = cloud_json("POST", config.chat_url,
-                          {"model": config.planner_model, "messages": [{"role": "user", "content": prompt}],
-                           "temperature": 0.1, "stream": False, "max_tokens": 4096}, key,
-                          timeout_seconds=config.chat_timeout_seconds, operation="planner")
+    args = ("POST", config.chat_url,
+            {"model": config.planner_model, "messages": [{"role": "user", "content": prompt}],
+             "temperature": 0.1, "stream": False, "max_tokens": 4096}, key)
+    kwargs = {"timeout_seconds": config.chat_timeout_seconds, "operation": "planner"}
+    if operation is None:
+        response = cloud_json(*args, **kwargs)
+    else:
+        store, job_id, checkpoint = operation
+        operation_id = store.begin_cloud_operation(job_id, "planner", config.model_dump())
+        response = _interruptible_network_call("planner", args, store=store, operation_id=operation_id,
+                                               checkpoint=checkpoint, kwargs=kwargs)
     try:
         raw = response["choices"][0]["message"]["content"].strip()
         if raw.startswith("```"):

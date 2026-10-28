@@ -12,6 +12,8 @@ export default defineConfig(({ mode }) => ({
   } } }), tailwindcss(), vueDevTools()],
   server: {
     port: 5173, strictPort: true,
+    // Cargo locks target/*.exe while building; watching it crashes Vite with EBUSY.
+    watch: { ignored: ['**/src-tauri/**'] },
     proxy: { '/api': { target: `http://127.0.0.1:${process.env.DOUYINCUT_PORT || '8765'}` } },
   }
 }))

@@ -5,6 +5,7 @@
   "identifier": "com.douyincut.desktop",
   "build": {
     "devUrl": "http://127.0.0.1:5173",
+    "beforeDevCommand": "uv run --project .. python ../scripts/dev.py",
     "frontendDist": "../dist",
     "beforeBuildCommand": "pnpm run build"
   },

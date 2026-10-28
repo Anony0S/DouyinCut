@@ -52,7 +52,17 @@ uv run python scripts/prepare-windows-exit-check.py
 
 脚本会在 `.runtime/windows-packaging/exit-check/<时间戳>/` 生成启动器、操作说明和独立测试工作区。它使用随包 FFmpeg 生成合成视频，并预置一个项目、一个已审核方案和两个合法本地导出任务；不访问真实工作目录或云端。双击生成目录中的 `launch-exit-check.cmd`，按同目录 `README.txt` 依次验证草稿返回 / 放弃、活动任务退出取消与继续、确认退出收尾及子进程清理、重启后保持暂停和手动恢复。若原生退出命令失败，确认框应重新出现，提示应包含可读错误详情，可再次尝试；相同错误再次发生也应再次显示。若提示仍为空或第二次点击无反应，记录提示文字并检查对应隔离工作区的 `config/logs/desktop-runtime.log` 与任务状态。测试时如任务已完成，按说明恢复第二项后重测检查点。保存失败路径不由预置夹具稳定触发，仍需在隔离项目中另行验证，确保保存失败时退出提示不会被绕过。不要选择真实数据或填写云端凭据。
 
+工单 06 的 ASR / 上传退出重发使用另一隔离夹具：
+
+~~~powershell
+uv run python scripts/prepare-windows-cloud-exit-check.py
+~~~
+
+脚本生成 `.runtime/windows-packaging/cloud-exit-check/<时间戳>/`，内含用 Windows 中文语音合成的 7 分钟口播测试视频（`--minutes` 可调，ASR 每 2 分钟一段）、启动器、`README.txt` 和只读检查入口 `inspect.cmd`（调用 `scripts/inspect-windows-cloud-exit-check.py` 打印分析任务、云端操作记录与分段缓存）。该夹具调用真实 OSS / ASR 并产生少量费用；云端密钥存于 Windows 凭据管理器，与正式应用共用。上传中退出、成功响应竞态与普通超时无法稳定手动触发，由后端受控阻塞测试覆盖。
+
 记录 Windows 版本、各步骤结果和进程数量，再将工单状态从 `ready-for-human` 更新为实际验收结果。
+
+用户于 2026-10-28 确认退出命令问题已修复，并在 Windows 隔离程序中手动验证“退出并暂停”运行正常，工单 05 据此标记为 `resolved`。用户未提供 Windows 版本或进程快照；保存失败分支未单独触发，不能视为单独验收通过。
 
 ## 人工验收记录
 

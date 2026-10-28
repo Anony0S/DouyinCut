@@ -76,7 +76,7 @@ def _run_role(role, settings, frontend, token, listener, stop, report):
         else:
             if role == 'worker':
                 from .worker import Worker
-                worker = Worker(settings)
+                worker = Worker(settings, interruptible_cloud=True)
             else:
                 from .live_monitoring.service import LiveMonitorWorker
                 worker = LiveMonitorWorker(settings)

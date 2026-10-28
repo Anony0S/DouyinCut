@@ -30,5 +30,7 @@ assert.match(appSource, /exitPrompt\.value='activity'\s+session\.report\(cause\)
   'a failed native exit must restore the activity prompt so the user can retry')
 assert.match(appSource, /watch\(errorRevision,\(\)=>\{if\(error\.value\) pushToast\('error',error\.value\)\}\)/,
   'identical consecutive errors must still be announced')
+assert.match(appSource, /不等于撤销已到达云端的请求.*直接重发.*产生费用/,
+  'cloud exit confirmation must explain that interrupted requests may be sent again and charged')
 
 console.log('Exit guard checks passed: project and settings drafts are visible to the exit coordinator.')

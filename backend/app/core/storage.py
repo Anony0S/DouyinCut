@@ -42,6 +42,11 @@ class Store:
                 CREATE TABLE IF NOT EXISTS runtime_state (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS cloud_operations (
+                    id TEXT PRIMARY KEY, job_id TEXT NOT NULL, stage TEXT NOT NULL,
+                    attempt INTEGER NOT NULL, config_fingerprint TEXT NOT NULL, cache_key TEXT, status TEXT NOT NULL,
+                    reason TEXT, started REAL NOT NULL, updated REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS attempts (
                     job_id TEXT NOT NULL, attempt INTEGER NOT NULL, owner TEXT NOT NULL,
                     started REAL NOT NULL, ended REAL, state TEXT, error TEXT,
@@ -125,6 +130,73 @@ class Store:
         with self.connection() as conn:
             conn.execute("INSERT OR REPLACE INTO cache VALUES (?, ?)",
                          (key, json.dumps(body, ensure_ascii=False)))
+
+    def begin_cloud_operation(self, job_id: str, stage: str, config: dict, cache_key: str | None = None):
+        now = time.time()
+        operation_id = new_id("cloud")
+        fingerprint = hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,)).fetchone():
+                raise SessionStopping("桌面会话正在退出，不再提交云端请求")
+            job = conn.execute("SELECT attempts,state FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if job is None or job["state"] != "running":
+                raise RuntimeError("分析任务已停止，拒绝提交云端请求")
+            conn.execute("INSERT INTO cloud_operations VALUES(?,?,?,?,?,?,'active',NULL,?,?)",
+                         (operation_id, job_id, stage, job["attempts"], fingerprint, cache_key, now, now))
+            if cache_key:
+                conn.execute("INSERT OR REPLACE INTO cache VALUES(?,?)",
+                             (cache_key, json.dumps({"status": "submitting", "exit_operation_id": operation_id}))
+            )
+        return operation_id
+
+    def complete_cloud_operation(self, operation_id: str, cache_key: str | None = None, cache_body=None):
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT status FROM cloud_operations WHERE id=?", (operation_id,)).fetchone()
+            if row is None or row["status"] != "active":
+                return False
+            if cache_key and cache_body is not None:
+                encoded = json.dumps(cache_body, ensure_ascii=False)
+                conn.execute("UPDATE cache SET body=? WHERE json_extract(body,'$.exit_operation_id')=?",
+                             (encoded, operation_id))
+                conn.execute("INSERT OR REPLACE INTO cache VALUES(?,?)",
+                             (cache_key, encoded))
+            conn.execute("UPDATE cloud_operations SET status='succeeded',updated=? WHERE id=?",
+                         (time.time(), operation_id))
+        return True
+
+    def fail_cloud_operation(self, operation_id: str):
+        with self.connection() as conn:
+            conn.execute("UPDATE cloud_operations SET status='failed',updated=? WHERE id=? AND status='active'",
+                         (time.time(), operation_id))
+
+    def interruptible_operation(self, operation_id: str):
+        with self.connection() as conn:
+            row = conn.execute("SELECT status FROM cloud_operations WHERE id=?", (operation_id,)).fetchone()
+        return bool(row and row["status"] == "exit_interrupted")
+
+    def recover_exit_interrupted_operations(self):
+        now = time.time()
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute("SELECT id,job_id,cache_key FROM cloud_operations "
+                                "WHERE status='exit_interrupted'").fetchall()
+            job_ids = {row["job_id"] for row in rows}
+            for row in rows:
+                conn.execute("DELETE FROM cache WHERE json_extract(body,'$.exit_operation_id')=?",
+                             (row["id"],))
+                conn.execute("UPDATE cloud_operations SET status='consumed',updated=? WHERE id=?",
+                             (now, row["id"]))
+            for job_id in job_ids:
+                job = conn.execute("SELECT state,attempts FROM jobs WHERE id=?", (job_id,)).fetchone()
+                if job is None or job["state"] in {"succeeded", "cancelled"}:
+                    continue
+                conn.execute("UPDATE attempts SET ended=?,state='interrupted',error='显式退出中断云端请求' "
+                             "WHERE job_id=? AND attempt=? AND ended IS NULL", (now, job_id, job["attempts"]))
+                conn.execute("UPDATE jobs SET state='queued',owner=NULL,lease=NULL,error=NULL,error_detail=NULL,updated=? "
+                             "WHERE id=?", (now, job_id))
+        return len(job_ids)
 
     def commit_result(self, cache_key: str, result: dict, objects: list[tuple[str, dict]], followup=None,
                       job_id: str | None = None, owner: str | None = None,
@@ -256,13 +328,20 @@ class Store:
             conn.execute("BEGIN IMMEDIATE")
             conn.execute("INSERT OR REPLACE INTO runtime_state(key,value) VALUES(?, 'stopping')",
                          (self._SHUTDOWN_KEY,))
+            conn.execute("UPDATE cloud_operations SET status='exit_interrupted',reason='explicit_exit',updated=? "
+                         "WHERE status='active'", (now,))
             conn.execute(f"UPDATE jobs SET state='paused',owner=NULL,lease=NULL,updated=? "
                          f"WHERE state='queued' AND kind IN ({kinds})", (now, *local_kinds))
             conn.execute(f"UPDATE jobs SET state='pause_requested',updated=? "
-                         f"WHERE state='running' AND kind IN ({kinds})", (now, *local_kinds))
+                         f"WHERE state='running' AND kind IN ({kinds}, 'analyze')", (now, *local_kinds))
 
     def start_session(self):
+        self.recover_exit_interrupted_operations()
         with self.connection() as conn:
+            conn.execute("""UPDATE jobs SET state='queued',owner=NULL,lease=NULL,updated=?
+                WHERE kind='analyze' AND state IN ('queued','paused','pause_requested','running')
+                AND EXISTS (SELECT 1 FROM cloud_operations op WHERE op.job_id=jobs.id
+                    AND op.attempt=jobs.attempts AND op.status='succeeded')""", (time.time(),))
             conn.execute("DELETE FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,))
 
     def is_shutting_down(self):

@@ -14,7 +14,7 @@ const route=useRoute(),router=useRouter(),session=useSessionStore(),project=useP
 const {busy,connected,activeJobs,error,errorRevision,message}=storeToRefs(session)
 const {savedDraft,planDirty}=storeToRefs(project)
 const exitPrompt=ref<'drafts'|'activity'|null>(null), exiting=ref(false)
-const exitRequestActive=ref(false), activeLocalJobs=ref(0)
+const exitRequestActive=ref(false), activeLocalJobs=ref(0), activeCloudJobs=ref(0)
 const hasUnsavedChanges=computed(()=>busy.value || planDirty.value ||
   (Boolean(project.assetId) && savedDraft.value!==JSON.stringify(project.currentDraft())) ||
   hasRegisteredUnsavedChanges())
@@ -54,9 +54,11 @@ async function inspectExitRequest() {
 }
 async function confirmActivityExit() {
   const jobs=await jobsApi.list()
+  const activeStates=['queued','running','pause_requested','cancel_requested']
   activeLocalJobs.value=jobs.filter(job=>['import','preview','export','jianying','live_product_clips'].includes(job.kind) &&
-    ['queued','running','pause_requested','cancel_requested'].includes(job.state)).length
-  if(activeLocalJobs.value) {exitPrompt.value='activity';return}
+    activeStates.includes(job.state)).length
+  activeCloudJobs.value=jobs.filter(job=>['analyze'].includes(job.kind) && activeStates.includes(job.state)).length
+  if(activeLocalJobs.value || activeCloudJobs.value) {exitPrompt.value='activity';return}
   await beginExit()
 }
 async function beginExit() {
@@ -128,9 +130,13 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
     </div>
     <div v-if="exitPrompt" class="modal modal-open exit-modal" role="presentation">
       <section class="modal-box" role="dialog" aria-modal="true" aria-labelledby="exit-title" aria-describedby="exit-description">
-        <h2 id="exit-title">{{ exitPrompt==='drafts'?'有未保存的修改':'退出并暂停本地任务？' }}</h2>
+        <h2 id="exit-title">{{ exitPrompt==='drafts'?'有未保存的修改':activeCloudJobs?'退出并暂停当前任务？':'退出并暂停本地任务？' }}</h2>
         <p id="exit-description" v-if="exitPrompt==='drafts'">当前项目、片段方案或设置中有未保存内容。可以返回保存，或明确放弃这些修改后退出。</p>
-        <p id="exit-description" v-else>当前有 {{ activeLocalJobs }} 项本地导入、预览或导出工作。退出后会在安全检查点暂停，重新打开应用后可手动恢复。</p>
+        <template v-else>
+          <p v-if="activeLocalJobs">当前有 {{ activeLocalJobs }} 项本地导入、预览或导出工作。退出后会在安全检查点暂停，重新打开应用后可手动恢复。</p>
+          <p v-if="activeCloudJobs" id="exit-description">当前有 {{ activeCloudJobs }} 项后台分析任务。退出会中断本机等待，但不等于撤销已到达云端的请求；重新打开后会直接重发未完成阶段，可能重复执行并产生费用。</p>
+          <p v-else id="exit-description">退出后本地任务会在安全检查点暂停，重新打开应用后可手动恢复。</p>
+        </template>
         <div class="modal-action">
           <button v-if="exitPrompt==='drafts'" class="btn btn-primary" autofocus @click="returnToSave">返回保存</button>
           <button v-else class="btn" @click="cancelExit">继续使用</button>
@@ -144,7 +150,7 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
       <section class="modal-box exit-progress">
         <span class="loading loading-spinner loading-md" aria-hidden="true"></span>
         <h2>正在安全退出</h2>
-        <p>正在暂停本地任务并关闭应用自己的后台进程…</p>
+        <p>正在暂停本地任务并关闭应用自己的后台进程。</p>
       </section>
     </div>
   </div>

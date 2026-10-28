@@ -42,8 +42,9 @@ class Context:
 
 
 class Worker:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, interruptible_cloud: bool = False):
         self.settings = settings
+        self.interruptible_cloud = interruptible_cloud
         settings.prepare()
         self.store = Store(settings.database)
         self.owner = new_id("worker")
@@ -118,7 +119,8 @@ class Worker:
                                                      if field in payload})
             transcripts = validate_transcripts(transcribe(asset, config, settings, store, workdir, ctx.checkpoint,
                                                           lambda p: ctx.progress(p * 0.7), require_sentence_timing=True,
-                                                          refresh_scope=job["id"] if request.refresh_asr else None), asset)
+                                                          refresh_scope=job["id"] if request.refresh_asr else None,
+                                                          job_id=job["id"] if self.interruptible_cloud else None), asset)
             # Publish the complete source dialogue before calling the planner, even if it later fails.
             store.cache(f"roughcut-transcript:{job['id']}", {"job_id": job["id"], "source_asset_id": asset.id,
                         "duration_us": asset.duration_us, "ready": True,

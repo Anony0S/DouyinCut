@@ -241,6 +241,40 @@ class StoreTests(unittest.TestCase):
         restarted.control(waiting["id"], "resume")
         self.assertEqual(restarted.job(waiting["id"])["state"], "queued")
 
+    def test_only_explicitly_interrupted_cloud_operations_are_requeued_once(self):
+        from app.ai.providers import CloudConfig
+        config = CloudConfig().model_dump()
+        task = self.store.enqueue("analyze", {"asset_id": "a", "config": config})
+        self.store.claim("worker")
+        cache_key = "qwen-audio-v1:a:endpoint:model:0:120000000"
+        operation_id = self.store.begin_cloud_operation(task["id"], "asr", config, cache_key)
+
+        self.store.pause_for_shutdown()
+        self.assertTrue(self.store.interruptible_operation(operation_id))
+
+        restarted = Store(self.store.path)
+        restarted.start_session()
+        self.assertEqual(restarted.job(task["id"])["state"], "queued")
+        self.assertIsNone(restarted.cached(cache_key))
+        self.assertEqual(restarted.recover_exit_interrupted_operations(), 0)
+        self.assertEqual(restarted.job(task["id"])["state"], "queued")
+
+    def test_saved_cloud_response_wins_race_with_shutdown(self):
+        from app.ai.providers import CloudConfig
+        config = CloudConfig().model_dump()
+        task = self.store.enqueue("analyze", {"asset_id": "a", "config": config})
+        self.store.claim("worker")
+        cache_key = "qwen-audio-v1:a:endpoint:model:0:120000000"
+        operation_id = self.store.begin_cloud_operation(task["id"], "asr", config, cache_key)
+        cached = {"status": "response_received", "response": {"output": {"text": "saved"}}}
+        self.assertTrue(self.store.complete_cloud_operation(operation_id, cache_key, cached))
+
+        self.store.pause_for_shutdown()
+        restarted = Store(self.store.path)
+        restarted.start_session()
+        self.assertEqual(restarted.cached(cache_key), cached)
+        self.assertEqual(restarted.job(task["id"])["state"], "queued")
+
     def test_revision_compare_and_swap_preserves_history(self):
         self.store.put("plan",{"id":"p","revision":1,"value":"original"})
         new=self.store.next_revision("plan","p",{"id":"p","value":"edited"},expected_revision=1)

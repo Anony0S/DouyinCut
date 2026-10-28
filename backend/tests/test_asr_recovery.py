@@ -2,9 +2,13 @@ import hashlib
 import io
 import json
 import tempfile
+import threading
+import time
 import unittest
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,9 +16,28 @@ from app.core.config import Settings
 from app.core.domain import Asset, Candidate, Product, Transcript
 from app.media.editing import build_plan
 from app.ai.providers import (ASR_MIN_CHUNK_US, CloudConfig, ProviderError, ProviderHTTPError,
-                           audio_segments, audio_text, cloud_json, qwen_audio_payload, transcribe)
+                           _interruptible_network_call, audio_segments, audio_text, cloud_json,
+                           qwen_audio_payload, transcribe)
 from app.core.storage import Store
 from app.worker import Paused, Worker
+
+
+class BlockingHandler(BaseHTTPRequestHandler):
+    started = None
+    release = None
+
+    def do_POST(self):
+        self.started.set()
+        self.release.wait(10)
+        try:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"output":{"text":"late"}}')
+        except OSError:
+            pass
+
+    def log_message(self, *_args):
+        pass
 
 
 def response(text):
@@ -157,6 +180,45 @@ class QwenAudioTests(unittest.TestCase):
         self.assertEqual(self.store.cached(self.cache_key())["status"], "succeeded")
         self.assertEqual(len(self.transcribe()), 2)
         self.assertEqual(self.network.call_count, 2)
+
+    def test_explicit_exit_terminates_blocked_asr_request_and_requeues_once(self):
+        BlockingHandler.started = threading.Event()
+        BlockingHandler.release = threading.Event()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), BlockingHandler)
+        server.daemon_threads = True
+        serving = threading.Thread(target=server.serve_forever, daemon=True)
+        serving.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(lambda: BlockingHandler.release.set())
+        self.addCleanup(server.shutdown)
+
+        task = self.store.enqueue("analyze", {"asset_id": self.asset.id, "config": self.config.model_dump()})
+        self.store.claim("worker")
+        cache_key = self.cache_key()
+        operation_id = self.store.begin_cloud_operation(task["id"], "asr", self.config.model_dump(), cache_key)
+
+        def checkpoint():
+            if self.store.is_shutting_down():
+                raise Paused()
+
+        started = time.monotonic()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            request = executor.submit(_interruptible_network_call, "asr",
+                                      ("POST", f"http://127.0.0.1:{server.server_port}/blocked", {}, "mock-key"),
+                                      store=self.store, operation_id=operation_id, cache_key=cache_key,
+                                      checkpoint=checkpoint)
+            self.assertTrue(BlockingHandler.started.wait(5), "test server did not receive request")
+            self.store.pause_for_shutdown()
+            with self.assertRaises(Paused):
+                request.result(timeout=3)
+
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertTrue(self.store.interruptible_operation(operation_id))
+        restarted = Store(self.store.path)
+        restarted.start_session()
+        self.assertEqual(restarted.job(task["id"])["state"], "queued")
+        self.assertIsNone(restarted.cached(cache_key))
+        self.assertEqual(restarted.recover_exit_interrupted_operations(), 0)
 
     def test_empty_audio_text_is_cached_silence(self):
         self.network.return_value = response("")

@@ -1,6 +1,7 @@
 import hashlib
 import http.client
 import json
+import multiprocessing
 import re
 import time
 import urllib.error
@@ -87,6 +88,85 @@ class ProviderHTTPError(ProviderError):
     def __init__(self, status_code: int, details: dict | None = None):
         self.status_code = status_code
         super().__init__(f"云端请求失败（HTTP {status_code}），请检查凭据、模型和服务区域", details)
+
+
+class ExitInterrupted(RuntimeError):
+    """A cloud operation stopped because this desktop session is explicitly exiting."""
+
+
+def _network_child(pipe, kind, args, kwargs):
+    try:
+        if kind == "asr":
+            result = cloud_json(*args, **kwargs)
+        else:
+            result = _upload_audio_request(*args, **kwargs)
+        pipe.send(("ok", result))
+    except ProviderHTTPError as exc:
+        pipe.send(("http", exc.status_code, exc.details))
+    except ProviderError as exc:
+        pipe.send(("provider", str(exc), exc.details))
+    except BaseException as exc:
+        pipe.send(("error", type(exc).__name__, str(exc)))
+    finally:
+        pipe.close()
+
+
+def _interruptible_network_call(kind, args, *, store, operation_id, cache_key=None, checkpoint=None, kwargs=None):
+    context = multiprocessing.get_context("spawn")
+    receive, send = context.Pipe(duplex=False)
+    process = context.Process(target=_network_child, args=(send, kind, args, kwargs or {}),
+                              name=f"douyincut-cloud-{kind}")
+    try:
+        process.start()
+    except BaseException:
+        store.fail_cloud_operation(operation_id)
+        receive.close()
+        send.close()
+        process.close()
+        raise ProviderError("无法启动可中断的云端请求进程") from None
+    send.close()
+    try:
+        while True:
+            if receive.poll(0.05):
+                message = receive.recv()
+                process.join(2)
+                if message[0] == "ok":
+                    if kind == "asr":
+                        body = {"status": "response_received", "response": cached_audio_response(message[1], args[3])}
+                    else:
+                        config, object_id = args[1], args[2]
+                        body = {"status": "succeeded", "object_id": object_id,
+                                "endpoint": config.oss_endpoint, "bucket": config.oss_bucket}
+                    if not store.complete_cloud_operation(operation_id, cache_key, body):
+                        raise ExitInterrupted("退出时 ASR 响应尚未持久化")
+                    return message[1]
+                store.fail_cloud_operation(operation_id)
+                if message[0] == "http":
+                    raise ProviderHTTPError(message[1], message[2])
+                if message[0] == "provider":
+                    raise ProviderError(message[1], message[2])
+                raise ProviderError(f"云端子进程失败（{message[1]}）")
+            if checkpoint:
+                try:
+                    checkpoint()
+                except BaseException:
+                    if process.is_alive():
+                        process.terminate()
+                    process.join(2)
+                    if process.is_alive():
+                        process.kill()
+                        process.join(2)
+                    store.fail_cloud_operation(operation_id)
+                    raise
+            if not process.is_alive():
+                store.fail_cloud_operation(operation_id)
+                raise ProviderError("云端请求进程提前退出")
+    finally:
+        receive.close()
+        if process.is_alive():
+            process.terminate()
+            process.join(2)
+        process.close()
 
 
 def redact_cloud_text(value: str, api_key: str | None = None) -> str:
@@ -250,24 +330,50 @@ def required_secret(name: str):
     return value
 
 
-def upload_audio(audio: Path, config: CloudConfig, object_id: str) -> str:
+def _upload_audio_request(audio: Path, config: CloudConfig, object_id: str, access_key_id: str,
+                         access_key_secret: str) -> str:
+    import oss2
+    auth = oss2.Auth(access_key_id, access_key_secret)
+    bucket = oss2.Bucket(auth, config.oss_endpoint, config.oss_bucket)
+    key = f"douyincut/audio/{object_id}.wav"
+    bucket.put_object_from_file(key, str(audio))
+    return bucket.sign_url("GET", key, 24 * 3600)
+
+
+def _signed_audio_url(config: CloudConfig, object_id: str, access_key_id: str, access_key_secret: str) -> str:
+    import oss2
+    auth = oss2.Auth(access_key_id, access_key_secret)
+    bucket = oss2.Bucket(auth, config.oss_endpoint, config.oss_bucket)
+    return bucket.sign_url("GET", f"douyincut/audio/{object_id}.wav", 24 * 3600)
+
+
+def upload_audio(audio: Path, config: CloudConfig, object_id: str, *, operation=None) -> str:
     if not config.oss_endpoint or not config.oss_bucket:
         raise ProviderError("Qwen 语音识别需要 OSS 音频地址，请先配置 OSS")
     endpoint = urlparse(config.oss_endpoint)
     if endpoint.scheme != "https" or not endpoint.hostname or not endpoint.hostname.endswith(".aliyuncs.com") or endpoint.username or endpoint.password:
         raise ProviderError("OSS endpoint 必须是阿里云 HTTPS 地址")
-    try:
-        import oss2
-    except ImportError:
-        raise ProviderError("尚未安装 OSS 客户端依赖") from None
-    auth = oss2.Auth(required_secret("oss_access_key_id"), required_secret("oss_access_key_secret"))
-    bucket = oss2.Bucket(auth, config.oss_endpoint, config.oss_bucket)
-    key = f"douyincut/audio/{object_id}.wav"
+    access_key_id = required_secret("oss_access_key_id")
+    access_key_secret = required_secret("oss_access_key_secret")
     try:
         # Overwrite deterministic keys so a previous empty/corrupt upload cannot
         # be reused after local extraction has been fixed.
-        bucket.put_object_from_file(key, str(audio))
-        return bucket.sign_url("GET", key, 24 * 3600)
+        if operation is None:
+            return _upload_audio_request(audio, config, object_id, access_key_id, access_key_secret)
+        store, job_id, checkpoint = operation
+        upload_cache_key = f"oss-upload:{config.oss_endpoint}:{config.oss_bucket}:{object_id}"
+        uploaded = store.cached(upload_cache_key)
+        if (uploaded and uploaded.get("status") == "succeeded" and uploaded.get("object_id") == object_id
+                and uploaded.get("endpoint") == config.oss_endpoint and uploaded.get("bucket") == config.oss_bucket):
+            return _signed_audio_url(config, object_id, access_key_id, access_key_secret)
+        operation_id = store.begin_cloud_operation(job_id, "oss_upload", config.model_dump())
+        return _interruptible_network_call("upload", (audio, config, object_id, access_key_id, access_key_secret),
+                                            store=store, operation_id=operation_id, cache_key=upload_cache_key,
+                                            checkpoint=checkpoint)
+    except ImportError:
+        raise ProviderError("尚未安装 OSS 客户端依赖") from None
+    except ExitInterrupted:
+        raise
     except Exception:
         raise ProviderError("OSS 上传失败，请检查权限、Bucket 和 endpoint") from None
 
@@ -430,7 +536,7 @@ def audio_segments(response, asset_id: str, start_us: int, end_us: int) -> list[
 
 
 def transcribe(asset, config, settings, store, workdir, checkpoint, progress=None, *, require_sentence_timing=False,
-               refresh_scope: str | None = None):
+               refresh_scope: str | None = None, job_id: str | None = None):
     key = asr_api_key(config)
     audio_start_us = (probe_stream_timing(Path(asset.path), settings)["audio_start_us"]
                       if Path(asset.path).is_file() else getattr(asset, "audio_start_us", 0))
@@ -456,8 +562,13 @@ def transcribe(asset, config, settings, store, workdir, checkpoint, progress=Non
         if previous and previous.get("status") == "submitting" and previous.get("refresh_scope") != refresh_scope:
             raise ProviderError("之前的 ASR 请求结果不确定，请先核查云端记录，不能通过重新识别绕过防重复计费保护",
                                 previous.get("error_detail"))
-        if state and state.get("status") == "succeeded":
+        if state and state.get("status") in {"succeeded", "response_received"}:
             chunk_segments = audio_segments(state["response"], asset.id, start, end)
+            if state.get("status") == "response_received":
+                state = {"status": "succeeded", "response": state["response"],
+                         "segments": [t.model_dump(exclude={"source_asset_id"}) for t in chunk_segments],
+                         "text": "\n".join(t.text for t in chunk_segments)}
+                store.cache(cache_key, state)
         else:
             if state and state.get("status") == "submitting":
                 raise ProviderError(f"Qwen 语音片段 {index + 1} 的请求结果不确定，停止自动重提以避免重复计费；请核查该模型请求记录",
@@ -468,17 +579,33 @@ def transcribe(asset, config, settings, store, workdir, checkpoint, progress=Non
                               audio_start_us=audio_start_us)
             else:
                 extract_audio(asset, audio, settings, checkpoint, start_us=start, end_us=end)
-            file_url = upload_audio(audio, config, f"{asset.sha256}-qwen-audio-v1-{start}-{end}")
+            operation = (store, job_id, checkpoint) if job_id else None
+            file_url = upload_audio(audio, config, f"{asset.sha256}-qwen-audio-v1-{start}-{end}",
+                                    operation=operation)
             checkpoint()
-            submitting = {"status": "submitting", "started_at": time.time()}
-            if refresh_scope:
-                submitting["refresh_scope"] = refresh_scope
-                store.cache(base_key, submitting)
-            store.cache(cache_key, submitting)
+            operation_id = None
+            if job_id:
+                operation_id = store.begin_cloud_operation(job_id, "asr", config.model_dump(), cache_key)
+                if refresh_scope:
+                    store.cache(base_key, {"status": "submitting", "exit_operation_id": operation_id,
+                                           "refresh_scope": refresh_scope})
+            else:
+                submitting = {"status": "submitting", "started_at": time.time()}
+                if refresh_scope:
+                    submitting["refresh_scope"] = refresh_scope
+                    store.cache(base_key, submitting)
+                store.cache(cache_key, submitting)
             try:
-                response = cloud_json("POST", config.asr_url,
-                                      qwen_audio_payload(config.asr_model, file_url), key,
-                                      sse=False, operation="asr", timeout_seconds=config.asr_timeout_seconds)
+                args = ("POST", config.asr_url, qwen_audio_payload(config.asr_model, file_url), key)
+                if operation_id:
+                    response = _interruptible_network_call(
+                        "asr", args, store=store, operation_id=operation_id, cache_key=cache_key,
+                        checkpoint=checkpoint,
+                        kwargs={"sse": False, "operation": "asr",
+                                "timeout_seconds": config.asr_timeout_seconds})
+                else:
+                    response = cloud_json(*args, sse=False, operation="asr",
+                                          timeout_seconds=config.asr_timeout_seconds)
             except ProviderHTTPError as exc:
                 if exc.status_code in ASR_REJECTED_HTTP_STATUSES:
                     rejection = {"status": "rejected", "http_status": exc.status_code}

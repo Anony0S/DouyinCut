@@ -24,5 +24,11 @@ stopProject()
 const appSource = fs.readFileSync(path.resolve(__dirname, '../src/App.vue'), 'utf8')
 assert.match(appSource, /@click="returnToSave">返回保存/, 'return-to-save must leave the window open')
 assert.match(appSource, /@click="continueExit">放弃并退出/, 'only explicit discard continues exit')
+assert.match(appSource, /await tauri\.invoke\('complete_exit'\)/, 'native invoke must retain its Tauri bridge receiver')
+assert.doesNotMatch(appSource, /const invoke=.*__TAURI_INTERNALS__\?\.invoke/, 'do not detach the native invoke method')
+assert.match(appSource, /exitPrompt\.value='activity'\s+session\.report\(cause\)/,
+  'a failed native exit must restore the activity prompt so the user can retry')
+assert.match(appSource, /watch\(errorRevision,\(\)=>\{if\(error\.value\) pushToast\('error',error\.value\)\}\)/,
+  'identical consecutive errors must still be announced')
 
 console.log('Exit guard checks passed: project and settings drafts are visible to the exit coordinator.')

@@ -11,7 +11,7 @@ import { appearance, setAppearance, type Appearance } from './appearance'
 import { hasUnsavedChanges as hasRegisteredUnsavedChanges } from './exit-guards'
 import { jobsApi } from './services/jobs'
 const route=useRoute(),router=useRouter(),session=useSessionStore(),project=useProjectStore()
-const {busy,connected,activeJobs,error,message}=storeToRefs(session)
+const {busy,connected,activeJobs,error,errorRevision,message}=storeToRefs(session)
 const {savedDraft,planDirty}=storeToRefs(project)
 const exitPrompt=ref<'drafts'|'activity'|null>(null), exiting=ref(false)
 const exitRequestActive=ref(false), activeLocalJobs=ref(0)
@@ -38,7 +38,7 @@ function pushToast(kind:ToastKind,text:string) {
   toasts.value=[...toasts.value,{id,kind,text}]
   toastTimers.set(id,window.setTimeout(()=>dismissToast(id),kind==='error'?9000:6000))
 }
-watch(error,value=>{if(value) pushToast('error',value)})
+watch(errorRevision,()=>{if(error.value) pushToast('error',error.value)})
 watch(message,value=>{if(value) pushToast('success',value)})
 onMounted(workspace.start)
 async function inspectExitRequest() {
@@ -64,12 +64,13 @@ async function beginExit() {
   exiting.value=true
   try {
     await nextTick()
-    const invoke=(window as Window & {__TAURI_INTERNALS__?:{invoke:(command:string,args?:Record<string,unknown>)=>Promise<unknown>}}).__TAURI_INTERNALS__?.invoke
-    if(!invoke) throw new Error('无法连接桌面退出控制')
-    await invoke('complete_exit')
+    const tauri=(window as Window & {__TAURI_INTERNALS__?:{invoke:(command:string,args?:Record<string,unknown>)=>Promise<unknown>}}).__TAURI_INTERNALS__
+    if(!tauri) throw new Error('无法连接桌面退出控制')
+    await tauri.invoke('complete_exit')
   } catch(cause) {
     exiting.value=false
     exitRequestActive.value=false
+    exitPrompt.value='activity'
     session.report(cause)
   }
 }

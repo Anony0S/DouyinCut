@@ -1,5 +1,6 @@
 """Prepare an isolated Windows desktop fixture for explicit-exit acceptance."""
 
+import argparse
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,8 +11,13 @@ if sys.platform != "win32":
     raise SystemExit("This acceptance fixture is only available on Windows.")
 
 repo = Path(__file__).resolve().parents[1]
-source_app = repo / "desktop/src-tauri/target/release/douyincut.exe"
-source_runtime = repo / "desktop/src-tauri/target/release/runtime"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--release-dir", type=Path, default=repo / "desktop/src-tauri/target/release",
+                    help="Release directory containing douyincut.exe and runtime/")
+args = parser.parse_args()
+release_dir = args.release_dir.resolve()
+source_app = release_dir / "douyincut.exe"
+source_runtime = release_dir / "runtime"
 media = repo / ".runtime/windows-packaging/media"
 ffmpeg = media / "ffmpeg.exe"
 ffprobe = media / "ffprobe.exe"

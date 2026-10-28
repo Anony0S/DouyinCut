@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workbench",
+  "description": "工作台窗口权限：允许本地 Python 后端提供的页面请求安全退出",
+  "local": true,
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "windows": ["workbench"],
+  "permissions": [
+    "allow-complete-exit",
+    "core:default"
+  ]
+}

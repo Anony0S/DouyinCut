@@ -298,21 +298,35 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let config = if args.is_empty() {
         app.path().app_config_dir()?.join("workspace.json")
-    } else if args.len() == 2 && args[0] == "--workspace-config" {
-        std::path::PathBuf::from(&args[1])
     } else {
-        return Err(std::io::Error::other(
-            "不支持这些启动参数。隔离验证可使用 --workspace-config <定位配置绝对路径>。",
-        )
-        .into());
+        // Find --workspace-config argument, ignoring any Tauri-injected arguments
+        let workspace_config_pos = args.iter().position(|arg| arg == "--workspace-config");
+        if let Some(pos) = workspace_config_pos {
+            if pos + 1 < args.len() {
+                std::path::PathBuf::from(&args[pos + 1])
+            } else {
+                return Err(std::io::Error::other(
+                    "--workspace-config requires a path argument.",
+                )
+                .into());
+            }
+        } else {
+            app.path().app_config_dir()?.join("workspace.json")
+        }
     };
     if !config.is_absolute() {
         return Err(std::io::Error::other("定位配置必须为绝对路径").into());
     }
-    let executable = app
-        .path()
-        .resource_dir()?
-        .join("runtime/DouyinCutRuntime.exe");
+    let resource_dir = app.path().resource_dir()?;
+    let executable = resource_dir.join("runtime/DouyinCutRuntime.exe");
+    if !executable.is_file() {
+        return Err(std::io::Error::other(format!(
+            "缺少冻结运行时。resource_dir: {}, 期望: {}",
+            resource_dir.display(),
+            executable.display()
+        ))
+        .into());
+    }
     app.manage(crate::workspace::WorkDirectoryHost::new(executable, config));
     let mut config = app.config().app.windows[0].clone();
     config.url = tauri::WebviewUrl::App("setup.html".into());

@@ -1,0 +1,12 @@
+"$schema" = "../gen/schemas/desktop-schema.json"
+
+[[permission]]
+identifier = "allow-workspace-action"
+description = "允许调用工作目录选择与初始化命令"
+commands.allow = ["workspace_action"]
+
+[[permission]]
+identifier = "allow-complete-exit"
+description = "允许工作台请求安全退出"
+commands.allow = ["complete_exit"]
+

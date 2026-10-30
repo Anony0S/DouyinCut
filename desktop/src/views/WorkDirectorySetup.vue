@@ -10,11 +10,17 @@ declare global {
 const flow = createWorkDirectoryFlow((command, args) => window.__TAURI_INTERNALS__.invoke(command, args))
 flow.view = reactive(flow.view)
 const view = flow.view
-onMounted(() => flow.run('inspect'))
+
+// Check immediately before mounting to avoid flash
+onMounted(async () => {
+  await flow.run('inspect')
+  // If already configured and opened, no need to show this screen
+})
 </script>
 
 <template>
-  <div class="min-h-screen bg-base-200 px-6 py-16 text-base-content">
+  <!-- Only show setup UI if selection or repair is required -->
+  <div v-if="view.state === 'selection_required' || view.state === 'repair_required'" class="min-h-screen bg-base-200 px-6 py-16 text-base-content">
     <section class="card card-border mx-auto max-w-2xl bg-base-100 shadow-sm" aria-labelledby="setup-title">
       <div class="card-body gap-6 p-8">
         <div>

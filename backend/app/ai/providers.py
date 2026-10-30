@@ -24,10 +24,10 @@ TRANSCRIPT_COMMA_SPLIT_MIN_US = 3_500_000
 
 class CloudConfig(Model):
     region: Literal["cn"] = "cn"
-    base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1", max_length=500)
-    planner_model: str = Field(default="qwen3.8-flash", min_length=1, max_length=100)
-    asr_base_url: str = Field(default="https://dashscope.aliyuncs.com", max_length=500)
-    asr_model: str = Field(default="qwen-audio-3.1-asr-flash", min_length=1, max_length=100,
+    base_url: str = Field(default="", max_length=500)
+    planner_model: str = Field(default="", max_length=100)
+    asr_base_url: str = Field(default="", max_length=500)
+    asr_model: str = Field(default="", max_length=100,
                            pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     oss_endpoint: str = Field(default="", max_length=300)
     oss_bucket: str = Field(default="", max_length=100)

@@ -35,8 +35,8 @@ watch(()=>route.query,()=>{
     <div class="card-body">
       <div class="projects-toolbar">
         <form class="project-filters" @submit.prevent="filterProjects">
-          <input v-model="projectSearch" class="input input-sm" aria-label="搜索视频或商品名称" placeholder="搜索视频名称、商品名称" maxlength="200"/>
-          <select v-model="projectStatus" class="select select-sm" aria-label="项目状态" @change="filterProjects">
+          <input v-model="projectSearch" class="input input-md" aria-label="搜索视频或商品名称" placeholder="搜索视频名称、商品名称" maxlength="200"/>
+          <select v-model="projectStatus" class="select" aria-label="项目状态" @change="filterProjects">
             <option value="all">全部状态</option>
             <option v-for="(label,value) in projectStatusLabels" :key="value" :value="value">{{ label }}</option>
           </select>

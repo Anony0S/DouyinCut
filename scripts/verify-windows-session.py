@@ -84,6 +84,13 @@ def main():
                 diagnostics = json.load(get('/api/v1/diagnostics', {'X-Session-Token': token}))
                 assert diagnostics['credentials']['available'], diagnostics['credentials']
                 assert diagnostics['credentials']['backend'].startswith('keyring.backends.Windows.'), diagnostics['credentials']
+                
+                # Verify live monitoring dependencies are present in the frozen runtime
+                probe = subprocess.run([str(executable), '--work-dir', str(work), '--workspace-action', 'inspect',
+                    '--workspace-config', str(config)], cwd=root, env=env,
+                    capture_output=True, text=True, encoding='utf-8', timeout=20)
+                # If inspect succeeded, the runtime loaded app.live_monitoring which imports streamget
+                assert probe.returncode == 0 or 'streamget' not in probe.stderr,                     f"Live monitoring imports failed: {probe.stderr}"
                 page = get('/')
                 assert page.status == 200 and 'Content-Security-Policy' in page.headers
                 assert token.encode() not in page.read()

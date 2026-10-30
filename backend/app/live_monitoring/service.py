@@ -1215,9 +1215,11 @@ class LiveMonitorWorker:
                    "正在自动录制" if monitor["auto_record"] and not monitor["retry_blocked"]
                    else "打开 DouyinCut 直播监控可开始录制")
 
-    def run_once(self, now: float | None = None):
+    def run_once(self, now: float | None = None, stop: threading.Event | None = None):
         now = now or time.time()
         for monitor in self.live.all_monitors():
+            if stop and stop.is_set():
+                break
             monitor_id = monitor["id"]
             active = self.processes.get(monitor_id)
             if active:
@@ -1238,7 +1240,10 @@ class LiveMonitorWorker:
             self.seen_controls[monitor_id] = monitor["updated_controls"]
             self.last_check[monitor_id] = now
             try:
-                resolved = asyncio.run(self._resolve(monitor["url"]))
+                # Network calls can block for 30+ seconds; use a shorter timeout so exit is responsive.
+                async def resolve_with_timeout():
+                    return await asyncio.wait_for(self._resolve(monitor["url"]), timeout=8)
+                resolved = asyncio.run(resolve_with_timeout())
                 is_live = bool(resolved.get("is_live"))
                 self.live.set_liveness(monitor_id, is_live)
                 if not monitor["name"] and resolved.get("anchor_name"):
@@ -1276,7 +1281,7 @@ class LiveMonitorWorker:
         try:
             while not stop.is_set():
                 try:
-                    self.run_once()
+                    self.run_once(stop=stop)
                 except Exception:
                     logging.getLogger("douyincut.live-monitor").exception("Live monitor cycle failed")
                 stop.wait(1)

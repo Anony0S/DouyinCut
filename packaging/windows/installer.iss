@@ -1,0 +1,135 @@
+; DouyinCut Windows Installer Script for Inno Setup 6
+; Generates a current-user offline installer that preserves work data on uninstall
+
+#define AppName "DouyinCut"
+#define AppVersion "0.3.0"
+#define AppPublisher "DouyinCut"
+#define AppURL "https://github.com/user/douyincut"
+#define AppExeName "douyincut.exe"
+#define RuntimeExeName "DouyinCutRuntime.exe"
+
+[Setup]
+AppId={{8F3E7A2B-4C9D-4E6A-9B1F-2D5C8A7E6F3B}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppPublisher={#AppPublisher}
+AppPublisherURL={#AppURL}
+AppSupportURL={#AppURL}
+AppUpdatesURL={#AppURL}
+DefaultDirName={autopf}\{#AppName}
+DisableProgramGroupPage=yes
+; Current user install - no admin required
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+OutputDir=..\..\desktop\src-tauri\target\release\installer
+OutputBaseFilename=DouyinCut-{#AppVersion}-setup
+SetupIconFile=..\..\desktop\icons\icon.ico
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+; Preserve work data on uninstall
+UninstallFilesDir={app}\uninst
+
+[Languages]
+Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+; Main executable
+Source: "..\..\desktop\src-tauri\target\release\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; Frozen runtime
+Source: "..\..\desktop\src-tauri\runtime\{#RuntimeExeName}\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Media tools (FFmpeg)
+Source: "..\..\desktop\src-tauri\runtime\media\*"; DestDir: "{app}\media"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Frontend assets
+Source: "..\..\desktop\dist\*"; DestDir: "{app}\frontend"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+
+  // Check if the application is running
+  if CheckForMutexes('DouyinCut_SingleInstance_Mutex') then
+  begin
+    if MsgBox('DouyinCut 正在运行。安装前必须完全退出应用程序。' + #13#10 +
+              '是否继续？', mbConfirmation, MB_YESNO) = IDYES then
+    begin
+      Result := False;
+      MsgBox('请先关闭 DouyinCut，然后重新运行安装程序。', mbError, MB_OK);
+    end
+    else
+    begin
+      Result := False;
+    end;
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := True;
+
+  // Check if the application is running during uninstall
+  if CheckForMutexes('DouyinCut_SingleInstance_Mutex') then
+  begin
+    if MsgBox('DouyinCut 正在运行。卸载前必须完全退出应用程序。' + #13#10 +
+              '是否继续？', mbConfirmation, MB_YESNO) = IDYES then
+    begin
+      Result := False;
+      MsgBox('请先关闭 DouyinCut，然后重新运行卸载程序。', mbError, MB_OK);
+    end
+    else
+    begin
+      Result := False;
+    end;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  WorkDirConfigPath: String;
+  WorkDir: String;
+  ResultCode: Integer;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // Preserve work directory data, settings, and credentials
+    // Work directory location is stored in user config, not in app directory
+    // So uninstalling the app does NOT delete user data
+
+    if MsgBox('是否保留所有项目数据、录制文件和设置？' + #13#10 +
+              '选择"是"将保留工作目录数据（推荐）。' + #13#10 +
+              '选择"否"将仅删除程序文件，工作数据仍需手动删除。',
+              mbConfirmation, MB_YESNO or MB_DEFBUTTON1) = IDYES then
+    begin
+      // User chose to keep data - do nothing
+      MsgBox('程序文件已删除。' + #13#10 +
+             '您的项目数据、录制文件和设置已保留。',
+             mbInformation, MB_OK);
+    end
+    else
+    begin
+      // User wants guidance on manual deletion
+      MsgBox('程序文件已删除。' + #13#10 +
+             '如需删除工作数据，请打开工作目录并手动删除。' + #13#10 +
+             '工作目录位置保存在：' + #13#10 +
+             ExpandConstant('{localappdata}\DouyinCut\config\workspace.json'),
+             mbInformation, MB_OK);
+    end;
+  end;
+end;

@@ -16,7 +16,7 @@ from app.core.config import Settings
 from app.core.domain import Asset, Candidate, Product, Transcript
 from app.media.editing import build_plan
 from app.ai.providers import (ASR_MIN_CHUNK_US, CloudConfig, ProviderError, ProviderHTTPError,
-                           _interruptible_network_call, audio_segments, audio_text, cloud_json,
+                           interruptible_network_call, audio_segments, audio_text, cloud_json,
                            qwen_audio_payload, transcribe)
 from app.core.storage import Store
 from app.worker import Paused, Worker
@@ -203,7 +203,7 @@ class QwenAudioTests(unittest.TestCase):
 
         started = time.monotonic()
         with ThreadPoolExecutor(max_workers=1) as executor:
-            request = executor.submit(_interruptible_network_call, "asr",
+            request = executor.submit(interruptible_network_call, "asr",
                                       ("POST", f"http://127.0.0.1:{server.server_port}/blocked", {}, "mock-key"),
                                       store=self.store, operation_id=operation_id, cache_key=cache_key,
                                       checkpoint=checkpoint)

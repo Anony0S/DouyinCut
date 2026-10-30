@@ -3,7 +3,8 @@ import time
 from pydantic import Field
 
 from ..core.domain import Model
-from .providers import CloudConfig, ProviderError, ProviderHTTPError, cloud_json, model_api_key
+from .providers import (CloudConfig, ExitInterrupted, ProviderError, ProviderHTTPError,
+                        interruptible_network_call, model_api_key)
 
 
 class ModelConnectionTestRequest(Model):
@@ -18,12 +19,15 @@ def check_model_connection(request: ModelConnectionTestRequest) -> dict:
     result = {"ok": False, "model": config.planner_model}
     try:
         key = request.api_key.strip() or model_api_key(config)
-        response = cloud_json(
-            "POST", config.chat_url,
-            {"model": config.planner_model,
-             "messages": [{"role": "user", "content": "这是连接测试，请只回复 OK，不要解释。"}],
-             "stream": False, "max_tokens": 128},
-            key, timeout_seconds=min(config.chat_timeout_seconds, 60), operation="model_test",
+        # A one-off probe runs in a child process so desktop exit never waits for the model.
+        # It keeps no operation record: an interrupted test is simply not replayed.
+        response = interruptible_network_call(
+            "model_test",
+            ("POST", config.chat_url,
+             {"model": config.planner_model,
+              "messages": [{"role": "user", "content": "这是连接测试，请只回复 OK，不要解释。"}],
+              "stream": False, "max_tokens": 128}, key),
+            kwargs={"timeout_seconds": min(config.chat_timeout_seconds, 60), "operation": "model_test"},
         )
         try:
             content = response["choices"][0]["message"]["content"]
@@ -32,6 +36,8 @@ def check_model_connection(request: ModelConnectionTestRequest) -> dict:
         if not isinstance(content, str) or not content.strip():
             raise ProviderError("模型未返回有效文本，请检查模型 ID 与接口兼容性")
         result.update(ok=True, message="文本模型可用，已收到有效回复")
+    except ExitInterrupted as exc:
+        result.update(message=str(exc))
     except ProviderHTTPError as exc:
         hints = {401: "API Key 无效或已失效", 403: "无权访问该模型，请检查模型权限",
                  404: "模型或接口不存在，请检查 Base URL 和模型 ID",

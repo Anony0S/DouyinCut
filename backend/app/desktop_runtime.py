@@ -60,6 +60,7 @@ def _run_role(role, settings, frontend, token, listener, stop, report):
         if role == 'api':
             import uvicorn
             from .api import create_app
+            from .ai import providers
 
             app = create_app(settings, token, frontend_dir=frontend)
             server = uvicorn.Server(uvicorn.Config(app, loop='asyncio', http='h11', ws='none', lifespan='on',
@@ -68,6 +69,9 @@ def _run_role(role, settings, frontend, token, listener, stop, report):
 
             def request_stop():
                 stop.wait()
+                # Abort in-flight one-off cloud calls (for example a settings model test) so the
+                # process exits without waiting for the provider or a graceful-shutdown timeout.
+                providers.begin_shutdown()
                 server.should_exit = True
 
             threading.Thread(target=request_stop, daemon=True).start()

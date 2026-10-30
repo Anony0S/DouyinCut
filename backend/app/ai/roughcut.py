@@ -3,7 +3,7 @@ import json
 from pydantic import Field, model_validator
 
 from ..core.domain import Candidate, Model, Transcript
-from .providers import (ProviderError, _interruptible_network_call, aggregate_transcript, cloud_json, model_api_key,
+from .providers import (ProviderError, interruptible_network_call, aggregate_transcript, cloud_json, model_api_key,
                         parsed_response_details)
 
 
@@ -88,7 +88,7 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
     else:
         store, job_id, checkpoint = operation
         operation_id = store.begin_cloud_operation(job_id, "planner", config.model_dump())
-        response = _interruptible_network_call("planner", args, store=store, operation_id=operation_id,
+        response = interruptible_network_call("planner", args, store=store, operation_id=operation_id,
                                                checkpoint=checkpoint, kwargs=kwargs)
     try:
         raw = response["choices"][0]["message"]["content"].strip()

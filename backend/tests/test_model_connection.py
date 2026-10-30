@@ -22,7 +22,7 @@ class ModelConnectionTests(unittest.TestCase):
         self.request = {"config": {"base_url": "https://gateway.example/v1",
                                    "planner_model": "draft-model", "chat_timeout_seconds": 300},
                         "api_key": "draft-private-key"}
-        self.cloud = self.enterContext(patch("app.ai.connection.cloud_json",
+        self.cloud = self.enterContext(patch("app.ai.connection.interruptible_network_call",
             return_value={"choices": [{"message": {"content": "OK"}}]}))
         self.secret = self.enterContext(patch("app.ai.providers.read_secret", return_value="saved-private-key"))
 
@@ -40,14 +40,17 @@ class ModelConnectionTests(unittest.TestCase):
         self.assertEqual(response.json()["model"], "draft-model")
         self.assertGreaterEqual(response.json()["elapsed_ms"], 0)
         self.cloud.assert_called_once()
-        args, kwargs = self.cloud.call_args
-        self.assertEqual(args[:2], ("POST", "https://gateway.example/v1/chat/completions"))
-        self.assertEqual(args[2]["model"], "draft-model")
-        self.assertIs(args[2]["stream"], False)
-        self.assertEqual(args[2]["max_tokens"], 128)
-        self.assertEqual(args[3], "draft-private-key")
-        self.assertEqual(kwargs["timeout_seconds"], 60)
-        self.assertEqual(kwargs["operation"], "model_test")
+        (kind, call), kwargs = self.cloud.call_args
+        self.assertEqual(kind, "model_test")
+        self.assertEqual(call[:2], ("POST", "https://gateway.example/v1/chat/completions"))
+        self.assertEqual(call[2]["model"], "draft-model")
+        self.assertIs(call[2]["stream"], False)
+        self.assertEqual(call[2]["max_tokens"], 128)
+        self.assertEqual(call[3], "draft-private-key")
+        self.assertEqual(kwargs["kwargs"]["timeout_seconds"], 60)
+        self.assertEqual(kwargs["kwargs"]["operation"], "model_test")
+        # A one-off test keeps no replay state.
+        self.assertNotIn("store", kwargs)
         self.secret.assert_not_called()
         write.assert_not_called()
         self.assertEqual(store.get("config", "cloud"), saved)
@@ -60,8 +63,8 @@ class ModelConnectionTests(unittest.TestCase):
         response = self.post()
         self.assertTrue(response.json()["ok"])
         self.secret.assert_called_once_with("llm_api_key")
-        self.assertEqual(self.cloud.call_args.args[3], "saved-private-key")
-        self.assertEqual(self.cloud.call_args.kwargs["timeout_seconds"], 30)
+        self.assertEqual(self.cloud.call_args.args[1][3], "saved-private-key")
+        self.assertEqual(self.cloud.call_args.kwargs["kwargs"]["timeout_seconds"], 30)
 
     def test_missing_key_fails_without_cloud_request(self):
         self.request["api_key"] = ""

@@ -81,6 +81,9 @@ def main():
                 response = get('/api/v1/projects', {'X-Session-Token': token})
                 assert response.status == 200
                 assert json.load(response)['items'][0]['name'] == '冻结会话项目.mp4'
+                diagnostics = json.load(get('/api/v1/diagnostics', {'X-Session-Token': token}))
+                assert diagnostics['credentials']['available'], diagnostics['credentials']
+                assert diagnostics['credentials']['backend'].startswith('keyring.backends.Windows.'), diagnostics['credentials']
                 page = get('/')
                 assert page.status == 200 and 'Content-Security-Policy' in page.headers
                 assert token.encode() not in page.read()
@@ -98,7 +101,8 @@ def main():
                     assert_process_exited(role['pid'])
                 print(json.dumps({'result': 'passed', 'relocated': True, 'development_path_removed': True,
                     'chinese_and_space_paths': True, 'authenticated_project_list': True,
-                    'roles_exited': list(stopped['roles'])}, ensure_ascii=False))
+                    'roles_exited': list(stopped['roles']),
+                    'credential_store': diagnostics['credentials']}, ensure_ascii=False))
             finally:
                 stop_owned_process(process)
         settings.database.unlink()

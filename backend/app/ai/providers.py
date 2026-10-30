@@ -3,6 +3,7 @@ import http.client
 import json
 import multiprocessing
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -94,9 +95,21 @@ class ExitInterrupted(RuntimeError):
     """A cloud operation stopped because this desktop session is explicitly exiting."""
 
 
+_SHUTDOWN = threading.Event()
+
+
+def begin_shutdown():
+    """Let in-flight one-off cloud calls abort; background jobs use their worker checkpoint instead."""
+    _SHUTDOWN.set()
+
+
+def clear_shutdown():
+    _SHUTDOWN.clear()
+
+
 def _network_child(pipe, kind, args, kwargs):
     try:
-        if kind in {"asr", "planner"}:
+        if kind in {"asr", "planner", "model_test"}:
             result = cloud_json(*args, **kwargs)
         else:
             result = _upload_audio_request(*args, **kwargs)
@@ -111,7 +124,13 @@ def _network_child(pipe, kind, args, kwargs):
         pipe.close()
 
 
-def _interruptible_network_call(kind, args, *, store, operation_id, cache_key=None, checkpoint=None, kwargs=None):
+def interruptible_network_call(kind, args, *, store=None, operation_id=None, cache_key=None, checkpoint=None,
+                               kwargs=None):
+    """Run one network call in a child process so an exit can stop it without waiting.
+
+    Background jobs pass the store so the reply is accepted inside the exit gate.
+    One-off calls such as the settings model test pass neither and keep no replay state.
+    """
     context = multiprocessing.get_context("spawn")
     receive, send = context.Pipe(duplex=False)
     process = context.Process(target=_network_child, args=(send, kind, args, kwargs or {}),
@@ -119,7 +138,8 @@ def _interruptible_network_call(kind, args, *, store, operation_id, cache_key=No
     try:
         process.start()
     except BaseException:
-        store.fail_cloud_operation(operation_id)
+        if store:
+            store.fail_cloud_operation(operation_id)
         receive.close()
         send.close()
         process.close()
@@ -138,15 +158,20 @@ def _interruptible_network_call(kind, args, *, store, operation_id, cache_key=No
                         config, object_id = args[1], args[2]
                         body = {"status": "succeeded", "object_id": object_id,
                                 "endpoint": config.oss_endpoint, "bucket": config.oss_bucket}
-                    if not store.complete_cloud_operation(operation_id, cache_key, body):
+                    if store and not store.complete_cloud_operation(operation_id, cache_key, body):
                         raise ExitInterrupted("云端响应未被采用：会话正在退出，或任务已由新的执行接管")
                     return message[1]
-                store.fail_cloud_operation(operation_id)
+                if store:
+                    store.fail_cloud_operation(operation_id)
                 if message[0] == "http":
                     raise ProviderHTTPError(message[1], message[2])
                 if message[0] == "provider":
                     raise ProviderError(message[1], message[2])
                 raise ProviderError(f"云端子进程失败（{message[1]}）")
+            if checkpoint is None and _SHUTDOWN.is_set():
+                process.terminate()
+                process.join(2)
+                raise ExitInterrupted("桌面会话正在退出，已中断本次网络请求")
             if checkpoint:
                 try:
                     checkpoint()
@@ -157,10 +182,12 @@ def _interruptible_network_call(kind, args, *, store, operation_id, cache_key=No
                     if process.is_alive():
                         process.kill()
                         process.join(2)
-                    store.fail_cloud_operation(operation_id)
+                    if store:
+                        store.fail_cloud_operation(operation_id)
                     raise
             if not process.is_alive():
-                store.fail_cloud_operation(operation_id)
+                if store:
+                    store.fail_cloud_operation(operation_id)
                 raise ProviderError("云端请求进程提前退出")
     finally:
         receive.close()
@@ -368,7 +395,7 @@ def upload_audio(audio: Path, config: CloudConfig, object_id: str, *, operation=
                 and uploaded.get("endpoint") == config.oss_endpoint and uploaded.get("bucket") == config.oss_bucket):
             return _signed_audio_url(config, object_id, access_key_id, access_key_secret)
         operation_id = store.begin_cloud_operation(job_id, "oss_upload", config.model_dump())
-        return _interruptible_network_call("upload", (audio, config, object_id, access_key_id, access_key_secret),
+        return interruptible_network_call("upload", (audio, config, object_id, access_key_id, access_key_secret),
                                             store=store, operation_id=operation_id, cache_key=upload_cache_key,
                                             checkpoint=checkpoint)
     except ImportError:
@@ -599,7 +626,7 @@ def transcribe(asset, config, settings, store, workdir, checkpoint, progress=Non
             try:
                 args = ("POST", config.asr_url, qwen_audio_payload(config.asr_model, file_url), key)
                 if operation_id:
-                    response = _interruptible_network_call(
+                    response = interruptible_network_call(
                         "asr", args, store=store, operation_id=operation_id, cache_key=cache_key,
                         checkpoint=checkpoint,
                         kwargs={"sse": False, "operation": "asr",

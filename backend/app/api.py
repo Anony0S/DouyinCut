@@ -14,7 +14,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import Field
 
 from .core.config import Settings
-from .core.credentials import read_secret, secret_preview, write_secret
+from .core.credentials import read_secret, secret_preview, storage_status, write_secret
 from .core.domain import Asset, Candidate, Model, Plan, Product, Transcript
 from .media.editing import make_batches, remap_subtitles, validate_plan
 from .media.processing import diagnostics, probe_stream_timing
@@ -110,7 +110,8 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     def diagnostic():
         return {**diagnostics(settings), "data_dir": str(settings.data_dir),
                 "jianying": {"version": "11.6.0", "status": "untested"},
-                "douyin_resolver": "streamget", "cloud_integration": "awaiting_live_validation"}
+                "douyin_resolver": "streamget", "cloud_integration": "awaiting_live_validation",
+                "credentials": storage_status()}
 
     @app.get("/api/v1/live/monitors")
     def live_monitors(window_start: float | None = Query(None, ge=0, allow_inf_nan=False),

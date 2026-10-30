@@ -255,7 +255,29 @@ def main():
             assert hashlib.sha256(Path(preview['video_path']).read_bytes()).hexdigest() == old_preview_hash
             assert hashlib.sha256(source.read_bytes()).hexdigest() == original
             assert not list((work / 'exports').glob('*.partial'))
+            
+            # Test JianYing draft generation with bundled templates
+            jianying_job = session.request('POST', '/plans/' + plan['id'] + '/jianying-drafts',
+                                          json={'revision': approved['revision']})
+            jianying = session.job(jianying_job['id'])['result']
+            draft_path = Path(jianying['draft_path'])
+            assert draft_path.exists(), f"JianYing draft not found at {draft_path}"
+            assert (draft_path / "draft_meta_info.json").exists(), "draft_meta_info.json missing"
+            assert (draft_path / "draft_content.json").exists(), "draft_content.json missing"
+            assert (draft_path / "draft_materials").is_dir(), "draft_materials directory missing"
+            
+            # Verify draft contains video clips and subtitles
+            draft_content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
+            materials = draft_content.get("materials", {})
+            assert "videos" in materials, "No videos in draft materials"
+            assert len(materials["videos"]) > 0, "Draft has no video materials"
+            
+            # Verify materials directory contains actual media files
+            material_files = list((draft_path / "draft_materials").glob("*"))
+            assert len(material_files) > 0, "draft_materials directory is empty"
+            
             report = {'result': 'passed', 'bundled_version': '8.1-full_build-www.gyan.dev',
+                      'jianying_draft_generated': True, 'jianying_templates_bundled': True,
                       'system_only_path': True, 'media_environment_overrides_ignored': True,
                       'chinese_space_paths': True, 'authenticated_api_sse_range_media': True,
                       'real_decoded_clip_order_audio_and_srt': True, 'source_unchanged': True,

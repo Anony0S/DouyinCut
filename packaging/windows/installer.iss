@@ -2,11 +2,11 @@
 ; Generates a current-user offline installer that preserves work data on uninstall
 
 #define AppName "DouyinCut"
-#define AppVersion "0.3.0"
+#define AppVersion "0.2.99"
 #define AppPublisher "DouyinCut"
 #define AppURL "https://github.com/user/douyincut"
 #define AppExeName "douyincut.exe"
-#define RuntimeExeName "DouyinCutRuntime.exe"
+#define RuntimeDirName "DouyinCutRuntime"
 
 [Setup]
 AppId={{8F3E7A2B-4C9D-4E6A-9B1F-2D5C8A7E6F3B}
@@ -23,7 +23,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\..\desktop\src-tauri\target\release\installer
 OutputBaseFilename=DouyinCut-{#AppVersion}-setup
-SetupIconFile=..\..\desktop\icons\icon.ico
+SetupIconFile=..\..\desktop\src-tauri\icons\icon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -42,7 +42,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Main executable
 Source: "..\..\desktop\src-tauri\target\release\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; Frozen runtime
-Source: "..\..\desktop\src-tauri\runtime\{#RuntimeExeName}\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\desktop\src-tauri\runtime\{#RuntimeDirName}\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Media tools (FFmpeg)
 Source: "..\..\desktop\src-tauri\runtime\media\*"; DestDir: "{app}\media"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Frontend assets

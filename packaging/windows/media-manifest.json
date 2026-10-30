@@ -1,17 +1,17 @@
 {
-  "version": "8.1-full_build-www.gyan.dev",
+  "version": "9.0.2-essentials_build-www.gyan.dev",
   "platform": "windows-x64",
   "license": "GPL-3.0-or-later",
   "provider": "https://www.gyan.dev/ffmpeg/builds/",
-  "acquisition": "Pre-acquired Gyan.FFmpeg WinGet distribution; hashes measured from the installed files",
-  "provenance_verification": "Gyan 8.1 binary archive digest and its pinned media, license and README member hashes were verified on 2026-10-27; fixed FFmpeg main source and license materials were collected",
+  "acquisition": "Pre-acquired Gyan.FFmpeg essentials distribution; hashes measured from the installed files",
+  "provenance_verification": "Gyan 9.0.2 essentials binary archive and its pinned media, license and README member hashes were verified on 2026-10-30",
   "redistribution_readiness": "Corresponding source and external-library license bundle require release verification before distribution",
-  "ffmpeg_source": "https://github.com/FFmpeg/FFmpeg/commit/9047fa1b084f76b1b4d065af2d743df1b40dfb56",
+  "ffmpeg_source": "https://github.com/FFmpeg/FFmpeg/releases/tag/n9.0.2",
   "required_encoders": ["libx264", "aac", "pcm_s16le", "mjpeg"],
   "files": {
-    "ffmpeg.exe": "d1e2a156261ecc675081943197a85f08f2868784a0af499171ede89353edad31",
-    "ffprobe.exe": "70872c3ffbc43d0b2c570f9837f54d6e9a832f4ca25463e9735b6a3ec0621478",
+    "ffmpeg.exe": "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec",
+    "ffprobe.exe": "f0d36ecbbdd3bcfac3efa078c96c7271c2e68b3810595552ac3b7f17e9a65c52",
     "LICENSE": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
-    "README.txt": "557205ec68086511f87c0c2ca7ba077d4c687f71e55f3165aed425ebe704b5d8"
+    "README.txt": "0342de6bb39dd421cbec2c00d89ad274b640d75ad3f2cab09ffd647ce2d8f949"
   }
 }

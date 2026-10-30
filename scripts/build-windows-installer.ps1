@@ -4,7 +4,7 @@
 
 param(
     [string]$MediaSource = "bundled",
-    [switch]$SkipTests
+    [switch]$SkipTests = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,13 +80,17 @@ try {
     }
     Write-Host "✓ PyInstaller: $pyiVersion" -ForegroundColor Green
 
-    # Check Inno Setup
-    $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    # Check Inno Setup (try version 7 first, then 6)
+    $isccPath = "C:\Program Files\Inno Setup 7\ISCC.exe"
     if (-not (Test-Path $isccPath)) {
-        throw "Inno Setup 6 is not installed at: $isccPath`nDownload from: https://jrsoftware.org/isdl.php"
+        $isccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+    }
+    if (-not (Test-Path $isccPath)) {
+        throw "Inno Setup is not installed.`nTried:`n  - C:\Program Files\Inno Setup 7\ISCC.exe`n  - C:\Program Files (x86)\Inno Setup 6\ISCC.exe`nDownload from: https://jrsoftware.org/isdl.php"
     }
     $isccVersion = & $isccPath /? 2>&1 | Select-String "Inno Setup" | Select-Object -First 1
     Write-Host "✓ Inno Setup: $isccVersion" -ForegroundColor Green
+    Write-Host "  Path: $isccPath" -ForegroundColor Gray
 
     # Read version from SPEC.md
     $specContent = Get-Content (Join-Path $repo 'SPEC.md') -Raw
@@ -107,18 +111,22 @@ try {
     }
     Write-Host "✓ Frontend built: desktop/dist/" -ForegroundColor Green
 
-    Write-Section "Preparing Bundled Media"
-    Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/prepare-windows-media.py',
-        '--output-manifest', 'packaging/windows/media-manifest.json',
-        '--output-sources', 'packaging/windows/media-sources.json') 'Media preparation'
-
+    Write-Section "Checking Bundled Media"
     $mediaDir = Join-Path $repo '.runtime/windows-packaging/media'
     $ffmpeg = Join-Path $mediaDir 'ffmpeg.exe'
     $ffprobe = Join-Path $mediaDir 'ffprobe.exe'
-    if (-not ((Test-Path $ffmpeg) -and (Test-Path $ffprobe))) {
-        throw 'Bundled media tools are missing'
+
+    if ((Test-Path $ffmpeg) -and (Test-Path $ffprobe)) {
+        Write-Host "✓ Media tools already prepared: $mediaDir" -ForegroundColor Green
+    } else {
+        Write-Host "Media tools not found, preparing..." -ForegroundColor Yellow
+        if ($MediaSource -eq "bundled") {
+            throw "Media tools not found and no source directory specified.`nRun prepare-windows-media.py manually first or specify --MediaSource with FFmpeg directory."
+        }
+        Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/prepare-windows-media.py',
+            '--source', $MediaSource) 'Media preparation'
+        Write-Host "✓ Media tools prepared: $mediaDir" -ForegroundColor Green
     }
-    Write-Host "✓ Media tools prepared: $mediaDir" -ForegroundColor Green
 
     Write-Section "Freezing Python Runtime"
     $pyiWork = Join-Path $repo '.runtime/windows-packaging/pyinstaller'

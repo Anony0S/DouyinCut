@@ -10,10 +10,10 @@ const session = useSessionStore();
 const { busy, connected, error } = storeToRefs(session);
 const config = ref<CloudConfig>({
   region: "cn",
-  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  planner_model: "qwen3.8-flash",
-  asr_base_url: "https://dashscope.aliyuncs.com",
-  asr_model: "qwen-audio-3.1-asr-flash",
+  base_url: "",
+  planner_model: "",
+  asr_base_url: "",
+  asr_model: "",
   asr_timeout_seconds: 300,
   oss_endpoint: "",
   oss_bucket: "",

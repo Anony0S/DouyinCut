@@ -104,7 +104,7 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
       <button :class="{active:route.name==='settings'}" :disabled="busy" @click="workspace.go('settings')">云端设置 <span>↗</span></button>
       <div class="sidebar-bottom">
         <label for="app-appearance" class="mb-2 mt-0 text-inherit">外观</label>
-        <select id="app-appearance" class="select select-sm mb-5 w-full bg-base-200 text-base-content border-base-300"
+        <select id="app-appearance" class="select mb-5 w-full bg-base-200 text-base-content border-base-300"
           aria-label="外观" :value="appearance"
           @change="setAppearance(($event.target as HTMLSelectElement).value as Appearance)">
           <option value="system">跟随系统</option>

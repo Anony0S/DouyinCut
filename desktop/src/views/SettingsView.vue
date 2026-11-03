@@ -209,6 +209,59 @@ onUnmounted(() => {
   douyinCookie.value = "";
   secretDrafts.value = { oss_access_key_id: "", oss_access_key_secret: "" };
 });
+
+// Workspace management
+async function changeWorkDirectory() {
+  if (!confirm('更换工作目录需要重启应用，未保存的更改将丢失。确认继续？')) {
+    return;
+  }
+  try {
+    // Delete workspace.json to force re-selection on next startup
+    await window.__TAURI_INTERNALS__.invoke('delete_workspace_config');
+    // Restart the app
+    await window.__TAURI_INTERNALS__.invoke('relaunch');
+  } catch (error) {
+    alert(`操作失败: ${error}`);
+  }
+}
+
+// Log management
+const appVersion = ref('0.2.99');
+async function openLogDirectory() {
+  try {
+    await window.__TAURI_INTERNALS__.invoke('open_log_directory');
+  } catch (error) {
+    alert(`打开日志目录失败: ${error}`);
+  }
+}
+
+async function clearLogs() {
+  if (!confirm('确认删除所有日志文件？此操作不可恢复。')) {
+    return;
+  }
+  try {
+    await window.__TAURI_INTERNALS__.invoke('clear_logs');
+    alert('日志已清理');
+  } catch (error) {
+    alert(`清理日志失败: ${error}`);
+  }
+}
+
+// Update check
+const checkingUpdate = ref(false);
+const updateResult = ref<{ hasUpdate: boolean; message: string } | null>(null);
+async function checkForUpdate() {
+  checkingUpdate.value = true;
+  updateResult.value = null;
+  try {
+    const result = await window.__TAURI_INTERNALS__.invoke('check_for_update');
+    updateResult.value = result as { hasUpdate: boolean; message: string };
+  } catch (error) {
+    updateResult.value = { hasUpdate: false, message: `检查更新失败: ${error}` };
+  } finally {
+    checkingUpdate.value = false;
+  }
+}
 </script>
 <template>
   <section class="settings-panel">
@@ -439,6 +492,107 @@ onUnmounted(() => {
           </div>
         </form>
       </section>
+
+      <!-- Workspace Management -->
+      <section class="card card-border bg-base-100 settings-card">
+        <div class="settings-card-heading">
+          <div>
+            <h2>工作目录管理</h2>
+            <p>管理应用数据存储位置</p>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <div class="action-row">
+            <div>
+              <p class="action-label">更换工作目录</p>
+              <p class="action-hint">重新选择工作数据存储位置，需要重启应用</p>
+            </div>
+            <button class="btn btn-outline" @click="changeWorkDirectory">
+              更换目录
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Log Management -->
+      <section class="card card-border bg-base-100 settings-card">
+        <div class="settings-card-heading">
+          <div>
+            <h2>日志管理</h2>
+            <p>查看和清理应用日志</p>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <div class="action-row">
+            <div>
+              <p class="action-label">打开日志目录</p>
+              <p class="action-hint">查看诊断日志文件</p>
+            </div>
+            <button class="btn btn-outline" @click="openLogDirectory">
+              打开目录
+            </button>
+          </div>
+          <div class="action-row">
+            <div>
+              <p class="action-label">清理日志</p>
+              <p class="action-hint">删除所有历史日志文件</p>
+            </div>
+            <button class="btn btn-outline btn-error" @click="clearLogs">
+              清理日志
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Update Check -->
+      <section class="card card-border bg-base-100 settings-card">
+        <div class="settings-card-heading">
+          <div>
+            <h2>版本更新</h2>
+            <p>检查应用更新</p>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <div class="action-row">
+            <div>
+              <p class="action-label">当前版本</p>
+              <p class="action-hint">v{{ appVersion }}</p>
+            </div>
+            <button class="btn btn-outline" :disabled="checkingUpdate" @click="checkForUpdate">
+              {{ checkingUpdate ? '检查中...' : '检查更新' }}
+            </button>
+          </div>
+          <div v-if="updateResult" class="alert mt-3" :class="updateResult.hasUpdate ? 'alert-info' : 'alert-success'">
+            {{ updateResult.message }}
+          </div>
+        </div>
+      </section>
     </div>
   </section>
 </template>
+
+<style scoped>
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.action-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.action-label {
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.action-hint {
+  font-size: 0.875rem;
+  opacity: 0.6;
+}
+</style>

@@ -23,6 +23,11 @@ fn main() {
         .manage(instance)
         .invoke_handler(tauri::generate_handler![
             workspace::workspace_action,
+            workspace::delete_workspace_config,
+            workspace::relaunch,
+            workspace::open_log_directory,
+            workspace::clear_logs,
+            workspace::check_for_update,
             session::complete_exit
         ])
         .on_window_event(session::handle_window_event)

@@ -150,3 +150,88 @@ fn pick_directory() -> Result<Option<PathBuf>, String> {
 fn pick_directory() -> Result<Option<PathBuf>, String> {
     Err("目录选择仅支持 Windows。".into())
 }
+
+#[tauri::command]
+pub async fn delete_workspace_config(app: tauri::AppHandle) -> Result<(), String> {
+    let config_path = app.path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("workspace.json");
+
+    if config_path.exists() {
+        std::fs::remove_file(&config_path)
+            .map_err(|e| format!("删除工作目录配置失败: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn relaunch(app: tauri::AppHandle) -> Result<(), String> {
+    app.restart();
+}
+
+#[tauri::command]
+pub async fn open_log_directory(app: tauri::AppHandle) -> Result<(), String> {
+    let log_dir = app.path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("logs");
+
+    if !log_dir.exists() {
+        return Err("日志目录不存在".to_string());
+    }
+
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer")
+            .arg(log_dir)
+            .spawn()
+            .map_err(|e| format!("打开日志目录失败: {}", e))?;
+    }
+
+    #[cfg(not(windows))]
+    {
+        return Err("此功能仅支持 Windows".to_string());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_logs(app: tauri::AppHandle) -> Result<(), String> {
+    let log_dir = app.path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?
+        .join("logs");
+
+    if !log_dir.exists() {
+        return Ok(());
+    }
+
+    let entries = std::fs::read_dir(&log_dir)
+        .map_err(|e| format!("读取日志目录失败: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_file() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("删除日志文件失败: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn check_for_update() -> Result<serde_json::Value, String> {
+    // Placeholder implementation - you can integrate with GitHub releases or your update server
+    let current_version = "0.2.99";
+
+    // For now, just return that we're up to date
+    // In a real implementation, you would fetch the latest version from GitHub/server
+    Ok(serde_json::json!({
+        "hasUpdate": false,
+        "message": format!("当前版本 {} 已是最新版本", current_version)
+    }))
+}

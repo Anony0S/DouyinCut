@@ -327,28 +327,11 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         ))
         .into());
     }
-    app.manage(crate::workspace::WorkDirectoryHost::new(executable, config.clone()));
-    let mut window_config = app.config().app.windows[0].clone();
-    // If workspace.json exists and contains a valid path, skip setup and go straight to main
-    let initial_url = if config.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&config) {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                if parsed.get("path").and_then(|v| v.as_str()).is_some() {
-                    tauri::WebviewUrl::App("index.html".into())
-                } else {
-                    tauri::WebviewUrl::App("setup.html".into())
-                }
-            } else {
-                tauri::WebviewUrl::App("setup.html".into())
-            }
-        } else {
-            tauri::WebviewUrl::App("setup.html".into())
-        }
-    } else {
-        tauri::WebviewUrl::App("setup.html".into())
-    };
-    window_config.url = initial_url;
-    tauri::WebviewWindowBuilder::from_config(app, &window_config)?.build()?;
+    app.manage(crate::workspace::WorkDirectoryHost::new(executable, config));
+    let mut config = app.config().app.windows[0].clone();
+    config.url = tauri::WebviewUrl::App("setup.html".into());
+    config.visible = false; // Start hidden to avoid flash
+    tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
     Ok(())
 }
 

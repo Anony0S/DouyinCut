@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { createWorkDirectoryFlow, type DirectoryState } from '../work-directory'
+import { getCurrent } from '@tauri-apps/api/window'
 
 declare global {
   interface Window {
@@ -14,11 +15,14 @@ const showUI = ref(false)
 
 // Check immediately before mounting to avoid flash
 onMounted(async () => {
+  const currentWindow = getCurrent()
   await flow.run('inspect')
   // Only show UI if selection or repair is required
   if (view.state === 'selection_required' || view.state === 'repair_required') {
     showUI.value = true
+    await currentWindow.show()
   }
+  // If already configured (state is 'opened'), window will be replaced by workbench
 })
 </script>
 

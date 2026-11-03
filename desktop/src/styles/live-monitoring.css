@@ -20,8 +20,8 @@
 .live-icon { display: inline-block; width: 18px; height: 18px; flex: none; vertical-align: middle; }
 .live-page .live-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .live-overview { width: 100%; }
-.live-metric .card-body { min-height: 120px; }
-.live-metric-icon { width: 52px; height: 52px; }
+.live-metric .card-body { min-height: 60px; padding: 0 20% 0 10%;}
+.live-metric-icon { width: 26px; height: 26px; }
 .live-metric-copy { display: flex; flex: 1; flex-direction: column; gap: 10px; }
 .live-metric-copy strong { align-self: left; font-variant-numeric: tabular-nums; }
 .live-toolbar, .live-toolbar-actions, .live-toolbar > p { display: flex; align-items: center; gap: 10px; }

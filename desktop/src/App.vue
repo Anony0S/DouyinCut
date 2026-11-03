@@ -7,7 +7,6 @@ import { useProjectStore } from './stores/project'
 import { createWorkspace, provideWorkspace } from './workspace'
 import { provideVideoImport } from './composables/useVideoImport'
 import LiveIcon from './components/live/LiveIcon.vue'
-import { appearance, setAppearance, type Appearance } from './appearance'
 import { hasUnsavedChanges as hasRegisteredUnsavedChanges } from './exit-guards'
 import { jobsApi } from './services/jobs'
 const route=useRoute(),router=useRouter(),session=useSessionStore(),project=useProjectStore()
@@ -97,21 +96,37 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
     <aside class="sidebar">
       <div class="brand"><span class="brand-icon">D</span><div>DouyinCut<small>服装直播剪辑工作台</small></div></div>
       <div class="nav-label">工作空间</div>
-      <button :class="{active:route.name==='live-monitoring'}" :disabled="busy" @click="workspace.go('live-monitoring')">直播监控</button>
-      <button :class="{active:route.name==='workspace'}" :disabled="!project.assetId || busy" @click="workspace.goEditor()">素材与粗剪 <span>01</span></button>
-      <button :class="{active:route.name==='projects'}" :disabled="busy" @click="workspace.goProjects()">视频项目</button>
-      <button :class="{active:route.name==='jobs'}" :disabled="busy" @click="workspace.go('jobs')">后台任务 <span>{{ activeJobs }}</span></button>
-      <button :class="{active:route.name==='settings'}" :disabled="busy" @click="workspace.go('settings')">云端设置 <span>↗</span></button>
+      <button class="sidebar-link" :class="{active:route.name==='live-monitoring'}" :disabled="busy" @click="workspace.go('live-monitoring')">
+        <LiveIcon name="radio"/><span class="nav-text">直播监控</span>
+      </button>
+      <button class="sidebar-link" :class="{active:route.name==='workspace'}" :disabled="!project.assetId || busy" @click="workspace.goEditor()">
+        <LiveIcon name="video"/><span class="nav-text">素材与粗剪</span><span class="nav-badge">01</span>
+      </button>
+      <button class="sidebar-link" :class="{active:route.name==='projects'}" :disabled="busy" @click="workspace.goProjects()">
+        <LiveIcon name="folder"/><span class="nav-text">视频项目</span>
+      </button>
+      <button class="sidebar-link" :class="{active:route.name==='jobs'}" :disabled="busy" @click="workspace.go('jobs')">
+        <LiveIcon name="clock"/><span class="nav-text">后台任务</span><span class="nav-badge">{{ activeJobs }}</span>
+      </button>
+      <button class="sidebar-link" :class="{active:route.name==='appearance'}" :disabled="busy" @click="workspace.go('appearance')">
+        <LiveIcon name="palette"/><span class="nav-text">外观</span>
+      </button>
+      <button class="sidebar-link" :class="{active:route.name==='settings'}" :disabled="busy" @click="workspace.go('settings')">
+        <LiveIcon name="settings"/><span class="nav-text">云端设置</span>
+      </button>
+      <button class="sidebar-link" :class="{active:route.name==='local-settings'}" :disabled="busy" @click="workspace.go('local-settings')">
+        <LiveIcon name="server"/><span class="nav-text">本地设置</span>
+      </button>
       <div class="sidebar-bottom">
-        <label for="app-appearance" class="mb-2 mt-0 text-inherit">外观</label>
-        <select id="app-appearance" class="select mb-5 w-full bg-base-200 text-base-content border-base-300"
-          aria-label="外观" :value="appearance"
-          @change="setAppearance(($event.target as HTMLSelectElement).value as Appearance)">
-          <option value="system">跟随系统</option>
-          <option value="light">浅色</option>
-          <option value="dark">深色</option>
-        </select>
-        <span :class="['status-dot',{online:connected}]"></span>{{ connected?'本地服务已连接':'本地服务未连接' }}<p>v0.1</p>
+        <span
+          class="connection-status"
+          role="img"
+          tabindex="0"
+          :title="connected ? '本地服务已连接' : '本地服务未连接'"
+          :aria-label="connected ? '本地服务已连接' : '本地服务未连接'">
+          <LiveIcon name="server" :class="{online:connected}"/>
+        </span>
+        <span class="app-version">v0.2.99</span>
       </div>
     </aside>
 

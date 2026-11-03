@@ -19,6 +19,8 @@ const paths: Record<string, string> = {
   arrow: 'M5 12h14 m-5-5 5 5-5 5',
   layers: 'm12 3 10 5-10 5L2 8l10-5z M2 12l10 5 10-5 M2 16l10 5 10-5',
   bag: 'M5 7h14l1 14H4L5 7z M8 8V6a4 4 0 0 1 8 0v2',
+  palette: 'M12 3a9 9 0 1 0 0 18h1.2a2.8 2.8 0 0 0 2.1-4.7 1.6 1.6 0 0 1 1.2-2.7H18a3 3 0 0 0 3-3c0-4.2-4-7.6-9-7.6z M7.5 12h.01 M9.5 7.8h.01 M14.5 7.8h.01 M17 11h.01',
+  server: 'M4 5h16v10H4z M8 19h8 M12 15v4 M7 9h.01 M10 9h.01',
 }
 </script>
 <template><svg class="live-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name] || paths.rooms" /></svg></template>

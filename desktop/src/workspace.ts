@@ -18,7 +18,7 @@ export function createWorkspace(router: Router) {
   async function goProjects(filter: ProjectFilter = list.filter) {await push({name:'projects',query:filterQuery(filter)})}
   async function openProject(id: string) {await push({name:'workspace',params:{id}})}
   async function goEditor() {if(project.assetId) await openProject(project.assetId)}
-  async function go(name: 'jobs'|'settings'|'live-monitoring') {await push({name})}
+  async function go(name: 'jobs'|'settings'|'appearance'|'local-settings'|'live-monitoring') {await push({name})}
   async function refreshProjects(filter: ProjectFilter) {
     try {
       await session.connect();await list.load(filter)

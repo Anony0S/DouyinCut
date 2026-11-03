@@ -293,10 +293,10 @@ onUnmounted(() => {
           <LiveIcon name="rooms" class="live-metric-icon shrink-0 text-info" />
           <div class="live-metric-copy">
             <span class="text-lg text-base-content">直播间总数</span>
-            <strong class="text-2xl font-bold leading-none">
-              {{ monitors.length }}
-            </strong>
           </div>
+          <strong class="text-2xl font-bold leading-none">
+            {{ monitors.length }}
+          </strong>
         </div>
       </div>
       <div class="card card-border bg-base-100 live-metric">
@@ -304,10 +304,10 @@ onUnmounted(() => {
           <LiveIcon name="record" class="live-metric-icon shrink-0 text-error" />
           <div class="live-metric-copy">
             <span class="text-lg text-base-content">正在录制</span>
-            <strong class="text-2xl font-bold leading-none">
-              {{ recordingCount }}
-            </strong>
           </div>
+          <strong class="text-2xl font-bold leading-none">
+            {{ recordingCount }}
+          </strong>
         </div>
       </div>
       <div class="card card-border bg-base-100 live-metric">
@@ -315,10 +315,10 @@ onUnmounted(() => {
           <LiveIcon name="radio" class="live-metric-icon shrink-0 text-success" />
           <div class="live-metric-copy">
             <span class="text-lg text-base-content">正在直播</span>
-            <strong class="text-2xl font-bold leading-none">
-              {{ liveCount }}
-            </strong>
           </div>
+          <strong class="text-2xl font-bold leading-none">
+            {{ liveCount }}
+          </strong>
         </div>
       </div>
       <div class="card card-border bg-base-100 live-metric">
@@ -329,10 +329,10 @@ onUnmounted(() => {
             :class="attentionCount ? 'text-warning' : 'text-success'" />
           <div class="live-metric-copy">
             <span class="text-lg text-base-content">需要关注</span>
-            <strong class="text-2xl font-bold leading-none">
-              {{ attentionCount }}
-            </strong>
           </div>
+          <strong class="text-2xl font-bold leading-none">
+            {{ attentionCount }}
+          </strong>
         </div>
       </div>
     </div>

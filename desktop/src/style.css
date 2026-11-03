@@ -28,13 +28,25 @@
   --accent-hover: color-mix(in oklab, var(--color-primary) 85%, var(--color-base-content));
   --accent-soft: color-mix(in oklab, var(--color-primary) 12%, var(--color-base-100));
   --accent-border: color-mix(in oklab, var(--color-primary) 30%, var(--color-base-100));
-  --sidebar: #202235;
+  --sidebar: #ffffff;
+  --sidebar-text: #536075;
+  --sidebar-muted: #7e899b;
+  --sidebar-active: #eef1f7;
+  --sidebar-border: #e5e9f1;
   --video: #191b26;
   font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;
   color:var(--text);
   background:var(--page);
   font-synthesis:none;
   font-size:14px;
+}
+
+:root[data-theme="dark"] {
+  --sidebar: #111214;
+  --sidebar-text: #c4c6cc;
+  --sidebar-muted: #8b8e96;
+  --sidebar-active: #292a2e;
+  --sidebar-border: #303136;
 }
 
 * {
@@ -147,7 +159,8 @@ small {
   padding:31px 22px;
   position:fixed;
   inset:0 auto 0 0;
-  color:#f4f5ff;
+  color:var(--sidebar-text);
+  border-right:1px solid var(--sidebar-border);
   display:flex;
   flex-direction:column
 }
@@ -165,7 +178,7 @@ small {
   font-size:10px;
   letter-spacing:1px;
   font-weight:400;
-  color:#a9aec5
+  color:var(--sidebar-muted)
 }
 
 .brand-icon {
@@ -182,42 +195,83 @@ small {
 .nav-label {
   margin:55px 13px 15px;
   font-size:10px;
-  color:#a1a7c1;
+  color:var(--sidebar-muted);
   letter-spacing:2px
 }
 
 .sidebar>button {
   text-align:left;
   display:flex;
-  justify-content:space-between;
-  color:#b7bdd3;
+  align-items:center;
+  justify-content:flex-start;
+  gap:12px;
+  width:100%;
+  color:var(--sidebar-text);
   background:transparent;
   border-radius:7px;
   padding:14px;
   margin:4px 0
 }
 
-.sidebar>button.active {
-  color:#eeebff;
-  background:#343052
+.sidebar>button .live-icon {
+  width:18px;
+  height:18px;
+  flex:none;
 }
 
-.sidebar>button span {
+.sidebar>button .nav-text {
+  flex:1;
+  min-width:0;
+}
+
+.sidebar>button.active {
+  color:var(--text);
+  background:var(--sidebar-active)
+}
+
+.sidebar>button:hover:not(:disabled):not(.active) {
+  color:var(--text);
+  background:var(--surface-soft)
+}
+
+.sidebar>button .nav-badge {
+  margin-left:auto;
   font-size:11px;
-  color:#b9b2ed
+  color:var(--sidebar-muted)
 }
 
 .sidebar-bottom {
   margin-top:auto;
-  font-size:11px;
-  color:#b8bfd3;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:13px;
+  color:var(--sidebar-muted);
   padding:22px 10px 0
 }
 
-.sidebar-bottom p {
-  color:#a1a7c1;
-  line-height:1.9;
-  margin-top:18px
+.connection-status {
+  display:inline-flex;
+  flex:none;
+  width:16px;
+  height:16px;
+  color:#d38a5f;
+  cursor:help;
+}
+
+.connection-status .live-icon {
+  width:16px;
+  height:16px;
+}
+
+.connection-status .live-icon.online {
+  color:#4f9b6d;
+}
+
+.app-version {
+  white-space:nowrap;
+  font-size:13px;
+  line-height:1;
 }
 
 .status-dot {
@@ -715,11 +769,37 @@ main.workspace-main { padding-top: 26px; }
 .settings-panel .settings-card label { font-size: 14px; }
 .settings-panel .hint { font-size: 14px; }
 
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 24px;
+.settings-tabs {
+  display:flex;
+  gap:6px;
+  margin:22px 0 16px;
+  overflow-x:auto;
+  border-bottom:1px solid var(--app-border);
+}
+
+.settings-tabs button {
+  flex:none;
+  padding:11px 14px 10px;
+  border-bottom:2px solid transparent;
+  background:transparent;
+  color:var(--text-muted);
+  font-size:14px;
+  white-space:nowrap;
+}
+
+.settings-tabs button:hover {
+  color:var(--text);
+  background:var(--surface-soft);
+}
+
+.settings-tabs button.active {
+  border-bottom-color:var(--color-primary);
+  color:var(--text);
+  font-weight:600;
+}
+
+.cloud-settings-panels > .settings-card {
+  margin:0;
 }
 
 .settings-card {
@@ -809,6 +889,7 @@ main.workspace-main { padding-top: 26px; }
 
 .secret-field-controls {
   display: flex;
+  align-items: center;
   gap: 10px;
 }
 
@@ -938,13 +1019,6 @@ main {
 
 }
 
-@media(max-width:1150px) {
-  .settings-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-}
-
 @media(max-width:600px) {
   .settings-card {
     padding: 18px;
@@ -962,13 +1036,38 @@ main {
   padding:22px 10px
 }
 
-.brand>div,.brand small,.nav-label,.sidebar-bottom,.sidebar>button span {
+.brand>div,.brand small,.nav-label {
   display:none
 }
 
 .sidebar>button {
   padding:12px 5px;
   font-size:10px
+}
+
+.sidebar>button .nav-text,
+.sidebar>button .nav-badge {
+  display:none;
+}
+
+.sidebar>button .live-icon {
+  margin:auto;
+}
+
+.sidebar-bottom {
+  justify-content:center;
+  gap:5px;
+  padding:18px 0 0;
+}
+
+.connection-status,
+.connection-status .live-icon {
+  width:13px;
+  height:13px;
+}
+
+.app-version {
+  font-size:9px;
 }
 
 .brand-icon {

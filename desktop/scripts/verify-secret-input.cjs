@@ -181,7 +181,7 @@ async function verifySettings() {
     throw new Error(`Unexpected API route: ${url}`)
   }
   const appSource = fs.readFileSync(path.join(__dirname, '../src/views/SettingsView.vue'), 'utf8')
-  assert.ok(appSource.includes('<h2>语音识别模型</h2>'), 'Speech model has its own card')
+  assert.ok(appSource.includes('id="settings-panel-asr"'), 'Speech model has its own panel')
   assert.ok(!appSource.includes('settings-step'), 'Settings are not numbered steps')
   assert.ok(appSource.includes('qwen-audio-3.1-asr-flash'))
   const appScript = compileScript(parse(appSource).descriptor, { id: 'settings-save-check' })
@@ -235,7 +235,7 @@ async function verifySettings() {
       await settle()
       if (i === 0) await bindings.saveModelConnection()
       else if (i === 1) await bindings.saveAsrConnection()
-      else await bindings.saveSecret(fields[i])
+      else await bindings.saveSettings()
       await settle()
       assert.equal(bindings.error.value, '', 'Saving should not fail')
       assert.equal(inputs[i].props.value, secretPreview(keys[i]), `${fields[i]} must display preview immediately after save`)
@@ -281,13 +281,29 @@ async function verifySettings() {
     assert.equal(bindings.config.value.oss_bucket, 'unsaved-oss-draft')
     assert.equal(bindings.asrKey.value, '')
     bindings.config.value.asr_model = 'another-unsaved-model'
+    bindings.config.value.oss_endpoint = 'https://oss.example'
+    bindings.secretDrafts.value.oss_access_key_secret = 'new-oss-secret'
+    const beforeOssSave = submissions.length
     await bindings.saveSettings(); await settle()
+    assert.equal(savedConfig.oss_endpoint, 'https://oss.example', 'OSS save persists endpoint')
     assert.equal(savedConfig.oss_bucket, 'unsaved-oss-draft', 'OSS save persists its own fields')
+    assert.deepEqual(submissions.slice(beforeOssSave), [
+      { name: 'oss_access_key_id', value: 'unsaved-oss-id' },
+      { name: 'oss_access_key_secret', value: 'new-oss-secret' },
+    ], 'One OSS save submits both replacement keys')
+    assert.equal(bindings.secretDrafts.value.oss_access_key_id, '')
+    assert.equal(bindings.secretDrafts.value.oss_access_key_secret, '')
+    assert.equal(inputs[2].props.value, secretPreview('unsaved-oss-id'))
+    assert.equal(inputs[3].props.value, secretPreview('new-oss-secret'))
     assert.equal(savedConfig.asr_model, 'custom-qwen-audio-v1', 'OSS save must not persist model draft')
     assert.equal(bindings.config.value.asr_model, 'another-unsaved-model', 'OSS save preserves model draft locally')
-    const configBeforeKeySave = structuredClone(savedConfig)
-    await bindings.saveSecret('oss_access_key_id'); await settle()
-    assert.deepEqual(savedConfig, configBeforeKeySave, 'OSS key save must not change model/OSS settings')
+    assert.equal(bindings.modelKey.value, 'unsaved-text-key', 'OSS save preserves text key draft')
+    const countAfterOssSave = submissions.length
+    bindings.secretDrafts.value.oss_access_key_id = '  '
+    await bindings.saveSettings(); await settle()
+    assert.equal(submissions.length, countAfterOssSave, 'Blank OSS drafts preserve saved keys')
+    assert.equal(values.oss_access_key_id, 'unsaved-oss-id')
+    assert.equal(values.oss_access_key_secret, 'new-oss-secret')
     console.log('Settings save/reload checks passed (four independent mock credentials and isolated card saves).')
   } finally {
     app.unmount()
@@ -319,8 +335,12 @@ async function verifyModelTestButton() {
   const compiled=compileScript(parse(source).descriptor,{id:'settings-model-test',inlineTemplate:true})
   const code=ts.transpileModule(compiled.content,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
   const result={exports:{}}
+  const vShow={
+    beforeMount(element,{value}) { element.props.style={...element.props.style,display:value?'':'none'} },
+    updated(element,{value}) { element.props.style={...element.props.style,display:value?'':'none'} },
+  }
   new Function('require','module','exports',code)(name=>{
-    if(name==='vue') return {...vue,vModelText:{}}
+    if(name==='vue') return {...vue,vModelText:{},vShow}
     if(name==='../services/cloud') return loaded.load('services/cloud.ts')
     if(name==='../stores/session') return loaded.load('stores/session.ts')
     if(name==='../exit-guards') return loaded.load('exit-guards.ts')
@@ -331,7 +351,15 @@ async function verifyModelTestButton() {
   let unmounted=false
   try {
     app.use(pinia);app.mount(root);await settle()
-    assert.deepEqual(all(root,el=>el.type==='h2').map(text), ['文本剪辑模型','语音识别模型','OSS 存储','抖音直播登录'])
+    assert.deepEqual(all(root,el=>el.props.role==='tab').map(el=>text(el).trim()), ['文本剪辑模型','语音识别模型','OSS 存储','抖音直播登录'])
+    const ossPanel=all(root,el=>el.props.id==='settings-panel-oss')[0]
+    const ossForms=all(ossPanel,el=>el.type==='form')
+    assert.equal(ossForms.length,1,'OSS fields share one form without nested secret forms')
+    const ossSaveButtons=all(ossPanel,el=>el.type==='button' && text(el).trim().startsWith('保存'))
+    assert.equal(ossSaveButtons.length,1,'OSS has one save button for all configuration')
+    assert.equal(text(ossSaveButtons[0]).trim(),'保存 OSS 配置')
+    assert.ok(all(ossForms[0],el=>el.type==='input' && el.props.id==='oss_access_key_secret')[0], 'OSS form contains secret fields')
+    assert.ok(all(ossForms[0].children.at(-1),el=>el===ossSaveButtons[0])[0], 'Save action appears at the bottom of the OSS form')
     const speechInput=all(root,el=>el.type==='input' && el.props.id==='asr-api-key')[0]
     assert.ok(speechInput,'Speech card renders its independent credential input')
     assert.ok(all(root,el=>el.type==='input' && el.props.id==='asr-base-url')[0])
@@ -345,6 +373,20 @@ async function verifyModelTestButton() {
     assert.ok(text(root).includes('文本模型可用'))
     assert.ok(text(root).includes('0.25 秒'))
     const planner=all(root,el=>el.type==='input' && el.props.id==='planner-model')[0]
+    planner.props['onUpdate:modelValue']('unsaved-model');await settle()
+    const textPanel=all(root,el=>el.props.id==='settings-panel-text')[0]
+    const asrPanel=all(root,el=>el.props.id==='settings-panel-asr')[0]
+    const asrTab=all(root,el=>el.props.role==='tab' && el.props.id==='settings-tab-asr')[0]
+    const textTab=all(root,el=>el.props.role==='tab' && el.props.id==='settings-tab-text')[0]
+    assert.equal(textPanel.props.style.display,'','The selected cloud settings panel is visible')
+    asrTab.props.onClick();await settle()
+    assert.equal(textPanel.props.style.display,'none')
+    assert.equal(asrPanel.props.style.display,'')
+    textTab.props.onClick();await settle()
+    assert.equal(textPanel.props.style.display,'')
+    await button.props.onClick();await settle()
+    assert.equal(requests.at(-1).config.planner_model,'unsaved-model','Switching tabs preserves the hidden form draft')
+    planner.props['onUpdate:modelValue']('temporary-model');await settle()
     planner.props['onUpdate:modelValue']('unsaved-model');await settle()
     assert.ok(!text(root).includes('文本模型可用'),'editing configuration clears the old result')
     const key=all(root,el=>el.type==='input' && el.props.id==='model-api-key')[0]

@@ -8,6 +8,32 @@ import SecretInput from "../components/SecretInput.vue";
 import { registerExitGuard } from "../exit-guards";
 const session = useSessionStore();
 const { busy, connected, error } = storeToRefs(session);
+const cloudSections = [
+  { id: "text", label: "文本剪辑模型" },
+  { id: "asr", label: "语音识别模型" },
+  { id: "oss", label: "OSS 存储" },
+  { id: "douyin", label: "抖音直播登录" },
+] as const;
+type CloudSectionId = (typeof cloudSections)[number]["id"];
+const activeCloudSection = ref<CloudSectionId>("text");
+function onCloudTabKeydown(event: KeyboardEvent, index: number) {
+  const nextIndex =
+    event.key === "ArrowRight"
+      ? (index + 1) % cloudSections.length
+      : event.key === "ArrowLeft"
+        ? (index - 1 + cloudSections.length) % cloudSections.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? cloudSections.length - 1
+            : -1;
+  if (nextIndex < 0) return;
+  event.preventDefault();
+  activeCloudSection.value = cloudSections[nextIndex].id;
+  (event.currentTarget as HTMLElement).parentElement
+    ?.querySelectorAll<HTMLButtonElement>("[role='tab']")
+    [nextIndex]?.focus();
+}
 const config = ref<CloudConfig>({
   region: "cn",
   base_url: "",
@@ -69,10 +95,19 @@ const canTestModel = computed(
     ),
 );
 let modelTestVersion = 0;
-const hasUnsavedChanges = computed(() => Boolean(savedConfig.value &&
-  JSON.stringify(config.value) !== JSON.stringify(savedConfig.value)) ||
-  Boolean(modelKey.value.trim() || asrKey.value.trim() || douyinCookie.value.trim() ||
-    Object.values(secretDrafts.value).some(value => value.trim())));
+const hasUnsavedChanges = computed(
+  () =>
+    Boolean(
+      savedConfig.value &&
+      JSON.stringify(config.value) !== JSON.stringify(savedConfig.value),
+    ) ||
+    Boolean(
+      modelKey.value.trim() ||
+      asrKey.value.trim() ||
+      douyinCookie.value.trim() ||
+      Object.values(secretDrafts.value).some((value) => value.trim()),
+    ),
+);
 let unregisterExitGuard: (() => void) | undefined;
 watch(
   [
@@ -135,24 +170,21 @@ async function saveConfigFields(fields: (keyof CloudConfig)[]) {
   };
   savedConfig.value = {
     ...(savedConfig.value || config.value),
-    ...Object.fromEntries(fields.map(name => [name, saved[name]])),
+    ...Object.fromEntries(fields.map((name) => [name, saved[name]])),
   } as CloudConfig;
 }
 async function saveSettings() {
   await session.act(async () => {
     await saveConfigFields(["oss_endpoint", "oss_bucket"]);
+    for (const { name } of ossSecretFields) {
+      const value = secretDrafts.value[name].trim();
+      if (!value) continue;
+      const result = await cloudApi.saveSecret(name, value);
+      secretDrafts.value[name] = "";
+      secrets.value[name] = true;
+      secretPreviews.value[name] = result.preview;
+    }
     session.message = "OSS 存储配置已保存";
-  });
-}
-async function saveSecret(name: ServiceSecretName) {
-  await session.act(async () => {
-    const value = secretDrafts.value[name].trim();
-    if (!value) return;
-    const result = await cloudApi.saveSecret(name, value);
-    secretDrafts.value[name] = "";
-    secrets.value[name] = true;
-    secretPreviews.value[name] = result.preview;
-    session.message = `${serviceSecretFields.find((field) => field.name === name)?.label} 已保存`;
   });
 }
 async function saveModelConnection() {
@@ -174,9 +206,16 @@ async function saveModelConnection() {
 }
 async function saveAsrConnection() {
   await session.act(async () => {
-    await saveConfigFields(["asr_base_url", "asr_model", "asr_timeout_seconds"]);
+    await saveConfigFields([
+      "asr_base_url",
+      "asr_model",
+      "asr_timeout_seconds",
+    ]);
     if (asrKey.value.trim()) {
-      const result = await cloudApi.saveSecret("asr_api_key", asrKey.value.trim());
+      const result = await cloudApi.saveSecret(
+        "asr_api_key",
+        asrKey.value.trim(),
+      );
       secretPreviews.value.asr_api_key = result.preview;
       asrKey.value = "";
       secrets.value.asr_api_key = true;
@@ -209,73 +248,32 @@ onUnmounted(() => {
   douyinCookie.value = "";
   secretDrafts.value = { oss_access_key_id: "", oss_access_key_secret: "" };
 });
-
-// Workspace management
-async function changeWorkDirectory() {
-  if (!confirm('更换工作目录需要重启应用，未保存的更改将丢失。确认继续？')) {
-    return;
-  }
-  try {
-    // Delete workspace.json to force re-selection on next startup
-    await window.__TAURI_INTERNALS__.invoke('delete_workspace_config');
-    // Restart the app
-    await window.__TAURI_INTERNALS__.invoke('relaunch');
-  } catch (error) {
-    alert(`操作失败: ${error}`);
-  }
-}
-
-// Log management
-const appVersion = ref('0.2.99');
-async function openLogDirectory() {
-  try {
-    await window.__TAURI_INTERNALS__.invoke('open_log_directory');
-  } catch (error) {
-    alert(`打开日志目录失败: ${error}`);
-  }
-}
-
-async function clearLogs() {
-  if (!confirm('确认删除所有日志文件？此操作不可恢复。')) {
-    return;
-  }
-  try {
-    await window.__TAURI_INTERNALS__.invoke('clear_logs');
-    alert('日志已清理');
-  } catch (error) {
-    alert(`清理日志失败: ${error}`);
-  }
-}
-
-// Update check
-const checkingUpdate = ref(false);
-const updateResult = ref<{ hasUpdate: boolean; message: string } | null>(null);
-async function checkForUpdate() {
-  checkingUpdate.value = true;
-  updateResult.value = null;
-  try {
-    const result = await window.__TAURI_INTERNALS__.invoke('check_for_update');
-    updateResult.value = result as { hasUpdate: boolean; message: string };
-  } catch (error) {
-    updateResult.value = { hasUpdate: false, message: `检查更新失败: ${error}` };
-  } finally {
-    checkingUpdate.value = false;
-  }
-}
 </script>
 <template>
   <section class="settings-panel">
-    <div class="intro-strip">
-      文本剪辑与语音识别分别配置连接，独立保存。语音识别使用 OSS 存储音频；直播登录按需配置。
+    <div class="settings-tabs" role="tablist" aria-label="云端设置">
+      <button
+        v-for="(section, index) in cloudSections"
+        :id="`settings-tab-${section.id}`"
+        :key="section.id"
+        type="button"
+        role="tab"
+        :aria-selected="activeCloudSection === section.id"
+        :aria-controls="`settings-panel-${section.id}`"
+        :tabindex="activeCloudSection === section.id ? 0 : -1"
+        :class="{ active: activeCloudSection === section.id }"
+        @click="activeCloudSection = section.id"
+        @keydown="onCloudTabKeydown($event, index)">
+        {{ section.label }}
+      </button>
     </div>
-    <div class="settings-grid">
-      <section class="card card-border bg-base-100 settings-card settings-model-card">
-        <div class="settings-card-heading">
-          <div>
-            <h2>文本剪辑模型</h2>
-            <p>根据识别文本选择剪辑区间、生成组片方案</p>
-          </div>
-        </div>
+    <div class="cloud-settings-panels">
+      <section
+        id="settings-panel-text"
+        v-show="activeCloudSection === 'text'"
+        role="tabpanel"
+        aria-labelledby="settings-tab-text"
+        class="card card-border bg-base-100 settings-card settings-model-card">
         <form @submit.prevent="saveModelConnection">
           <label for="model-base-url">Base URL</label>
           <input
@@ -284,7 +282,9 @@ async function checkForUpdate() {
             type="url"
             required
             placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" />
-          <p class="hint">使用兼容 Chat Completions 的接口，不含 /chat/completions。</p>
+          <p class="hint">
+            使用兼容 Chat Completions 的接口，不含 /chat/completions。
+          </p>
           <label for="model-api-key">
             API Key · {{ modelKeyConfigured ? "已配置" : "未配置" }}
           </label>
@@ -296,9 +296,15 @@ async function checkForUpdate() {
             :preview="modelKeyPreview"
             :disabled="busy"
             placeholder="填写文本模型服务的 API Key" />
-          <p class="hint">仅用于文本剪辑。输入新密钥可替换，留空保留已保存的密钥。</p>
+          <p class="hint">
+            仅用于文本剪辑。输入新密钥可替换，留空保留已保存的密钥。
+          </p>
           <label for="planner-model">模型 API ID</label>
-          <input id="planner-model" v-model="config.planner_model" required maxlength="100" />
+          <input
+            id="planner-model"
+            v-model="config.planner_model"
+            required
+            maxlength="100" />
           <label for="chat-timeout">请求等待时间 / 秒</label>
           <input
             id="chat-timeout"
@@ -307,9 +313,14 @@ async function checkForUpdate() {
             min="30"
             max="900"
             required />
-          <p class="hint">默认 300 秒。新分析、组片和失败任务重试使用保存后的文本配置。</p>
-          <p class="hint">测试会向当前文本模型发送一条简短请求，可能产生少量费用；不测试语音识别或 OSS。</p>
-          <div class="settings-actions flex-wrap items-center gap-2">
+          <p class="hint">
+            默认 300 秒。新分析、组片和失败任务重试使用保存后的文本配置。
+          </p>
+          <p class="hint">
+            测试会向当前文本模型发送一条简短请求，可能产生少量费用；不测试语音识别或
+            OSS。
+          </p>
+          <div class="settings-actions settings-model-actions">
             <button
               type="button"
               class="btn"
@@ -342,13 +353,12 @@ async function checkForUpdate() {
           </div>
         </form>
       </section>
-      <section class="card card-border bg-base-100 settings-card settings-model-card">
-        <div class="settings-card-heading">
-          <div>
-            <h2>语音识别模型</h2>
-            <p>将源视频音频识别为文本及源时间戳</p>
-          </div>
-        </div>
+      <section
+        id="settings-panel-asr"
+        v-show="activeCloudSection === 'asr'"
+        role="tabpanel"
+        aria-labelledby="settings-tab-asr"
+        class="card card-border bg-base-100 settings-card settings-model-card">
         <form @submit.prevent="saveAsrConnection">
           <label for="asr-base-url">Base URL</label>
           <input
@@ -357,7 +367,9 @@ async function checkForUpdate() {
             type="url"
             required
             placeholder="https://dashscope.aliyuncs.com" />
-          <p class="hint">使用 Qwen 原生多模态音频接口的服务地址，不含完整识别接口路径。</p>
+          <p class="hint">
+            使用 Qwen 原生多模态音频接口的服务地址，不含完整识别接口路径。
+          </p>
           <label for="asr-api-key">
             API Key · {{ asrKeyConfigured ? "已配置" : "未配置" }}
           </label>
@@ -369,7 +381,9 @@ async function checkForUpdate() {
             :preview="asrKeyPreview"
             :disabled="busy"
             placeholder="填写语音识别服务的 API Key" />
-          <p class="hint">仅用于语音识别，需单独保存。输入新密钥可替换，留空保留已保存的密钥。</p>
+          <p class="hint">
+            仅用于语音识别，需单独保存。输入新密钥可替换，留空保留已保存的密钥。
+          </p>
           <label for="asr-model">模型 API ID</label>
           <input
             id="asr-model"
@@ -385,20 +399,27 @@ async function checkForUpdate() {
             min="30"
             max="900"
             required />
-          <p class="hint">默认 300 秒。新分析和失败任务重试使用保存后的语音配置，进行中的任务保持提交时配置。</p>
-          <p class="hint">每段音频最多 2 分钟；模型必须支持此接口并返回句级时间戳，只有整段文本时无法精确粗剪。</p>
+          <p class="hint">
+            默认 300
+            秒。新分析和失败任务重试使用保存后的语音配置，进行中的任务保持提交时配置。
+          </p>
+          <p class="hint">
+            每段音频最多 2
+            分钟；模型必须支持此接口并返回句级时间戳，只有整段文本时无法精确粗剪。
+          </p>
           <div class="settings-actions">
-            <button class="btn btn-primary" :disabled="busy || !connected">保存语音模型</button>
+            <button class="btn btn-primary" :disabled="busy || !connected">
+              保存语音模型
+            </button>
           </div>
         </form>
       </section>
-      <section class="card card-border bg-base-100 settings-card">
-        <div class="settings-card-heading">
-          <div>
-            <h2>OSS 存储</h2>
-            <p>音频存储与访问凭据</p>
-          </div>
-        </div>
+      <section
+        id="settings-panel-oss"
+        v-show="activeCloudSection === 'oss'"
+        role="tabpanel"
+        aria-labelledby="settings-tab-oss"
+        class="card card-border bg-base-100 settings-card">
         <form @submit.prevent="saveSettings">
           <p class="hint">
             语音识别使用私有 Bucket
@@ -416,54 +437,45 @@ async function checkForUpdate() {
               v-model="config.oss_bucket"
               placeholder="私有 Bucket 名称" />
           </div>
+          <div class="section-divider"></div>
+          <h3>OSS 访问密钥</h3>
+          <p class="hint">与 Endpoint、Bucket 一起保存，密钥留空保留原值。</p>
+          <div class="secret-fields">
+            <div
+              v-for="field in ossSecretFields"
+              :key="field.name"
+              class="secret-field">
+              <label :for="field.name">
+                {{ field.label }}
+                <span class="secret-field-status">
+                  {{ secrets[field.name] ? "已配置" : "未配置" }}
+                </span>
+              </label>
+              <div class="secret-field-controls">
+                <SecretInput
+                  :id="field.name"
+                  v-model="secretDrafts[field.name]"
+                  :saved="Boolean(secrets[field.name])"
+                  :secret-name="field.name"
+                  :preview="secretPreviews[field.name] || ''"
+                  :disabled="busy"
+                  :placeholder="field.placeholder" />
+              </div>
+            </div>
+          </div>
           <div class="settings-actions">
             <button class="btn btn-primary" :disabled="busy || !connected">
               保存 OSS 配置
             </button>
           </div>
         </form>
-        <div class="section-divider"></div>
-        <h3>OSS 访问密钥</h3>
-        <p class="hint">每项单独保存，留空保留原值。</p>
-        <div class="secret-fields">
-          <form
-            v-for="field in ossSecretFields"
-            :key="field.name"
-            class="secret-field"
-            @submit.prevent="saveSecret(field.name)">
-            <label :for="field.name">
-              {{ field.label }}
-              <span class="secret-field-status">
-                {{ secrets[field.name] ? "已配置" : "未配置" }}
-              </span>
-            </label>
-            <div class="secret-field-controls">
-              <SecretInput
-                :id="field.name"
-                v-model="secretDrafts[field.name]"
-                :saved="Boolean(secrets[field.name])"
-                :secret-name="field.name"
-                :preview="secretPreviews[field.name] || ''"
-                :disabled="busy"
-                :placeholder="field.placeholder" />
-              <button
-                class="btn btn-primary"
-                :disabled="
-                  busy || !connected || !secretDrafts[field.name].trim()
-                ">
-                保存
-              </button>
-            </div>
-          </form>
-        </div>
       </section>
-      <section class="card card-border bg-base-100 settings-card">
-        <div class="settings-card-heading">
-          <div>
-            <h2>抖音直播登录</h2>
-            <p>直播商品详情的登录凭据</p>
-          </div>
-        </div>
+      <section
+        id="settings-panel-douyin"
+        v-show="activeCloudSection === 'douyin'"
+        role="tabpanel"
+        aria-labelledby="settings-tab-douyin"
+        class="card card-border bg-base-100 settings-card">
         <p class="hint">
           商品详情接口需要登录态。粘贴浏览器开发者工具中该请求的完整 Cookie
           请求头；内容保存到本机应用设置。留空时保留原值。
@@ -492,107 +504,16 @@ async function checkForUpdate() {
           </div>
         </form>
       </section>
-
-      <!-- Workspace Management -->
-      <section class="card card-border bg-base-100 settings-card">
-        <div class="settings-card-heading">
-          <div>
-            <h2>工作目录管理</h2>
-            <p>管理应用数据存储位置</p>
-          </div>
-        </div>
-        <div class="settings-actions">
-          <div class="action-row">
-            <div>
-              <p class="action-label">更换工作目录</p>
-              <p class="action-hint">重新选择工作数据存储位置，需要重启应用</p>
-            </div>
-            <button class="btn btn-outline" @click="changeWorkDirectory">
-              更换目录
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Log Management -->
-      <section class="card card-border bg-base-100 settings-card">
-        <div class="settings-card-heading">
-          <div>
-            <h2>日志管理</h2>
-            <p>查看和清理应用日志</p>
-          </div>
-        </div>
-        <div class="settings-actions">
-          <div class="action-row">
-            <div>
-              <p class="action-label">打开日志目录</p>
-              <p class="action-hint">查看诊断日志文件</p>
-            </div>
-            <button class="btn btn-outline" @click="openLogDirectory">
-              打开目录
-            </button>
-          </div>
-          <div class="action-row">
-            <div>
-              <p class="action-label">清理日志</p>
-              <p class="action-hint">删除所有历史日志文件</p>
-            </div>
-            <button class="btn btn-outline btn-error" @click="clearLogs">
-              清理日志
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Update Check -->
-      <section class="card card-border bg-base-100 settings-card">
-        <div class="settings-card-heading">
-          <div>
-            <h2>版本更新</h2>
-            <p>检查应用更新</p>
-          </div>
-        </div>
-        <div class="settings-actions">
-          <div class="action-row">
-            <div>
-              <p class="action-label">当前版本</p>
-              <p class="action-hint">v{{ appVersion }}</p>
-            </div>
-            <button class="btn btn-outline" :disabled="checkingUpdate" @click="checkForUpdate">
-              {{ checkingUpdate ? '检查中...' : '检查更新' }}
-            </button>
-          </div>
-          <div v-if="updateResult" class="alert mt-3" :class="updateResult.hasUpdate ? 'alert-info' : 'alert-success'">
-            {{ updateResult.message }}
-          </div>
-        </div>
-      </section>
     </div>
   </section>
 </template>
 
 <style scoped>
-.settings-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 1.5rem;
-}
-
-.action-row {
-  display: flex;
-  justify-content: space-between;
+.settings-model-actions {
+  flex-direction: row;
   align-items: center;
-  gap: 1rem;
-}
-
-.action-label {
-  font-weight: 500;
-  margin-bottom: 0.25rem;
-}
-
-.action-hint {
-  font-size: 0.875rem;
-  opacity: 0.6;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1.5rem 0 0;
 }
 </style>

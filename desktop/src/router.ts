@@ -7,6 +7,8 @@ import ProjectsView from './views/ProjectsView.vue'
 import WorkspaceView from './views/WorkspaceView.vue'
 import JobsView from './views/JobsView.vue'
 import SettingsView from './views/SettingsView.vue'
+import AppearanceView from './views/AppearanceView.vue'
+import LocalSettingsView from './views/LocalSettingsView.vue'
 import LiveMonitoringView from './views/LiveMonitoringView.vue'
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHashHistory()) {
@@ -17,7 +19,9 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
     {path:'/projects/:id/edit',name:'workspace',component:WorkspaceView},
     {path:'/live-monitoring',name:'live-monitoring',component:LiveMonitoringView},
     {path:'/jobs',name:'jobs',component:JobsView},
+    {path:'/appearance',name:'appearance',component:AppearanceView},
     {path:'/settings',name:'settings',component:SettingsView},
+    {path:'/local-settings',name:'local-settings',component:LocalSettingsView},
     {path:'/:pathMatch(.*)*',redirect:'/projects'},
   ],scrollBehavior:(_to,_from,saved)=>saved || {left:0,top:0}})
   let navigation=0

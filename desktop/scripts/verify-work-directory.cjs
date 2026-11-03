@@ -9,6 +9,24 @@ const moduleResult = { exports: {} }
 new Function('module', 'exports', code)(moduleResult, moduleResult.exports)
 
 async function main() {
+  // Check the generated command ACL against both actual desktop window labels.
+  // Frontend mocks alone cannot catch Tauri rejecting a command before its handler.
+  const tauriRoot = path.join(__dirname, '../src-tauri')
+  const acl = JSON.parse(fs.readFileSync(path.join(tauriRoot, 'gen/schemas/acl-manifests.json'), 'utf8'))['__app-acl__']
+  const capabilities = Object.values(JSON.parse(fs.readFileSync(path.join(tauriRoot, 'gen/schemas/capabilities.json'), 'utf8')))
+  const localSettings = fs.readFileSync(path.join(__dirname, '../src/views/LocalSettingsView.vue'), 'utf8')
+  const commands = [...localSettings.matchAll(/\.invoke\("([^"]+)"\)/g)].map(match => match[1])
+  assert.ok(commands.includes('delete_workspace_config'), 'Exercise the reported directory command')
+  const config = JSON.parse(fs.readFileSync(path.join(tauriRoot, 'tauri.conf.json'), 'utf8'))
+  for (const window of [config.app.windows[0].label || 'main', 'workbench']) {
+    for (const command of commands) {
+      const grants = capabilities.filter(capability => capability.windows?.includes(window) &&
+        capability.permissions.some(permission => acl.permissions[permission]?.commands.allow.includes(command)))
+      assert.ok(grants.some(capability => capability.local), `${command} not allowed on window "${window}", URL: local`)
+      assert.ok(grants.some(capability => capability.remote?.urls.includes('http://127.0.0.1:*')),
+        `${command} not allowed on window "${window}", URL: http://127.0.0.1:*`)
+    }
+  }
   const calls = []
   const replies = [
     { state: 'selection_required', path: null, message: '请选择目录' },
@@ -38,6 +56,7 @@ async function main() {
   assert.equal(failure.view.state, 'repair_required')
   assert.match(failure.view.message, /权限/)
   assert.equal(failure.view.busy, false)
+  console.log('Local maintenance ACL passed for main/workbench windows and local/loopback pages.')
   console.log('Work directory flow passed: selection, cancel, repair, retry, open and failure.')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

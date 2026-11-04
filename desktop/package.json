@@ -19,6 +19,7 @@
     "test:appearance": "node scripts/verify-appearance.cjs",
     "test:window-preferences": "node scripts/verify-window-preferences.cjs",
     "test:secret-input": "node scripts/verify-secret-input.cjs",
+    "test:product-platform": "node scripts/verify-product-platform.cjs",
     "test:events": "node scripts/verify-events.cjs",
     "test:runtime-session": "node scripts/verify-runtime-session.cjs",
     "test:exit-guards": "node scripts/verify-exit-guards.cjs",

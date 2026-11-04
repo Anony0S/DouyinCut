@@ -6,7 +6,7 @@ from starlette.staticfiles import StaticFiles
 
 PRODUCTION_CSP = (
     "default-src 'self'; connect-src 'self'; script-src 'self'; "
-    "media-src 'self' blob:; img-src 'self' data: blob:; "
+    "media-src 'self' blob:; img-src 'self' data: blob: https://p3-aio.ecombdimg.com https://p9-aio.ecombdimg.com; "
     "style-src 'self' 'unsafe-inline'; object-src 'none'; "
     "base-uri 'none'; frame-ancestors 'none'"
 )

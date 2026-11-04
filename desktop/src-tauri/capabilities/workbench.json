@@ -16,7 +16,9 @@
         { "url": "http://douyin.com/*" },
         { "url": "http://*.douyin.com/*" },
         { "url": "https://douyin.com/*" },
-        { "url": "https://*.douyin.com/*" }
+        { "url": "https://*.douyin.com/*" },
+        { "url": "https://e.reduxingxuan.com/treaty/index?type=9" },
+        { "url": "https://e.reduxingxuan.com/treaty/index?type=10" }
       ]
     },
     "core:default"

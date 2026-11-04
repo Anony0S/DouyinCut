@@ -25,6 +25,9 @@ from .core.storage import SessionStopping, Store
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, ProjectDraft, delete_plan, delete_project, job_summary,
                        project_detail, project_list, save_draft)
 from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
+from .product_platform import ProductPlatformService
+from .product_platform.client import ProductPlatformError
+from .product_platform.schemas import LoginRequest, MobileRequest, ScopeRequest, SearchRequest
 
 
 class ExportRequest(Model):
@@ -48,6 +51,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     token = token or os.environ.get("DOUYINCUT_SESSION_TOKEN") or secrets.token_urlsafe(32)
     app = FastAPI(title="DouyinCut", version="0.1.0")
     app.state.store, app.state.settings, app.state.live_store = store, settings, live_store
+    app.state.product_platform = ProductPlatformService(store)
     allowed = {f"http://127.0.0.1:{settings.port}"}
     if frontend_dir is None:
         allowed.update({"http://127.0.0.1:5173", "http://tauri.localhost", "https://tauri.localhost"})
@@ -88,6 +92,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     async def provider_error(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=422)
 
+    @app.exception_handler(ProductPlatformError)
+    async def product_platform_error(request, exc):
+        return JSONResponse({"detail": {"code": exc.code, "message": str(exc)}}, status_code=exc.status or 502)
+
     @app.exception_handler(SessionStopping)
     async def runtime_error(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=503)
@@ -124,6 +132,30 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         except OSError as exc:
             raise HTTPException(409, f"打开工作目录失败：{exc}") from None
         return {"opened": True}
+
+    @app.get("/api/v1/product-platform/status")
+    def product_platform_status():
+        return app.state.product_platform.status()
+
+    @app.post("/api/v1/product-platform/send-code")
+    def product_platform_send_code(body: MobileRequest):
+        return app.state.product_platform.send_code(body.mobile)
+
+    @app.post("/api/v1/product-platform/login")
+    def product_platform_login(body: LoginRequest):
+        return app.state.product_platform.login(body.mobile, body.sms_code)
+
+    @app.post("/api/v1/product-platform/scope")
+    def product_platform_scope(body: ScopeRequest):
+        return app.state.product_platform.select_scope(body.main_ip_id)
+
+    @app.post("/api/v1/product-platform/logout")
+    def product_platform_logout():
+        return app.state.product_platform.logout()
+
+    @app.post("/api/v1/product-platform/products/search")
+    def product_platform_search(body: SearchRequest):
+        return app.state.product_platform.search(body.keyword)
 
     @app.get("/api/v1/live/monitors")
     def live_monitors(window_start: float | None = Query(None, ge=0, allow_inf_nan=False),

@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [{ "create": false, "title": "DouyinCut · 服装直播剪辑", "width": 1440, "height": 810, "minWidth": 900, "minHeight": 650 }],
-    "security": { "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:5173 ws://127.0.0.1:5173; media-src 'self' blob:; style-src 'self' 'unsafe-inline'" }
+    "security": { "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:5173 ws://127.0.0.1:5173; media-src 'self' blob:; img-src 'self' data: blob: https://p3-aio.ecombdimg.com https://p9-aio.ecombdimg.com; style-src 'self' 'unsafe-inline'" }
   },
   "bundle": { "active": false, "icon": ["icons/icon.ico"] }
 }

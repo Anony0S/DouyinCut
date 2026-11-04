@@ -5,6 +5,7 @@ import type { LiveSegment, LiveSession, LiveProductPeriod, LivePeriodSource, Liv
 import LiveIcon from "./LiveIcon.vue";
 import LivePeriodSplit from "./LivePeriodSplit.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
+import ProductSearchDialog from "../product/ProductSearchDialog.vue";
 import {
   clipBadgeClasses,
   clipNames,
@@ -24,6 +25,7 @@ const props = defineProps<{
   onSplit: (id: string, confirmedMissingSegmentIds: string[]) => Promise<LiveSplitResult>;
 }>();
 const visiblePathKey = ref<string | null>(null);
+const queryProductName = ref("");
 defineEmits<{
   import: [id: string];
   "import-product-clip": [id: string];
@@ -318,7 +320,7 @@ const filters = computed(() => [
         </details>
         <p
           v-if="session.product_listener?.detail"
-          class="live-listener-note pl-6"
+          class="live-listener-note pl-4 pt-2"
           :class="{ 'is-error': listenerStatus === 'error' }">
           <LiveIcon :name="listenerStatus === 'error' ? 'alert' : 'radio'" />
           {{ session.product_listener.detail }}
@@ -369,7 +371,11 @@ const filters = computed(() => [
                     <span v-if="!period.sources.length" class="text-base-content/60 text-xs">暂无对应分段</span>
                   </div>
                 </div>
-                <div class="shrink-0">
+                <div class="flex shrink-0 flex-col items-stretch gap-2">
+                  <button type="button" class="btn btn-soft btn-sm"
+                    :disabled="busy || !period.product_name.trim()"
+                    :title="period.product_name.trim() ? '查询星斗商品平台中的商品信息' : '暂无商品名称，无法查询'"
+                    @click="queryProductName = period.product_name.trim()"><LiveIcon name="search" />查询商品</button>
                   <LivePeriodSplit :period="period" :busy="busy" :on-split="onSplit" />
                 </div>
               </div>
@@ -537,5 +543,6 @@ const filters = computed(() => [
         </div>
       </section>
     </div>
+    <ProductSearchDialog v-if="queryProductName" :keyword="queryProductName" @close="queryProductName = ''" />
   </div>
 </template>

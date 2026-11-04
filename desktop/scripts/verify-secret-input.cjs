@@ -192,6 +192,8 @@ async function verifySettings() {
   const appModule = { exports: {} }
   new Function('require', 'module', 'exports', appCode)(name => {
     if (name === 'vue') return vue
+    if (name === 'vue-router') return { useRoute: () => ({ query: {} }) }
+    if (name === '../components/product/ProductPlatformLoginCard.vue') return { __esModule: true, default: {} }
     if (name === '../services/cloud') return loaded.load('services/cloud.ts')
     if (name === '../stores/session') return loaded.load('stores/session.ts')
     if (name === '../exit-guards') return loaded.load('exit-guards.ts')
@@ -341,6 +343,8 @@ async function verifyModelTestButton() {
   }
   new Function('require','module','exports',code)(name=>{
     if(name==='vue') return {...vue,vModelText:{},vShow}
+    if(name==='vue-router') return { useRoute: () => ({ query: {} }) }
+    if(name==='../components/product/ProductPlatformLoginCard.vue') return {__esModule:true,default:{}}
     if(name==='../services/cloud') return loaded.load('services/cloud.ts')
     if(name==='../stores/session') return loaded.load('stores/session.ts')
     if(name==='../exit-guards') return loaded.load('exit-guards.ts')
@@ -351,7 +355,7 @@ async function verifyModelTestButton() {
   let unmounted=false
   try {
     app.use(pinia);app.mount(root);await settle()
-    assert.deepEqual(all(root,el=>el.props.role==='tab').map(el=>text(el).trim()), ['文本剪辑模型','语音识别模型','OSS 存储','抖音直播登录'])
+    assert.deepEqual(all(root,el=>el.props.role==='tab').map(el=>text(el).trim()), ['文本剪辑模型','语音识别模型','OSS 存储','抖音直播登录','星斗商品平台'])
     const ossPanel=all(root,el=>el.props.id==='settings-panel-oss')[0]
     const ossForms=all(ossPanel,el=>el.type==='form')
     assert.equal(ossForms.length,1,'OSS fields share one form without nested secret forms')

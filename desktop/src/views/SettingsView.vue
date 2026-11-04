@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
+import { useRoute } from "vue-router";
 import type { CloudConfig } from "../api";
 import { cloudApi, type ModelConnectionTestResult } from "../services/cloud";
 import { useSessionStore } from "../stores/session";
 import SecretInput from "../components/SecretInput.vue";
+import ProductPlatformLoginCard from "../components/product/ProductPlatformLoginCard.vue";
 import { registerExitGuard } from "../exit-guards";
 const session = useSessionStore();
 const { busy, connected, error } = storeToRefs(session);
@@ -13,9 +15,15 @@ const cloudSections = [
   { id: "asr", label: "语音识别模型" },
   { id: "oss", label: "OSS 存储" },
   { id: "douyin", label: "抖音直播登录" },
+  { id: "product-platform", label: "星斗商品平台" },
 ] as const;
 type CloudSectionId = (typeof cloudSections)[number]["id"];
 const activeCloudSection = ref<CloudSectionId>("text");
+const route = useRoute();
+watch(() => route.query.cloudTab, (value) => {
+  const section = cloudSections.find(section => section.id === value);
+  if (section) activeCloudSection.value = section.id;
+}, { immediate: true });
 function onCloudTabKeydown(event: KeyboardEvent, index: number) {
   const nextIndex =
     event.key === "ArrowRight"
@@ -503,6 +511,14 @@ onUnmounted(() => {
             </button>
           </div>
         </form>
+      </section>
+      <section
+        v-if="activeCloudSection === 'product-platform'"
+        id="settings-panel-product-platform"
+        role="tabpanel"
+        aria-labelledby="settings-tab-product-platform"
+        class="card card-border bg-base-100 settings-card">
+        <ProductPlatformLoginCard />
       </section>
     </div>
   </section>

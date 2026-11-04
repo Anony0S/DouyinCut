@@ -26,6 +26,17 @@ export function apiRequest(path: string, options: RequestInit = {}): Promise<Res
   return fetch(`/api/v1${path}`, { ...options, headers, credentials: 'include' })
 }
 
+export class ApiError extends Error {
+  status: number
+  code: string | undefined
+  constructor(message: string, status: number, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await apiRequest(path, {
     method,
@@ -34,8 +45,9 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
   })
   const data = await response.json()
   if (!response.ok) {
-    const detail = typeof data.detail === 'string' ? data.detail : '参数无效，请检查输入'
-    throw new Error(detail)
+    const detail = data?.detail
+    const message = typeof detail === 'string' ? detail : typeof detail?.message === 'string' ? detail.message : '参数无效，请检查输入'
+    throw new ApiError(message, response.status, typeof detail?.code === 'string' ? detail.code : undefined)
   }
   return data as T
 }

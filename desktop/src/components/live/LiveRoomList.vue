@@ -66,8 +66,7 @@ onUnmounted(() => clearInterval(clockTimer));
 const selectedCheckTime = computed(() => {
   const checked = selected.value?.last_checked;
   if (!checked) return "尚未检测";
-  const minutes = Math.max(0, Math.floor((now.value - checked * 1000) / 60000));
-  return `${formatLiveTime(checked)}（${minutes}分钟前）`;
+  return `${formatLiveTime(checked)}`;
 });
 const selectedRecording = computed(() =>
   Boolean(selected.value && isRecording(selected.value)),
@@ -213,13 +212,13 @@ onUnmounted(closeSettings);
                 : undefined
             ">
             <span
-              :class="['status', 'status-xs', liveness(monitor).status]"></span>
+              :class="['status', 'status-md', liveness(monitor).status]"></span>
             {{ liveness(monitor).label }}
           </span>
           <span
             v-if="isRecording(monitor)"
             class="badge badge-sm badge-soft badge-error">
-            <span class="status status-xs status-error"></span>
+            <span class="status status-md status-error"></span>
             录制中
           </span>
           <span class="live-room-item-sessions">

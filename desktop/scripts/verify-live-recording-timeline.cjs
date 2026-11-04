@@ -127,6 +127,7 @@ async function verify() {
     assert.equal(segmentPathButton.props['aria-expanded'], false, 'file path tooltip starts closed')
     await click(segmentPathButton)
     assert.match(segmentPathButton.parent.props.class, /tooltip-open/, 'clicking the file path icon opens its tooltip')
+    assert.match(segmentPathButton.parent.props.class, /tooltip-center/, 'file path tooltip is centered on its icon')
     assert.ok(text(root).includes('当前.ts'), 'file path tooltip contains the recording path')
     await click(segmentPathButton)
     assert.doesNotMatch(segmentPathButton.parent.props.class, /tooltip-open/, 'clicking the file path icon again closes its tooltip')

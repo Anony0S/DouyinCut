@@ -264,7 +264,7 @@ const filters = computed(() => [
                 <span
                   class="live-segment-path-tooltip"
                   :class="visiblePathKey === pathKey('segment', segment.id)
-                    ? 'tooltip tooltip-bottom tooltip-start tooltip-open'
+                    ? 'tooltip tooltip-bottom tooltip-center tooltip-open'
                     : ''">
                   <button
                     type="button"
@@ -443,7 +443,7 @@ const filters = computed(() => [
                   v-if="clip.path"
                   class="live-segment-path-tooltip"
                   :class="visiblePathKey === pathKey('clip', clip.id)
-                    ? 'tooltip tooltip-bottom tooltip-start tooltip-open'
+                    ? 'tooltip tooltip-bottom tooltip-center tooltip-open'
                     : ''">
                   <button
                     type="button"

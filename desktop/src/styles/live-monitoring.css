@@ -181,7 +181,7 @@
 .live-segment-path-trigger.btn { width: 24px; min-width: 24px; height: 24px; min-height: 24px; padding: 4px; color: var(--text-muted); }
 .live-segment-path-trigger.btn:hover, .live-segment-path-trigger.btn:focus-visible { color: var(--color-base-content); }
 .live-segment-path-trigger .live-icon { width: 15px; height: 15px; }
-.live-segment-path-content { max-width: min(420px, calc(100vw - 32px)); text-align: left; overflow-wrap: anywhere; }
+.live-segment-path-tooltip.tooltip > .live-segment-path-content { box-sizing: border-box; max-width: min(360px, calc(100vw - 32px)); text-align: left; overflow-wrap: anywhere; }
 .live-segment-path-content code { display: block; color: inherit; white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.6 Consolas, monospace; user-select: text; }
 .live-segment-path-content small { display: block; margin-top: 4px; font-size: 11px; }
 .live-segment-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 5px; }

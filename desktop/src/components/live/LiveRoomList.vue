@@ -80,7 +80,7 @@ function removeSelected() {
 const selectedRecordAction = computed<"start" | "stop" | null>(() => {
   if (!selected.value) return null;
   if (selectedRecording.value) return "stop";
-  return selected.value.auto_record && !selected.value.record_held
+  return selected.value.auto_record && !selected.value.record_held && !selected.value.retry_blocked
     ? null
     : "start";
 });

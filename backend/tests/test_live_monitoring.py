@@ -300,6 +300,50 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertTrue(args[-1].endswith("-%06d.ts"))
         self.assertEqual(self.live.monitor(monitor["id"])["live_state"], "recording")
 
+    def test_recorder_exit_code_distinguishes_failure_and_clean_close(self):
+        monitor = self.live.create_monitor("https://live.douyin.com/room-exit-diagnostic", "room")
+
+        class Process:
+            stdin = None
+
+            def __init__(self, returncode):
+                self.pid = 4000 + returncode
+                self.returncode = returncode
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        worker = LiveMonitorWorker(self.settings, resolver=object())
+        failed_session = self.live.start_session(
+            monitor["id"], self.settings.data_dir / "recordings" / "live" / monitor["id"] / "failed"
+        )
+        failed_log = self.settings.data_dir / "recordings" / "live" / monitor["id"] / failed_session / "ffmpeg.log"
+        failed_log.parent.mkdir(parents=True, exist_ok=True)
+        failed_log.write_text("[warning] network read failed https://media.example/live?token=secret\n", encoding="utf-8")
+        worker.processes[monitor["id"]] = (Process(17), failed_session)
+        worker._end_recorder(monitor, "error")
+
+        failed = self.live.recording_session(monitor["id"], failed_session)
+        self.assertEqual(failed["status"], "failed")
+        monitor_after_failure = self.live.monitor(monitor["id"])
+        self.assertTrue(monitor_after_failure["retry_blocked"])
+        self.assertIn("退出码 17", monitor_after_failure["error"])
+        self.assertIn("network read failed", monitor_after_failure["error"])
+        self.assertNotIn("token=secret", monitor_after_failure["error"])
+        self.assertNotIn("token=secret", failed_log.read_text(encoding="utf-8"))
+
+        clean_session = self.live.start_session(
+            monitor["id"], self.settings.data_dir / "recordings" / "live" / monitor["id"] / "clean"
+        )
+        worker.processes[monitor["id"]] = (Process(0), clean_session)
+        worker._end_recorder(monitor, "error")
+        clean = self.live.recording_session(monitor["id"], clean_session)
+        self.assertEqual(clean["status"], "stopped")
+        self.assertFalse(self.live.monitor(monitor["id"])["retry_blocked"])
+
     def test_python_product_listener_records_confirmed_events_in_formal_timeline(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-shadow", "room")
         session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "shadow-recording")

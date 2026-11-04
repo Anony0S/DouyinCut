@@ -1027,9 +1027,14 @@ class LiveMonitorWorker:
                 "-i", stream_url, "-map", "0:v:0", "-map", "0:a?", "-c", "copy",
                 "-f", "segment", "-segment_time", str(SEGMENT_SECONDS), "-reset_timestamps", "1",
                 "-segment_format", "mpegts", str(pattern)]
-        process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL,
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        stderr_log = directory / "ffmpeg.log"
+        stderr_handle = stderr_log.open("ab")
+        try:
+            process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                       stderr=stderr_handle,
+                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        finally:
+            stderr_handle.close()
         try:
             # Persist before exposing the child process to the loop.
             with self.store.connection() as conn:
@@ -1287,19 +1292,49 @@ class LiveMonitorWorker:
                 process.kill()
                 process.wait()
 
+    def _sanitize_ffmpeg_log(self, monitor_id: str, session_id: str):
+        log_path = self.settings.data_dir / "recordings" / "live" / monitor_id / session_id / "ffmpeg.log"
+        try:
+            text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        sanitized = re.sub(r"https?://[^\s'\"<>]+", "<stream-url>", text)
+        if sanitized != text:
+            try:
+                log_path.write_text(sanitized, encoding="utf-8")
+            except OSError:
+                pass
+        return sanitized
+
+    def _ffmpeg_exit_detail(self, monitor_id: str, session_id: str, returncode: int | None):
+        detail = f"录制进程退出（退出码 {returncode if returncode is not None else '未知'}）"
+        text = self._sanitize_ffmpeg_log(monitor_id, session_id)
+        if text.strip():
+            # Keep the monitor error compact while retaining the useful log tail.
+            detail += f"：{' '.join(text.strip().split())[-800:]}"
+        return detail
+
     def _end_recorder(self, monitor: dict, status: str):
         managed = self.processes.pop(monitor["id"], None)
         if not managed:
             return
         process, session_id = managed
+        returncode = process.poll()
         self._stop_product_listener(monitor["id"])
         self._stop_process(process)
+        if returncode is None:
+            returncode = process.poll()
+        self._sanitize_ffmpeg_log(monitor["id"], session_id)
         self._scan_segments(monitor["id"], session_id, final=True)
-        self.live.stop_session(monitor["id"], session_id, "stopped" if status == "offline" else "failed")
-        if status == "error":
+        abnormal = status == "error" and returncode != 0
+        self.live.stop_session(monitor["id"], session_id, "failed" if abnormal else "stopped")
+        if abnormal:
+            detail = self._ffmpeg_exit_detail(monitor["id"], session_id, returncode)
             self.live.set_monitor_state(monitor["id"], "error",
-                                        "录制进程已退出；直播间离线后恢复自动录制，关闭自动录制后可手动开始",
+                                        f"{detail}；直播间离线后恢复自动录制，当前直播可手动开始录制",
                                         retry_blocked=True)
+        elif status == "error":
+            self.live.set_monitor_state(monitor["id"], "live", retry_blocked=False)
 
     def _notify_live(self, monitor: dict):
         from .notifications import show_toast
@@ -1360,8 +1395,11 @@ class LiveMonitorWorker:
                 elif not resolved.get("stream_url"):
                     self.live.set_monitor_state(monitor_id, "error", "直播间已开播，但暂时无法解析媒体流地址")
                 elif monitor["retry_blocked"]:
+                    detail = monitor["error"] or "录制曾中断"
+                    if "当前直播可手动开始录制" not in detail:
+                        detail += "；当前直播可手动开始录制"
                     self.live.set_monitor_state(monitor_id, "error",
-                                                "录制曾中断；直播间离线后恢复自动录制，关闭自动录制后可手动开始")
+                                                detail, retry_blocked=True)
                 else:
                     self._start_recorder(monitor, resolved["stream_url"])
             except Exception as exc:

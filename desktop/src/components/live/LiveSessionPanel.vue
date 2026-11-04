@@ -29,6 +29,7 @@ defineEmits<{
   open: [assetId: string];
   split: [id: string];
   "open-file": [id: string, reveal: boolean];
+  "open-segment-file": [id: string, reveal: boolean];
 }>();
 const splitting = (segment: LiveSegment) =>
   Boolean(segment.clip_job && activeClipJobStates.has(segment.clip_job.state));
@@ -270,37 +271,63 @@ const filters = computed(() => [
                 </small>
               </details>
             </div>
-            <div class="live-segment-actions">
+            <div class="live-segment-actions live-recording-actions">
+              <button
+                class="btn btn-ghost btn-sm live-segment-action live-segment-action-open-file"
+                :disabled="busy"
+                aria-label="打开文件"
+                title="用系统默认播放器打开录制分段"
+                @click="$emit('open-segment-file', segment.id, false)">
+                <LiveIcon name="play"/>
+                <span class="live-segment-action-label" aria-hidden="true">打开文件</span>
+              </button>
+              <button
+                class="btn btn-ghost btn-sm live-segment-action live-segment-action-open-folder"
+                :disabled="busy"
+                aria-label="打开文件夹"
+                title="在文件夹中显示录制分段"
+                @click="$emit('open-segment-file', segment.id, true)">
+                <LiveIcon name="folder" />
+                <span class="live-segment-action-label" aria-hidden="true">打开文件夹</span>
+              </button>
               <button
                 v-if="['completed', 'importing', 'imported'].includes(segment.status)"
-                class="btn btn-soft btn-sm"
+                class="btn btn-soft btn-sm live-segment-action live-segment-action-split"
                 :disabled="busy || splitting(segment)"
+                :aria-label="splitting(segment) ? '切分任务进行中' : '切分商品'"
                 :title="splitting(segment) ? '切分任务进行中' : '按本分段内的商品讲解区间切分'"
                 @click="$emit('split', segment.id)">
                 <LiveIcon name="layers" />
-                {{ splitting(segment) ? "切分中…" : "切分商品" }}
+                <span class="live-segment-action-label" aria-hidden="true">
+                  {{ splitting(segment) ? "切分中…" : "切分商品" }}
+                </span>
               </button>
               <button
                 v-if="segment.status === 'completed'"
-                class="btn btn-primary btn-sm"
+                class="btn btn-primary btn-sm live-segment-action live-segment-action-import"
                 :disabled="busy"
+                aria-label="导入剪辑"
                 @click="$emit('import', segment.id)">
-                导入剪辑
                 <LiveIcon name="arrow" />
+                <span class="live-segment-action-label" aria-hidden="true">导入剪辑</span>
               </button>
               <button
                 v-else-if="segment.status === 'importing'"
-                class="btn btn-ghost btn-sm"
+                class="btn btn-ghost btn-sm live-segment-action live-segment-action-importing"
+                aria-label="导入中"
+                title="导入中"
                 disabled>
-                导入中…
+                <LiveIcon name="refresh" class="is-spinning" />
+                <span class="live-segment-action-label" aria-hidden="true">导入中…</span>
               </button>
               <button
                 v-else-if="segment.status === 'imported' && segment.asset_id"
-                class="btn btn-outline btn-sm"
+                class="btn btn-outline btn-sm live-segment-action live-segment-action-project"
                 :disabled="busy"
+                aria-label="打开项目"
                 @click="$emit('open', segment.asset_id)">
-                打开项目
                 <LiveIcon name="external" />
+                <span class="live-segment-action-label" aria-hidden="true">打开项目</span>
               </button>
               <ConfirmPopover
                 v-if="!['recording', 'importing'].includes(segment.status)"
@@ -310,7 +337,7 @@ const filters = computed(() => [
                 :disabled="busy || splitting(segment)"
                 v-slot="{ open, expanded, popoverId }">
                 <button
-                  class="btn btn-ghost btn-square btn-xs text-error"
+                  class="btn btn-ghost btn-sm live-segment-action live-segment-action-delete text-error"
                   :disabled="busy || splitting(segment)"
                   :aria-label="`删除分段 ${segment.segment_index}`"
                   title="删除分段与本地文件"
@@ -319,6 +346,7 @@ const filters = computed(() => [
                   aria-haspopup="dialog"
                   @click="open">
                   <LiveIcon name="trash" />
+                  <span class="live-segment-action-label" aria-hidden="true">删除分段</span>
                 </button>
               </ConfirmPopover>
             </div>

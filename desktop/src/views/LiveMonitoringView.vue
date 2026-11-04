@@ -246,6 +246,12 @@ async function openClipFile(clipId: string, reveal: boolean) {
     if (reveal) session.message = "已在文件夹中显示商品片段";
   });
 }
+async function openSegmentFile(segmentId: string, reveal: boolean) {
+  await session.act(async () => {
+    await liveMonitoringApi.openSegment(segmentId, reveal);
+    if (reveal) session.message = "已在文件夹中显示录制分段";
+  });
+}
 async function splitSegment(segmentId: string) {
   await session.act(async () => {
     await liveMonitoringApi.splitSegment(segmentId);
@@ -476,7 +482,8 @@ onUnmounted(() => {
           :on-delete="deleteSegment"
           :on-delete-product-clip="deleteProductClip"
           @split="splitSegment"
-          @open-file="openClipFile" />
+          @open-file="openClipFile"
+          @open-segment-file="openSegmentFile" />
         <div v-else class="live-content-columns">
           <section v-for="title in ['商品讲解', '录制分段', '商品视频片段']" :key="title"
             class="card card-border bg-base-100 live-content-card">

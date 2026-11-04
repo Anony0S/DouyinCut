@@ -726,6 +726,29 @@ class LiveStore:
             raise ValueError("没有可打开该文件的程序，请改用“所在文件夹”") from exc
         return {"opened": True, "revealed": reveal, "path": str(path)}
 
+    def open_segment(self, segment_id: str, recordings_root: Path, reveal: bool = False):
+        """Open a recording segment in the system player, or select it in Explorer."""
+        with self.store.connection() as conn:
+            row = conn.execute("SELECT path FROM live_segments WHERE id=?", (segment_id,)).fetchone()
+        if row is None:
+            raise KeyError(segment_id)
+        path = Path(row["path"]).resolve()
+        if not path.is_relative_to(recordings_root.resolve()):
+            raise ValueError("分段文件不在直播录制目录中，拒绝打开")
+        if not path.is_file():
+            raise ValueError("录制分段文件已不存在")
+        try:
+            if os.name == "nt":
+                if reveal:
+                    subprocess.Popen(["explorer", "/select,", str(path)])
+                else:
+                    os.startfile(str(path))
+            else:
+                subprocess.Popen(["xdg-open", str(path.parent if reveal else path)])
+        except OSError as exc:
+            raise ValueError("没有可打开该文件的程序，请改用“所在文件夹”") from exc
+        return {"opened": True, "revealed": reveal, "path": str(path)}
+
     def delete_product_clip(self, clip_id: str, recordings_root: Path):
         recordings_root = recordings_root.resolve()
         with self.store.connection() as conn:

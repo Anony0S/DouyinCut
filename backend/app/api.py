@@ -158,6 +158,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
 
+    @app.post("/api/v1/live/segments/{segment_id}/open")
+    def open_live_segment(segment_id: str, body: LiveClipOpen):
+        try:
+            return live_store.open_segment(
+                segment_id, settings.data_dir / "recordings" / "live", reveal=body.reveal)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
     @app.post("/api/v1/live/product-clips/{clip_id}/import", status_code=202)
     def import_live_product_clip(clip_id: str):
         try:

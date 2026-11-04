@@ -19,6 +19,7 @@ export const liveMonitoringApi = {
   setRecording: (id:string,action:'start'|'stop') => api<LiveMonitor>(`/live/monitors/${encodeURIComponent(id)}/recording`,'POST',{action}),
   remove: (id:string) => api<{deleted_monitor_id:string;recordings_retained:boolean}>(`/live/monitors/${encodeURIComponent(id)}`,'DELETE'),
   importSegment: (id:string) => api<Job|{asset_id:string;state:'imported'}>(`/live/segments/${encodeURIComponent(id)}/import`,'POST'),
+  openSegment: (id:string,reveal=false) => api<{opened:boolean;revealed:boolean;path:string}>(`/live/segments/${encodeURIComponent(id)}/open`,'POST',{reveal}),
   importProductClip: (id:string) => api<Job|{asset_id:string;state:'imported'}>(`/live/product-clips/${encodeURIComponent(id)}/import`,'POST'),
   openProductClip: (id:string,reveal=false) => api<{opened:boolean;revealed:boolean;path:string}>(`/live/product-clips/${encodeURIComponent(id)}/open`,'POST',{reveal}),
   deleteProductClip: (id:string) => api<{deleted_clip_id:string;file_deleted:boolean;project_file_retained:boolean}>(`/live/product-clips/${encodeURIComponent(id)}`,'DELETE'),

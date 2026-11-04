@@ -179,6 +179,20 @@
 .live-segment-path code { display: block; margin-top: 6px; padding: 7px; border: 1px solid var(--color-base-300); border-radius: 5px; background: var(--color-base-200); color: var(--text-muted); white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.6 Consolas, monospace; user-select: text; }
 .live-segment-path small { font-size: 12px; }
 .live-segment-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 5px; }
+.live-recording-actions .live-segment-action { box-sizing: border-box; display: inline-flex; flex: none; width: 34px; min-width: 34px; max-width: 34px; height: 32px; justify-content: flex-start; gap: 0; overflow: hidden; padding-inline: 9px; white-space: nowrap; transition: width 190ms ease, min-width 190ms ease, max-width 190ms ease, padding 190ms ease; }
+.live-recording-actions .live-segment-action:hover,
+.live-recording-actions .live-segment-action:focus-visible { width: calc(34px + var(--live-action-label-width)); min-width: calc(34px + var(--live-action-label-width)); max-width: calc(34px + var(--live-action-label-width)); }
+.live-recording-actions .live-segment-action-open-file { --live-action-label-width: 5em; }
+.live-recording-actions .live-segment-action-open-folder { --live-action-label-width: 6em; }
+.live-recording-actions .live-segment-action-split,
+.live-recording-actions .live-segment-action-import,
+.live-recording-actions .live-segment-action-importing,
+.live-recording-actions .live-segment-action-project,
+.live-recording-actions .live-segment-action-delete { --live-action-label-width: 5em; }
+.live-recording-actions .live-segment-action > .live-icon { flex: none; width: 16px; height: 16px; }
+.live-recording-actions .live-segment-action-label { display: inline-block; flex: none; min-width: 0; max-width: 0; margin-left: 0; overflow: hidden; opacity: 0; transition: max-width 190ms ease, margin-left 190ms ease, opacity 120ms ease; }
+.live-recording-actions .live-segment-action:hover .live-segment-action-label,
+.live-recording-actions .live-segment-action:focus-visible .live-segment-action-label { max-width: var(--live-action-label-width); margin-left: 7px; opacity: 1; }
 .live-card-empty { display: flex; flex: 1; flex-direction: column; justify-content: center; align-items: center; min-height: 0; padding: 24px 20px; text-align: center; }
 .live-card-empty > .live-icon { width: 30px; height: 30px; margin-bottom: 17px; color: var(--text-muted); }
 .live-card-empty > strong { color: var(--text-muted); font-size: 12px; font-weight: 500; }
@@ -258,4 +272,13 @@
   .live-welcome h2 { font-size: 18px; }
   .live-welcome-steps { gap: 8px; flex-wrap: wrap; justify-content: center; }
 }
-@media (prefers-reduced-motion: reduce) { .live-page .is-spinning { animation: none; } }
+@media (hover: none) {
+  .live-recording-actions { flex-wrap: wrap; justify-content: flex-start; }
+  .live-recording-actions .live-segment-action { width: calc(34px + var(--live-action-label-width)); min-width: calc(34px + var(--live-action-label-width)); max-width: calc(34px + var(--live-action-label-width)); }
+  .live-recording-actions .live-segment-action-label { max-width: var(--live-action-label-width); margin-left: 7px; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-page .is-spinning { animation: none; }
+  .live-recording-actions .live-segment-action,
+  .live-recording-actions .live-segment-action-label { transition: none; }
+}

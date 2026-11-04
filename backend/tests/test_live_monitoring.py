@@ -679,6 +679,35 @@ class LiveMonitoringTests(unittest.TestCase):
         rejected = self.client.post(f"/api/v1/live/product-clips/{clip['id']}/open", headers=self.headers, json={})
         self.assertEqual(rejected.status_code, 409, rejected.text)
 
+    def test_open_segment_uses_system_player_or_explorer_and_stays_in_recordings_root(self):
+        monitor, session_id, (segment_id, _second) = self._two_segment_session("room-open-segment")
+        with self.store.connection() as conn:
+            segment_path = conn.execute("SELECT path FROM live_segments WHERE id=?", (segment_id,)).fetchone()[0]
+
+        with patch("app.live_monitoring.service.os.startfile") as startfile, \
+             patch("app.live_monitoring.service.subprocess.Popen") as popen:
+            opened = self.client.post(f"/api/v1/live/segments/{segment_id}/open", headers=self.headers, json={})
+            self.assertEqual(opened.status_code, 200, opened.text)
+            startfile.assert_called_once_with(str(Path(segment_path).resolve()))
+            revealed = self.client.post(f"/api/v1/live/segments/{segment_id}/open", headers=self.headers,
+                                        json={"reveal": True})
+            self.assertTrue(revealed.json()["revealed"])
+            self.assertEqual(popen.call_args.args[0][:2], ["explorer", "/select,"])
+
+        outside = Path(self.temp.name) / "outside.ts"
+        outside.write_bytes(b"x")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET path=? WHERE id=?", (str(outside), segment_id))
+        rejected = self.client.post(f"/api/v1/live/segments/{segment_id}/open", headers=self.headers, json={})
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET path=? WHERE id=?",
+                         (str(self.settings.data_dir / "recordings" / "live" / monitor["id"] /
+                              session_id / "missing.ts"), segment_id))
+        missing = self.client.post(f"/api/v1/live/segments/{segment_id}/open", headers=self.headers, json={})
+        self.assertEqual(missing.status_code, 409, missing.text)
+
     def test_generated_product_clip_can_be_imported_and_reused(self):
         from app.live_monitoring.service import generate_segment_product_clips
 

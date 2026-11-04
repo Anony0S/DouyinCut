@@ -231,7 +231,7 @@
   .live-content-card { min-height: 360px; }
 }
 @container live-detail (max-width: 680px) {
-  .live-content-columns { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 18px; align-items: start; }
+  .live-content-columns { grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(360px, auto); gap: 18px; align-items: stretch; }
   .live-product-event-list, .live-segment-list { max-height: 330px; }
 }
 @media (max-width: 1350px) {

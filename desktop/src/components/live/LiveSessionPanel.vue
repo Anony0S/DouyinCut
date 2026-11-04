@@ -195,13 +195,6 @@ const filters = computed(() => [
         <div v-else class="live-card-empty">
           <LiveIcon name="clock" />
           <strong>还没有商品切换记录</strong>
-          <p>
-            {{
-              session.status === "recording"
-                ? "后续讲解切换会记录于此。"
-                : "这个场次没有记录到商品讲解变更。"
-            }}
-          </p>
         </div>
         <div class="live-card-foot">
           <LiveIcon name="clock" />
@@ -257,7 +250,7 @@ const filters = computed(() => [
                   {{ segmentNames[segment.status] || segment.status }}
                 </span>
               </div>
-              <div class="live-segment-meta">
+              <div class="live-segment-meta items-center">
                 <span>
                   {{
                     segment.duration_us
@@ -438,7 +431,7 @@ const filters = computed(() => [
                   {{ clipNames[clip.status] || clip.status }}
                 </span>
               </div>
-              <div class="live-segment-meta">
+              <div class="live-segment-meta items-center">
                 <span>分段 {{ String(clip.segment_index).padStart(2, "0") }}</span>
                 <span>
                   {{ formatOffset(clip.start, session.started) }} –
@@ -475,45 +468,52 @@ const filters = computed(() => [
                 {{ clip.error }}
               </p>
             </div>
-            <div class="live-segment-actions">
+            <div class="live-segment-actions live-recording-actions">
               <button
                 v-if="clip.status !== 'failed'"
-                class="btn btn-ghost btn-sm"
+                class="btn btn-ghost btn-sm live-segment-action live-segment-action-open-file"
                 :disabled="busy"
+                aria-label="打开文件"
                 title="用系统默认播放器打开"
                 @click="$emit('open-file', clip.id, false)">
                 <LiveIcon name="play" />
-                打开
+                <span class="live-segment-action-label" aria-hidden="true">打开文件</span>
               </button>
               <button
-                class="btn btn-ghost btn-square btn-sm"
+                class="btn btn-ghost btn-sm live-segment-action live-segment-action-open-folder"
                 :disabled="busy"
                 title="在文件夹中显示"
-                aria-label="在文件夹中显示"
+                aria-label="打开文件夹"
                 @click="$emit('open-file', clip.id, true)">
                 <LiveIcon name="folder" />
+                <span class="live-segment-action-label" aria-hidden="true">打开文件夹</span>
               </button>
               <button
                 v-if="clip.status === 'completed'"
-                class="btn btn-primary btn-sm"
+                class="btn btn-primary btn-sm live-segment-action live-segment-action-import"
                 :disabled="busy"
+                aria-label="导入剪辑"
                 @click="$emit('import-product-clip', clip.id)">
-                导入剪辑
                 <LiveIcon name="arrow" />
+                <span class="live-segment-action-label" aria-hidden="true">导入剪辑</span>
               </button>
               <button
                 v-else-if="clip.status === 'importing'"
-                class="btn btn-ghost btn-sm"
+                class="btn btn-ghost btn-sm live-segment-action live-segment-action-importing"
+                aria-label="导入中"
+                title="导入中"
                 disabled>
-                导入中…
+                <LiveIcon name="refresh" class="is-spinning" />
+                <span class="live-segment-action-label" aria-hidden="true">导入中…</span>
               </button>
               <button
                 v-else-if="clip.status === 'imported' && clip.asset_id"
-                class="btn btn-outline btn-sm"
+                class="btn btn-outline btn-sm live-segment-action live-segment-action-project"
                 :disabled="busy"
+                aria-label="打开项目"
                 @click="$emit('open', clip.asset_id)">
-                打开项目
                 <LiveIcon name="external" />
+                <span class="live-segment-action-label" aria-hidden="true">打开项目</span>
               </button>
               <ConfirmPopover
                 v-if="!['processing', 'importing'].includes(clip.status)"
@@ -523,7 +523,7 @@ const filters = computed(() => [
                 :disabled="busy"
                 v-slot="{ open, expanded, popoverId }">
                 <button
-                  class="btn btn-ghost btn-square btn-xs text-error"
+                  class="btn btn-ghost btn-sm live-segment-action live-segment-action-delete text-error"
                   :disabled="busy"
                   :aria-label="`删除商品片段 ${clip.product_name || clip.promotion_id}`"
                   title="删除商品片段"
@@ -532,6 +532,7 @@ const filters = computed(() => [
                   aria-haspopup="dialog"
                   @click="open">
                   <LiveIcon name="trash" />
+                  <span class="live-segment-action-label" aria-hidden="true">删除片段</span>
                 </button>
               </ConfirmPopover>
             </div>

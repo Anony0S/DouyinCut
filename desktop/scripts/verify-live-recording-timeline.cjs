@@ -115,6 +115,13 @@ async function verify() {
     assert.equal(all(root, el => el.type === 'select').length, 0, 'timeline replaces the dropdown')
     assert.ok(text(root).includes('讲解-当前'), 'recording is selected before finished sessions')
     assert.ok(text(root).includes('片段-当前'))
+    const productClipRow = all(root, el => el.type === 'article' && el.props.class?.includes('live-product-clip-row'))[0]
+    const productClipActions = all(productClipRow, el => el.props.class?.includes('live-recording-actions'))[0]
+    assert.ok(productClipActions, 'product clip actions reuse the recording segment interaction styles')
+    for (const action of ['open-file', 'open-folder', 'import', 'delete']) {
+      assert.ok(all(productClipActions, el => el.type === 'button' && el.props.class?.includes(`live-segment-action-${action}`)).length,
+        `product clip exposes the shared ${action} action style`)
+    }
     const segmentPathButton = selectButton(root, '查看录制分段')
     assert.ok(segmentPathButton, 'recording segment exposes a file path icon')
     assert.equal(segmentPathButton.props['aria-expanded'], false, 'file path tooltip starts closed')

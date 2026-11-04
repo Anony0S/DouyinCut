@@ -25,6 +25,7 @@
     "test:error-message": "node scripts/verify-error-message.cjs",
     "test:work-directory": "node scripts/verify-work-directory.cjs",
     "test:job-error": "node scripts/verify-job-error.cjs",
+    "test:job-pagination": "node scripts/verify-job-pagination.cjs",
     "test:confirmation-popover": "node scripts/verify-confirmation-popover.cjs",
     "test:delete-wiring": "node scripts/verify-delete-confirmation-wiring.cjs",
     "test:live-timeline": "node scripts/verify-live-recording-timeline.cjs",

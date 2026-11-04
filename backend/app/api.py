@@ -321,8 +321,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                              "instructions": body.instructions.strip() or DEFAULT_INSTRUCTIONS})
 
     @app.get("/api/v1/jobs")
-    def jobs(limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
-        return store.jobs(limit, offset)
+    def jobs(limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0),
+             before_created: float | None = Query(None, ge=0, allow_inf_nan=False),
+             before_id: str | None = Query(None, min_length=1, max_length=200)):
+        if (before_created is None) != (before_id is None):
+            raise HTTPException(422, "任务游标必须同时包含创建时间和任务 ID")
+        if before_created is not None and offset:
+            raise HTTPException(422, "任务游标不能与偏移量同时使用")
+        return store.jobs(limit, offset, before_created, before_id)
 
     @app.get("/api/v1/jobs/{job_id}")
     def job(job_id: str):

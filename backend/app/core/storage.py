@@ -55,6 +55,7 @@ class Store:
                 CREATE INDEX IF NOT EXISTS jobs_asset ON jobs(kind,json_extract(payload,'$.asset_id'),created);
                 CREATE INDEX IF NOT EXISTS jobs_plan ON jobs(json_extract(payload,'$.plan_id'),updated);
                 CREATE INDEX IF NOT EXISTS jobs_updated ON jobs(updated);
+                CREATE INDEX IF NOT EXISTS jobs_created ON jobs(created DESC,id DESC);
             """)
 
     @contextmanager
@@ -255,10 +256,14 @@ class Store:
             raise KeyError(job_id)
         return self.decode_job(row)
 
-    def jobs(self, limit=100, offset=0):
+    def jobs(self, limit=100, offset=0, before_created=None, before_id=None):
+        where, params = "", []
+        if before_created is not None:
+            where = "WHERE (created,id)<(?,?)"
+            params = [before_created, before_id]
         with self.connection() as conn:
-            rows = conn.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT ? OFFSET ?",
-                                (limit, offset)).fetchall()
+            rows = conn.execute(f"SELECT * FROM jobs {where} ORDER BY created DESC,id DESC LIMIT ? OFFSET ?",
+                                (*params, limit, offset)).fetchall()
         return [self.decode_job(row) for row in rows]
 
     def job_error_detail(self, job_id: str):

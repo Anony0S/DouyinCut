@@ -1,0 +1,55 @@
+const assert=require('node:assert/strict')
+const path=require('node:path')
+const {createPinia}=require('pinia')
+const {modules}=require('./test-modules.cjs')
+
+async function main() {
+  let data=Array.from({length:65},(_,i)=>({id:`job-${String(65-i).padStart(3,'0')}`,created:100,state:'succeeded'}))
+  let calls=0,fail=false,hold,release
+  const api=async url=>{
+    calls++
+    const params=new URLSearchParams(url.split('?')[1])
+    assert.equal(Number(params.get('limit')),21,'Every fetch is bounded to one page plus lookahead')
+    if(hold) await new Promise(resolve=>{release=resolve})
+    if(fail) throw new Error('网络中断')
+    const created=params.get('before_created'),id=params.get('before_id')
+    return data.filter(job=>!id || job.created<Number(created) || (job.created===Number(created) && job.id<id)).slice(0,21).map(job=>({...job}))
+  }
+  const loaded=modules({[path.resolve(__dirname,'../src/api.ts')]:{api}})
+  const store=loaded.load('stores/jobs.ts').useJobsStore(createPinia())
+  await store.load()
+  assert.equal(store.jobs.length,20);assert.equal(store.hasMore,true)
+  hold=true
+  const more=store.loadMore(),duplicate=store.loadMore(),refresh=store.load()
+  hold=false;release()
+  await Promise.all([more,duplicate,refresh])
+  assert.equal(store.jobs.length,40,'Append and event refresh serialize without collapsing history')
+  assert.equal(calls,4,'Duplicate bottom events share one request')
+  data.unshift({id:'new-job',created:101,state:'running'})
+  data.find(job=>job.id==='job-030').state='failed'
+  await store.load()
+  assert.equal(store.jobs[0].id,'new-job')
+  assert.ok(store.jobs.some(job=>job.id==='job-026'),'Refresh keeps the oldest loaded record')
+  assert.equal(store.jobs.find(job=>job.id==='job-030').state,'failed')
+  const retained=store.jobs.map(job=>job.id)
+  fail=true;await store.loadMore()
+  assert.deepEqual(store.jobs.map(job=>job.id),retained,'Failed page retains existing rows')
+  assert.match(store.loadError,/网络/);assert.equal(store.loadingMore,false)
+  fail=false;await store.retry()
+  assert.equal(store.jobs.length,66);assert.equal(store.hasMore,false);assert.equal(store.loadError,'')
+  assert.equal(new Set(store.jobs.map(job=>job.id)).size,66,'No duplicate records across pages')
+  const lastCalls=calls;await store.loadMore();assert.equal(calls,lastCalls,'Exhausted list stops requesting')
+  fail=true;await store.load()
+  assert.equal(store.jobs.length,66,'Failed refresh also preserves the full loaded range')
+  data[0].state='failed';fail=false;await store.retry()
+  assert.equal(store.jobs[0].state,'failed','Retry after refresh failure refreshes status, even at the end')
+  data=data.slice(0,20)
+  const exact=loaded.load('stores/jobs.ts').useJobsStore(createPinia())
+  await exact.load();assert.equal(exact.jobs.length,20);assert.equal(exact.hasMore,false)
+  data=[]
+  const empty=loaded.load('stores/jobs.ts').useJobsStore(createPinia())
+  fail=true;await empty.load();assert.equal(empty.initialized,false)
+  fail=false;await empty.retry();assert.equal(empty.initialized,true);assert.equal(empty.jobs.length,0);assert.equal(empty.hasMore,false)
+  console.log('Job pagination passed: bounded cursor requests, concurrent loads, refresh, failure/retry, exhaustion.')
+}
+main().catch(error=>{console.error(error);process.exitCode=1})

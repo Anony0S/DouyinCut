@@ -130,7 +130,7 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
       </div>
     </aside>
 
-    <main :class="{ 'workspace-main': route.name==='workspace', 'live-monitoring-main': route.name==='live-monitoring', 'projects-main': route.name==='projects' }">
+    <main :class="{ 'workspace-main': route.name==='workspace', 'live-monitoring-main': route.name==='live-monitoring', 'projects-main': route.name==='projects', 'jobs-main': route.name==='jobs' }">
       <input ref="fileInput" class="file-input" type="file" accept="video/*,.mkv,.flv,.ts" @change="selectFile"/>
       <RouterView/>
     </main>

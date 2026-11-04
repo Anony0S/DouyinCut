@@ -231,7 +231,7 @@
   .live-content-card { min-height: 360px; }
 }
 @container live-detail (max-width: 680px) {
-  .live-content-columns { grid-template-columns: minmax(0, 1fr); }
+  .live-content-columns { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; gap: 18px; align-items: start; }
   .live-product-event-list, .live-segment-list { max-height: 330px; }
 }
 @media (max-width: 1350px) {
@@ -246,7 +246,7 @@
   .live-detail { display: block; }
   .live-detail-empty { min-height: 300px; }
   .live-session-content { display: grid; }
-  .live-content-columns { display: grid; }
+  .live-content-columns { display: grid; flex: none; min-height: 0; row-gap: 18px; }
   .live-content-card { min-height: auto; }
   .live-product-event-list { flex: none; min-height: 220px; max-height: 310px; }
   .live-segment-list { flex: none; min-height: 175px; max-height: 330px; }

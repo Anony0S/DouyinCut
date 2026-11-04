@@ -1116,25 +1116,38 @@ h1 {
   background: var(--accent-soft);
 }
 
-.projects-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-.project-filters { display: flex; align-items: center; flex: 1; min-width: 0; gap: 10px; margin: 0; }
-.project-filters input { flex: 1 1 480px; min-width: 0; max-width: 520px; }
-.project-filters select { width: 150px; }
-.project-filters button { flex-shrink: 0; }
+.projects-main { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+.projects-panel { flex: 1; min-height: 0; overflow: hidden; }
+.projects-panel > .card-body { min-height: 0; padding: 0; gap: 0; }
+.projects-toolbar { flex: none; padding: 24px; }
+.project-filters { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; gap: 12px; margin: 0; }
+.project-filters input { flex: 1 1 280px; min-width: 0; max-width: 520px; }
+.project-filters select { flex: none; width: 140px; }
+.project-toolbar-actions { display: flex; align-items: center; flex: none; gap: 10px; }
 .project-filters :is(.input, .select):focus:not(:focus-visible) { --input-color: color-mix(in oklab, var(--color-base-content) 20%, #0000); outline: none; box-shadow: none; }
-.projects-toolbar > .btn { flex-shrink: 0; }
-.projects-panel .table { font-size: 14px; }
-.projects-panel .project-name-cell span { font-size: 13px; }
+.projects-panel .table { min-width: 960px; font-size: 14px; }
+.projects-panel .table :is(th, td) { padding: 18px 16px; vertical-align: middle; }
+.projects-panel .table :is(th, td):first-child { padding-left: 24px; }
+.projects-panel .table :is(th, td):last-child { padding-right: 24px; }
+.projects-panel .table th { background: var(--color-base-200); color: var(--text-muted); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.projects-panel .table th:nth-child(2), .projects-panel .table th:nth-child(4) { width: 104px; }
+.projects-panel .table th:nth-child(3) { width: 120px; }
+.projects-panel .table th:nth-child(5) { width: 150px; }
+.projects-panel .table tbody tr:hover { background: var(--surface-soft); }
+.projects-panel .project-name-cell strong { font-size: 16px; line-height: 1.6; }
+.projects-panel .project-name-cell span { font-size: 12px; line-height: 1.6; }
 .projects-panel .project-actions .btn { font-size: 13px; }
-.projects-panel .badge { font-size: 13px; }
-.projects-panel .empty { font-size: 14px; }
-.project-table-scroll { overflow: auto; max-height: max(280px, calc(100dvh - 380px)); }
-.project-actions { white-space: nowrap; }
-.project-name-cell { min-width: 200px; max-width: 420px; }
+.projects-panel .badge { font-size: 12px; }
+.projects-panel .hint { flex: none; margin: 0; padding: 0 24px 16px; }
+.projects-panel .empty { display: grid; flex: 1; place-items: center; padding: 40px 24px; font-size: 14px; }
+.project-table-scroll { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: auto; }
+.project-actions-heading, .project-actions { width: 220px; text-align: right; white-space: nowrap; }
+.project-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.project-name-cell { min-width: 240px; max-width: 640px; }
 .project-name-cell strong { display: block; white-space: normal; overflow-wrap: anywhere; font-weight: 600; }
-.project-name-cell span { display: block; color: var(--text-muted); white-space: normal; overflow-wrap: anywhere; margin-top: 6px; font-size: 11px; }
-.project-pagination { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-top: 20px; font-size: 14px; color: var(--text-muted); }
+.project-name-cell span { display: block; color: var(--text-muted); white-space: normal; overflow-wrap: anywhere; margin-top: 6px; }
+.project-pagination { display: flex; flex: none; justify-content: space-between; align-items: center; gap: 14px; padding: 18px 24px; border-top: 1px solid var(--app-border); font-size: 13px; color: var(--text-muted); }
 .workspace-project-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .workspace-project-bar > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary); }
 .workspace-project-bar button { flex-shrink: 0; }
-@media(max-width:700px) { .projects-toolbar { align-items: stretch; flex-direction: column; } .project-filters { flex-wrap: wrap; } .project-filters input { flex: 1 1 100%; max-width: none; } .project-filters select { flex: 1; } .projects-toolbar > .btn { align-self: flex-end; } .project-pagination { flex-direction: column; align-items: flex-start; } .workspace-project-bar { flex-wrap: wrap; } .workspace-project-bar > span { min-width: 100px; } }
+@media(max-width:700px) { .projects-toolbar { padding: 18px; } .project-filters input { flex: 1 1 100%; max-width: none; } .project-filters select { flex: 1; min-width: 110px; } .project-pagination { flex-wrap: wrap; padding: 16px 18px; } .workspace-project-bar { flex-wrap: wrap; } .workspace-project-bar > span { min-width: 100px; } }

@@ -40,48 +40,52 @@ watch(()=>route.query,()=>{
             <option value="all">全部状态</option>
             <option v-for="(label,value) in projectStatusLabels" :key="value" :value="value">{{ label }}</option>
           </select>
-          <button class="btn btn-md" :disabled="busy||projectLoading">搜索</button>
+          <div class="project-toolbar-actions">
+            <button class="btn btn-soft btn-info" type="submit" :disabled="busy||projectLoading">搜索</button>
+            <button class="btn btn-primary" type="button" :disabled="busy||!connected||Boolean(pendingImportId)" @click="chooseNewVideo">
+              {{ pendingImportId?'正在导入…':'＋ 新建视频项目' }}
+            </button>
+          </div>
         </form>
-        <button class="btn btn-primary" :disabled="busy||!connected||Boolean(pendingImportId)" @click="chooseNewVideo">
-          {{ pendingImportId?'正在导入…':'＋ 新建视频项目' }}
-        </button>
       </div>
       <p v-if="pendingImportId" class="hint" role="status">视频正在导入，完成后会自动进入素材与粗剪。</p>
       <div class="project-table-scroll" :aria-busy="projectLoading">
-        <table class="table table-sm table-pin-rows">
+        <table class="table table-pin-rows">
           <thead>
             <tr>
-              <th>视频 / 商品</th><th>原视频时长</th><th>处理状态</th><th>成片时长</th><th>最近更新</th><th>操作</th>
+              <th>商品 / 视频</th><th>原视频时长</th><th>处理状态</th><th>成片时长</th><th>最近更新</th><th class="project-actions-heading">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="project in projectPage.items" :key="project.id">
               <td class="project-name-cell">
-                <strong :title="project.name">{{ project.name }}</strong>
-                <span>{{ project.product_name||'尚未填写商品名称' }}</span>
+                <strong :title="project.product_name||'尚未填写商品名称'">{{ project.product_name||'尚未填写商品名称' }}</strong>
+                <span :title="project.name">{{ project.name }}</span>
               </td>
               <td>{{ duration(project.duration_us) }}</td>
               <td><span :class="['badge',projectStatusBadgeClass(project.status)]">{{ projectStatusLabels[project.status] }}</span></td>
               <td>{{ project.output_duration_us===null?'—':`${seconds(project.output_duration_us)} 秒` }}</td>
               <td>{{ updatedTime(project.updated_at) }}</td>
               <td class="project-actions">
-                <button class="btn btn-sm mr-2" :disabled="busy" @click="openProject(project.id)">查看 / 继续编辑</button>
-                <ConfirmPopover
-                  :title="`删除项目“${project.name}”？`"
-                  message="将删除本机导入副本、项目资料、ASR 对话、粗剪方案及本地产物；原始视频文件和 OSS 临时 ASR 音频会保留。此操作不可撤销。"
-                  :confirm-action="() => deleteProject(project.id)"
-                  :disabled="busy || projectLoading"
-                  v-slot="{ open, expanded, popoverId }">
-                  <button
-                    class="btn btn-error btn-outline btn-sm"
+                <div class="project-row-actions">
+                  <button class="btn btn-sm" :disabled="busy" @click="openProject(project.id)">查看 / 继续编辑</button>
+                  <ConfirmPopover
+                    :title="`删除项目“${project.name}”？`"
+                    message="将删除本机导入副本、项目资料、ASR 对话、粗剪方案及本地产物；原始视频文件和 OSS 临时 ASR 音频会保留。此操作不可撤销。"
+                    :confirm-action="() => deleteProject(project.id)"
                     :disabled="busy || projectLoading"
-                    :aria-expanded="expanded"
-                    :aria-controls="popoverId"
-                    aria-haspopup="dialog"
-                    @click="open">
-                    删除
-                  </button>
-                </ConfirmPopover>
+                    v-slot="{ open, expanded, popoverId }">
+                    <button
+                      class="btn btn-error btn-outline btn-sm"
+                      :disabled="busy || projectLoading"
+                      :aria-expanded="expanded"
+                      :aria-controls="popoverId"
+                      aria-haspopup="dialog"
+                      @click="open">
+                      删除
+                    </button>
+                  </ConfirmPopover>
+                </div>
               </td>
             </tr>
           </tbody>

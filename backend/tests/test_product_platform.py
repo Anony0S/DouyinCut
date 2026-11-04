@@ -71,7 +71,14 @@ class ClientTests(unittest.TestCase):
         self.assertNotEqual(error.exception.code, "PRODUCT_PLATFORM_AUTH_REQUIRED")
 
     def test_malformed_and_transport_failures_do_not_masquerade_as_empty_results(self):
-        for payload in ({"success": True, "data": {}}, {"success": True, "data": {"data": ["bad"]}}):
+        for payload in (
+            {"success": True, "data": {}},
+            {"success": True, "data": {"data": ["bad"]}},
+            {"success": True, "data": {"total": "1", "data": None}},
+            {"success": True, "data": {"total": "0"}},
+            {"success": True, "data": {"data": None}},
+            {"success": True, "data": {"total": "0", "data": ""}},
+        ):
             with self.assertRaises(ProductPlatformError) as error:
                 self.client(lambda request: httpx.Response(200, json=payload)).search("测试", "scope-a")
             self.assertEqual(error.exception.status, 502)
@@ -81,6 +88,15 @@ class ClientTests(unittest.TestCase):
             self.client(disconnected).search("测试", "scope-a")
         self.assertNotIn("sensitive", str(error.exception))
         self.assertIsNone(error.exception.__cause__)
+
+    def test_zero_total_with_null_rows_is_an_empty_search_result(self):
+        for total in ("0", 0):
+            with self.subTest(total=total):
+                payload = {"success": True, "code": None, "data": {
+                    "start": 0, "length": 20, "total": total, "totalPage": 0, "data": None, "cursor": None,
+                }}
+                client = self.client(lambda request: httpx.Response(200, json=payload))
+                self.assertEqual(client.search("独束大码女装【雪境牧歌】复古双面穿羽绒服保暖外套25DS84191", "scope-a"), [])
 
     def test_upstream_error_redacts_submitted_fields(self):
         client = self.client(lambda request: httpx.Response(200, json={
@@ -178,6 +194,20 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self.post("products/search", {"keyword": "测试"}).status_code, 401)
         self.assertNotIn(TOKEN_KEY, self.secrets)
         self.assertFalse(self.app.state.product_platform.status()["logged_in"])
+
+    def test_platform_null_rows_reach_api_as_no_product_and_keep_login(self):
+        self.login()
+        transport = httpx.Client(base_url=BASE_URL, transport=httpx.MockTransport(lambda request:
+            httpx.Response(200, json={"success": True, "data": {
+                "start": 0, "length": 20, "total": "0", "totalPage": 0, "data": None, "cursor": None,
+            }})))
+        self.addCleanup(transport.close)
+        remote = ProductPlatformClient("new-fixture-token", transport)
+        with patch("app.product_platform.service.ProductPlatformClient", return_value=remote):
+            result = self.post("products/search", {"keyword": "独束大码女装【雪境牧歌】复古双面穿羽绒服保暖外套25DS84191"})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertIsNone(result.json()["product"])
+        self.assertTrue(self.app.state.product_platform.status()["logged_in"])
 
     def test_permission_and_network_errors_keep_login_and_allow_retry(self):
         self.login()

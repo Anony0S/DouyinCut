@@ -77,7 +77,6 @@ onUnmounted(stopSourcePlayback)
 </script>
 <template><template v-if="activeAsset?.id===route.params.id">
         <div class="workspace-project-bar"><button class="secondary" :disabled="busy" @click="workspace.goProjects()">← 返回视频项目</button><span>{{ activeAsset?.name||'新建视频项目' }}</span><button v-if="activeAsset" class="secondary" :disabled="busy" @click="saveProjectInfo">保存项目设置</button></div>
-        <div class="intro-strip"><strong>单款视频 → 语音粗剪 → 拼接预览</strong><span>输入视频主要讲同一款商品，本版按口播选片。</span></div>
         <WorkspaceSplit>
           <template #left>
           <section class="panel roughcut-controls">

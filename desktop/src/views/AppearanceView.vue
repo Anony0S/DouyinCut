@@ -205,8 +205,8 @@ function startupSizeChanged(event: Event) {
 
 .theme-options {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 220px));
+  gap: 14px;
   margin: 22px 0 0;
   padding: 0;
   border: 0;
@@ -355,7 +355,7 @@ function startupSizeChanged(event: Event) {
 
 @media (max-width: 850px) {
   .theme-options {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 220px);
   }
 }
 </style>

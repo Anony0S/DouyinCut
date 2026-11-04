@@ -126,6 +126,9 @@ class ProductPlatformClient:
         }, authenticated=True)
         data = body.get("data") or {}
         products = data.get("data") if isinstance(data, dict) else None
+        # The platform returns an explicit null list for successful zero-match searches.
+        if isinstance(data, dict) and "data" in data and products is None and data.get("total") in (0, "0"):
+            return []
         if not isinstance(products, list) or any(not isinstance(item, dict) for item in products):
             raise ProductPlatformError("星斗商品平台搜索结果格式无效，请重试", status=502)
         return products

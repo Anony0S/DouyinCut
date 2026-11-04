@@ -14,8 +14,8 @@ const cloudSections = [
   { id: "text", label: "文本剪辑模型" },
   { id: "asr", label: "语音识别模型" },
   { id: "oss", label: "OSS 存储" },
-  { id: "douyin", label: "抖音直播登录" },
-  { id: "product-platform", label: "星斗商品平台" },
+  { id: "douyin", label: "抖音登录" },
+  { id: "product-platform", label: "星斗平台" },
 ] as const;
 type CloudSectionId = (typeof cloudSections)[number]["id"];
 const activeCloudSection = ref<CloudSectionId>("text");
@@ -445,9 +445,6 @@ onUnmounted(() => {
               v-model="config.oss_bucket"
               placeholder="私有 Bucket 名称" />
           </div>
-          <div class="section-divider"></div>
-          <h3>OSS 访问密钥</h3>
-          <p class="hint">与 Endpoint、Bucket 一起保存，密钥留空保留原值。</p>
           <div class="secret-fields">
             <div
               v-for="field in ossSecretFields"

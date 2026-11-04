@@ -71,7 +71,7 @@ async function verifyLogin() {
   }
   const mounted = await mount('views/SettingsView.vue')
   try {
-    const tab = button(mounted.root, '星斗商品平台')
+    const tab = button(mounted.root, '星斗平台')
     assert.equal(tab.props['aria-selected'], true, 'Deep link selects the product platform tab')
     assert.ok(button(mounted.root, '点击登录'))
     await click(button(mounted.root, '点击登录'))

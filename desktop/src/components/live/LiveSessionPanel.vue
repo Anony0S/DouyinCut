@@ -23,6 +23,7 @@ const props = defineProps<{
   onDelete: (id: string) => Promise<void>;
   onDeleteProductClip: (id: string) => Promise<void>;
 }>();
+const visiblePathKey = ref<string | null>(null);
 defineEmits<{
   import: [id: string];
   "import-product-clip": [id: string];
@@ -31,6 +32,16 @@ defineEmits<{
   "open-file": [id: string, reveal: boolean];
   "open-segment-file": [id: string, reveal: boolean];
 }>();
+function pathKey(kind: "segment" | "clip", id: string) {
+  return `${kind}:${id}`;
+}
+function pathTooltipId(kind: "segment" | "clip", id: string) {
+  return `live-${kind}-path-${id}`;
+}
+function togglePath(kind: "segment" | "clip", id: string) {
+  const key = pathKey(kind, id);
+  visiblePathKey.value = visiblePathKey.value === key ? null : key;
+}
 const splitting = (segment: LiveSegment) =>
   Boolean(segment.clip_job && activeClipJobStates.has(segment.clip_job.state));
 function deleteSegment(segment: LiveSegment) {
@@ -257,19 +268,38 @@ const filters = computed(() => [
                   }}
                 </span>
                 <span>{{ formatBytes(segment.size_bytes) }}</span>
+                <span
+                  class="live-segment-path-tooltip"
+                  :class="visiblePathKey === pathKey('segment', segment.id)
+                    ? 'tooltip tooltip-bottom tooltip-start tooltip-open'
+                    : ''">
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-square btn-xs live-segment-path-trigger"
+                    :aria-label="`查看录制分段 ${segment.segment_index} 的文件位置`"
+                    :aria-expanded="visiblePathKey === pathKey('segment', segment.id)"
+                    :aria-describedby="pathTooltipId('segment', segment.id)"
+                    title="查看文件位置"
+                    @click="togglePath('segment', segment.id)"
+                    @keydown.esc="visiblePathKey = null">
+                    <LiveIcon name="folder" />
+                  </button>
+                  <span
+                    :id="pathTooltipId('segment', segment.id)"
+                    class="tooltip-content live-segment-path-content"
+                    role="tooltip">
+                    <code>{{ segment.path }}</code>
+                    <small v-if="segment.duration_us">
+                      时长 {{ seconds(segment.duration_us) }} 秒
+                    </small>
+                  </span>
+                </span>
               </div>
               <p
                 v-if="segment.clip_job?.state === 'failed' && segment.clip_job.error"
                 class="live-product-clip-error">
                 切分失败：{{ segment.clip_job.error }}
               </p>
-              <details class="live-segment-path">
-                <summary>文件位置</summary>
-                <code>{{ segment.path }}</code>
-                <small v-if="segment.duration_us">
-                  时长 {{ seconds(segment.duration_us) }} 秒
-                </small>
-              </details>
             </div>
             <div class="live-segment-actions live-recording-actions">
               <button
@@ -416,14 +446,34 @@ const filters = computed(() => [
                 </span>
                 <span v-if="clip.duration_us">{{ duration(clip.duration_us) }}</span>
                 <span v-if="clip.size_bytes">{{ formatBytes(clip.size_bytes) }}</span>
+                <span
+                  v-if="clip.path"
+                  class="live-segment-path-tooltip"
+                  :class="visiblePathKey === pathKey('clip', clip.id)
+                    ? 'tooltip tooltip-bottom tooltip-start tooltip-open'
+                    : ''">
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-square btn-xs live-segment-path-trigger"
+                    :aria-label="`查看商品片段 ${clip.product_name || clip.promotion_id} 的文件位置`"
+                    :aria-expanded="visiblePathKey === pathKey('clip', clip.id)"
+                    :aria-describedby="pathTooltipId('clip', clip.id)"
+                    title="查看文件位置"
+                    @click="togglePath('clip', clip.id)"
+                    @keydown.esc="visiblePathKey = null">
+                    <LiveIcon name="folder" />
+                  </button>
+                  <span
+                    :id="pathTooltipId('clip', clip.id)"
+                    class="tooltip-content live-segment-path-content"
+                    role="tooltip">
+                    <code>{{ clip.path }}</code>
+                  </span>
+                </span>
               </div>
               <p v-if="clip.error" class="live-product-clip-error">
                 {{ clip.error }}
               </p>
-              <details v-if="clip.path" class="live-segment-path">
-                <summary>文件位置</summary>
-                <code>{{ clip.path }}</code>
-              </details>
             </div>
             <div class="live-segment-actions">
               <button

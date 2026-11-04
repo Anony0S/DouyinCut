@@ -90,22 +90,11 @@ function summary(item: LiveSession) {
         </div>
       </div>
     </div>
-    <div v-if="chronological.length" class="flex gap-2 overflow-x-auto p-1 [scrollbar-width:thin]" role="group" aria-label="逐场选择录制场次">
-      <button v-for="(item, index) in chronological" :key="item.id" type="button"
-        class="btn btn-sm min-w-[100px]! shrink-0 tabular-nums"
-        :class="{ 'btn-active outline-2 outline-primary outline-offset-1': item.id === selectedId }"
-        :aria-label="`逐场选择录制场次：第 ${index + 1} 场 · ${summary(item)}`" :aria-pressed="item.id === selectedId"
-        @mouseenter="hoveredId = item.id" @focus="previewFocus(item.id)" @blur="focusedId = ''"
-        @click="$emit('select', item.id)">
-        <span class="text-base-content/60">{{ index + 1 }}</span>
-        {{ formatLiveTime(item.started, true) }}
-      </button>
-    </div>
-    <button v-if="preview" type="button" class="btn btn-ghost btn-sm live-recording-timeline-summary"
-      :aria-label="`查看录制场次：${summary(preview)}`" @click="$emit('select', preview.id)">
+    <div v-if="preview" class="live-recording-timeline-summary">
       <span>{{ formatLiveTime(preview.started) }} — {{ preview.status === 'recording' ? '至今' : formatLiveTime(preview.ended) }}</span>
-      <span class="text-base-content/60">{{ duration(preview) }} · {{ state(preview) }}</span>
-    </button>
+      <span class="live-recording-timeline-duration">{{ duration(preview) }}</span>
+      <span class="text-base-content/60">· {{ state(preview) }}</span>
+    </div>
     <p v-else class="live-recording-timeline-empty text-base-content/60">{{ emptyMessage }}</p>
   </section>
 </template>

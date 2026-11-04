@@ -110,7 +110,8 @@
 .live-recording-timeline-period.btn.is-selected { outline: 2px solid var(--color-primary); outline-offset: 2px; z-index: 1; }
 .live-recording-timeline-period.btn:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 3px; z-index: 2; }
 .live-recording-timeline-continuation { color: var(--color-base-content); margin-inline: 4px; font-size: 16px; }
-.live-recording-timeline-summary.btn { align-self: flex-start; max-width: 100%; height: auto; min-height: 30px; padding: 5px 8px; flex-wrap: wrap; justify-content: flex-start; gap: 5px 12px; text-align: left; font-size: 12px; font-weight: 500; }
+.live-recording-timeline-summary { display: flex; align-self: flex-start; align-items: center; max-width: 100%; padding: 5px 8px; flex-wrap: wrap; gap: 5px 12px; color: var(--color-base-content); text-align: left; font-size: 12px; font-weight: 500; }
+.live-recording-timeline-duration { color: var(--color-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
 .live-recording-timeline-empty { min-height: 30px; padding: 5px 0; font-size: 12px; }
 .live-room-error { padding: 10px 12px; font-size: 12px; overflow-wrap: anywhere; }
 .live-room-error p { margin-top: 4px; max-height: 96px; overflow-y: auto; }

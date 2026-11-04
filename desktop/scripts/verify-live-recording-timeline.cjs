@@ -88,6 +88,7 @@ const text = el => el.text + el.children.map(text).join('')
 const settle = async () => { for (let i = 0; i < 16; i++) { await Promise.resolve(); await vue.nextTick() } }
 const click = async el => { assert.ok(el, 'interactive target exists'); await el.props.onClick({ currentTarget: el, target: el }); await settle() }
 const selectButton = (root, label) => all(root, el => el.type === 'button' && `${el.props['aria-label'] || ''}`.startsWith(label))[0]
+const timelineSummary = root => all(root, el => el.props.class?.includes('live-recording-timeline-summary'))[0]
 const deferred = () => {
   let resolve, reject
   const promise = new Promise((ok, fail) => { resolve = ok; reject = fail })
@@ -172,6 +173,7 @@ async function verify() {
     const recordingPeriod = all(root, el => el.type === 'button' && el.props.class?.includes('live-recording-timeline-period') && el.props.class?.includes('is-recording'))[0]
     assert.equal(parseFloat(recordingPeriod.props.style.left), 14 / 24 * 100)
     assert.ok(Math.abs(parseFloat(recordingPeriod.props.style.width) - 3605 / 86400 * 100) < 1e-8, 'ongoing period extends only to now and leaves future hours empty')
+    assert.equal(all(root, el => el.props.role === 'group' && el.props['aria-label'] === '逐场选择录制场次').length, 0, 'timeline does not render duplicate session buttons')
     const historical = selectButton(root, '选择录制场次：')
     assert.ok(historical)
     const historicalStyle = { ...historical.props.style }
@@ -183,10 +185,13 @@ async function verify() {
     const track = all(root, el => el.props.role === 'group' && el.props['aria-label'] === '选择录制场次')[0]
     track.props.onMouseleave?.() // Moving from the time bar to its summary stays inside the timeline.
     await settle()
-    const summary = selectButton(root, '查看录制场次：')
+    const summary = timelineSummary(root)
+    assert.equal(summary.type, 'div', 'session summary is informational content, not a button')
     assert.ok(text(summary).includes('2 小时'), 'summary shows the full recording duration')
-    await click(summary)
-    assert.ok(text(root).includes('讲解-历史'), 'summary card selects the corresponding whole session')
+    assert.ok(all(summary, el => el.props.class?.includes('live-recording-timeline-duration')).length, 'session duration has a distinct emphasis style')
+    assert.ok(text(summary).includes('已结束'), 'summary shows the session state')
+    await click(historical)
+    assert.ok(text(root).includes('讲解-历史'), 'clicking a timeline interval selects its session')
     await click(all(root, el => el.type === 'button' && el.props['aria-pressed'] === false
       && `${el.props['aria-label'] || ''}`.startsWith('选择录制场次：'))[0])
     assert.ok(text(root).includes('讲解-当前'))
@@ -205,7 +210,7 @@ async function verify() {
     assert.ok(text(crossBoundary).includes('‹'), 'recording beginning before the window has a continuation marker')
     await click(crossBoundary)
     assert.ok(text(second.root).includes('讲解-跨界'))
-    assert.ok(text(selectButton(second.root, '查看录制场次：')).includes('2 小时'), 'clipping does not shorten the full duration')
+    assert.ok(text(timelineSummary(second.root)).includes('2 小时'), 'clipping does not shorten the full duration')
     const room = all(second.root, el => el.props.role === 'button' && text(el).includes('直播间-二'))[0]
     await click(room)
     assert.ok(text(second.root).includes('今天无录制，可选择其他日期'))
@@ -299,7 +304,7 @@ async function verify() {
     await input.props.onChange({ target: { value: '2026-10-22' } }); await settle()
     const period = selectButton(ongoing.root, '选择录制场次：')
     assert.ok(text(period).includes('‹') && text(period).includes('›'), 'ongoing session extends beyond both historical boundaries')
-    assert.ok(text(selectButton(ongoing.root, '查看录制场次：')).includes('40 小时'), 'ongoing duration is calculated to now, not historical midnight')
+    assert.ok(text(timelineSummary(ongoing.root)).includes('40 小时'), 'ongoing duration is calculated to now, not historical midnight')
     assert.ok(text(ongoing.root).includes('讲解-持续录制'))
   } finally { ongoing.app.unmount() }
   const drifting = session('移出窗口', now - 52200, now - 45000, 17)
@@ -321,7 +326,7 @@ async function verify() {
     assert.ok(text(preserved.root).includes('片段-移出窗口'), 'all three cards continue showing the retained session')
     assert.match(text(preserved.root), /分段\s+17/)
     assert.ok(text(preserved.root).includes('所选场次已不在当前时间范围内'))
-    assert.ok(text(selectButton(preserved.root, '查看录制场次：')).includes('2 小时'), 'the retained selection keeps its summary even without a bar in the window')
+    assert.ok(text(timelineSummary(preserved.root)).includes('2 小时'), 'the retained selection keeps its summary even without a bar in the window')
     assert.equal(lastWindow.get('window_start'), '1792771200', 'today advances at midnight while the selection stays pinned')
     assert.equal(lastWindow.get('window_end'), '1792857600')
     assert.ok(text(preserved.root).includes('今天 · 2026-10-24 · 00:00–24:00'))
@@ -419,29 +424,29 @@ async function verifyDenseSessions() {
   const { root, app } = await mount()
   const warning = '异常结束，结束时间可能晚于实际停录时间'
   try {
-    const choices = () => all(root, el => el.type === 'button' && `${el.props['aria-label'] || ''}`.startsWith('逐场选择录制场次：'))
-    assert.equal(choices().length, 30, 'every one-second session has a separate readable selection control')
-    assert.equal(all(root, el => el.type === 'button' && `${el.props['aria-label'] || ''}`.startsWith('查看录制场次：')).length, 1, 'dense recordings share one summary without stacking cards')
+    const choices = () => all(root, el => el.type === 'button' && el.props.class?.includes('live-recording-timeline-period'))
+    assert.equal(choices().length, 30, 'every one-second session remains clickable on the timeline')
+    assert.equal(timelineSummary(root).type, 'div', 'dense recordings share one informational summary')
     choices()[0].props.onFocus()
     await settle()
-    assert.ok(text(selectButton(root, '查看录制场次：')).includes(warning), 'recovery-check end time shows its uncertainty')
+    assert.ok(text(timelineSummary(root)).includes(warning), 'recovery-check end time shows its uncertainty')
     assert.ok(text(root).includes('讲解-短场-30'), 'focusing a different session only previews it')
     all(root, el => el.type === 'section' && el.props['aria-label'] === '录制时间线')[0].props.onMouseleave()
     await settle()
-    assert.ok(text(selectButton(root, '查看录制场次：')).includes(warning), 'leaving with the pointer does not hide a keyboard-focused preview')
+    assert.ok(text(timelineSummary(root)).includes(warning), 'leaving with the pointer does not hide a keyboard-focused preview')
     choices()[1].props.onMouseenter()
     await settle()
-    assert.ok(!text(selectButton(root, '查看录制场次：')).includes(warning), 'moving the pointer to another session can preview it even while a previous button holds focus')
+    assert.ok(!text(timelineSummary(root)).includes(warning), 'moving the pointer to another session can preview it even while a previous button holds focus')
     all(root, el => el.type === 'section' && el.props['aria-label'] === '录制时间线')[0].props.onMouseleave()
     await settle()
-    assert.ok(text(selectButton(root, '查看录制场次：')).includes(warning), 'pointer exit restores the focused preview')
+    assert.ok(text(timelineSummary(root)).includes(warning), 'pointer exit restores the focused preview')
     choices()[0].props.onBlur()
     await settle()
-    assert.ok(!text(selectButton(root, '查看录制场次：')).includes(warning), 'leaving focus restores the selected session summary')
+    assert.ok(!text(timelineSummary(root)).includes(warning), 'leaving focus restores the selected session summary')
     choices()[1].props.onMouseenter()
     await settle()
-    assert.ok(text(selectButton(root, '查看录制场次：')).includes('异常结束'))
-    assert.ok(!text(selectButton(root, '查看录制场次：')).includes(warning), 'an observed failure does not claim a recovery time error')
+    assert.ok(text(timelineSummary(root)).includes('异常结束'))
+    assert.ok(!text(timelineSummary(root)).includes(warning), 'an observed failure does not claim a recovery time error')
     for (let i = 0; i < choices().length; i++) {
       await click(choices()[i])
       assert.ok(text(root).includes(`讲解-短场-${i + 1}`), 'each adjacent short session selects its own explanation')

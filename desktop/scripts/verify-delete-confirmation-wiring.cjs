@@ -109,13 +109,14 @@ async function verify() {
   await checkConfirmation(editor.root, '删除方案 1', '/plans/one', '源视频、ASR 对话')
   editor.app.unmount()
 
-  const liveSession = { id: 's', started: 1, status: 'completed', product_events: [], product_clips: [
+  const liveSession = { id: 's', started: 1, status: 'completed', product_events: [], product_periods: [], product_clips: [
     { id: 'c', status: 'completed', product_name: '商品一', promotion_id: 'p' },
     { id: 'i', status: 'imported', product_name: '商品二', promotion_id: 'q' },
     { id: 'busy', status: 'processing', product_name: '生成中', promotion_id: 'r' },
-  ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, clip_job: { state: 'running' } }] }
+  ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, splitting: true }] }
   const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, busy: false,
     onDelete: async id => calls.push(`/segments/${id}`), onDeleteProductClip: async id => calls.push(`/clips/${id}`),
+    onSplit: async () => ({state: 'noop', message: ''}),
   })
   await checkConfirmation(panel.root, '删除分段 1', '/segments/seg', '本地录制文件')
   await checkConfirmation(panel.root, '删除商品片段 商品一', '/clips/c', '本地文件')
@@ -123,6 +124,51 @@ async function verify() {
   assert.equal(button(panel.root, '删除分段 2').props.disabled, true)
   assert.equal(button(panel.root, '删除商品片段 生成中'), undefined)
   panel.app.unmount()
+
+  const source = (id, index, state = 'ready') => ({segment_id: id, segment_index: index, state, start: 1, end: 10, clip_start: 0, clip_end: 9, clip_status: null, clip_id: null})
+  const lecture = (id, started, ended, sources) => ({id, session_id: 's', promotion_id: 'p', product_name: '同一商品', started, ended, sources, mapping_error: '', clip_job: null})
+  const lectures = [lecture('first', 1, 11, [source('one', 1)]), lecture('current', 21, null, [source('two', 2, 'deleted'), source('three', 3), source('four', 4, 'recording')])]
+  const splitCalls = []
+  let changedMissing = false
+  const lecturePanel = await mount('components/live/LiveSessionPanel.vue', { session: {...liveSession, product_clips: [], product_periods: lectures}, busy: false,
+    onDelete: async () => {}, onDeleteProductClip: async () => {},
+    onSplit: async (id, confirmed) => {
+      splitCalls.push({id, confirmed})
+      if (id === 'first') return {id:'job-first',state:'queued'}
+      if (!confirmed.length || changedMissing) {
+        const missing = changedMissing ? [source('two', 2, 'deleted'), source('three', 3, 'missing')] : [source('two', 2, 'deleted')]
+        changedMissing = false
+        return {state:'confirmation_required',missing_segments:missing,available_count:1}
+      }
+      return {id:'job-current',state:'queued'}
+    },
+  })
+  const headings = all(lecturePanel.root, el => el.type === 'h3').map(text)
+  assert.deepEqual(headings, ['录制分段','商品讲解','商品视频片段'])
+  assert.ok(!text(lecturePanel.root).includes('场次结束时讲解'))
+  assert.ok(!text(lecturePanel.root).includes('讲解变更'))
+  const lectureRows = all(lecturePanel.root, el => el.type === 'article' && el.props.class?.includes('live-product-event'))
+  assert.equal(lectureRows.length, 2, 'repeated products retain separate lectures')
+  assert.ok(text(lectureRows[0]).includes('正在讲解'), 'current lecture is first')
+  assert.ok(text(lectureRows[0]).includes('分段 02（已删除）'))
+  assert.ok(text(lectureRows[0]).includes('部分待封存'))
+  const recordingCard = all(lecturePanel.root, el => el.type === 'section' && el.props.class?.includes('live-recordings-card'))[0]
+  assert.ok(!all(recordingCard, el => el.type === 'button').some(el => text(el).includes('切分商品')), 'recording rows have no split action')
+  await click(button(lectureRows[1], '切分商品 同一商品'))
+  assert.deepEqual(splitCalls.at(-1), {id:'first',confirmed:[]}, 'initial lecture can be split without a switch event')
+  await click(button(lectureRows[0], '切分商品 同一商品'))
+  assert.ok(text(dialog()).includes('分段 02（已删除）'))
+  await click(button(dialog(), '取消'))
+  assert.deepEqual(splitCalls.at(-1).confirmed, [], 'cancelling does not authorize partial output')
+  await click(button(lectureRows[0], '切分商品 同一商品'))
+  changedMissing = true
+  await click(button(dialog(), '只切可用部分'))
+  assert.ok(dialog(), 'changed missing sources require confirmation again')
+  assert.ok(text(dialog()).includes('分段 03（文件不存在）'))
+  await click(button(dialog(), '只切可用部分'))
+  assert.deepEqual(splitCalls.at(-1), {id:'current',confirmed:['two','three']})
+  assert.equal(dialog(), undefined)
+  lecturePanel.app.unmount()
 
   const monitors = ['m1', 'm2'].map(id => ({ id, name: id, url: 'https://live.douyin.com/1', sessions: [], live_state: 'idle' }))
   const selectedId = vue.ref('m1'), recording = vue.ref(false)

@@ -279,7 +279,7 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200, deleted.text)
         self.assertTrue(deleted.json()["file_deleted"])
         self.assertFalse(recording_path.exists())
-        self.assertIsNone(self.live.segment_status(recording_path))
+        self.assertEqual(self.live.segment_status(recording_path)["status"], "deleted")
 
     def test_start_recorder_uses_stream_copy_and_1200_second_segments(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-3", "room")
@@ -475,7 +475,7 @@ class LiveMonitoringTests(unittest.TestCase):
         directory.mkdir(parents=True, exist_ok=True)
         segment_ids = []
         for index in (1, 2):
-            path = directory / f"raw-{index}.ts"
+            path = directory / f"raw-{index - 1:06d}.ts"
             path.write_bytes(b"raw-recording")
             segment_ids.append(self.live.upsert_segment(session_id, path, index, "completed",
                                                         path.stat().st_size, 20_000_000))
@@ -493,81 +493,177 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertFalse(hasattr(LiveMonitorWorker(self.settings, resolver=object()), "clip_executor"))
         self.assertEqual(self.live.list_monitors()[0]["id"], monitor["id"])
 
-    def test_manual_split_cuts_only_the_requested_segment_on_its_local_timeline(self):
-        from app.live_monitoring.service import generate_segment_product_clips
+    def _period_id(self, session_id, promotion_id="p1"):
+        with self.store.connection() as conn:
+            return conn.execute("SELECT id FROM live_product_periods WHERE session_id=? AND promotion_id=? ORDER BY started LIMIT 1",
+                                (session_id, promotion_id)).fetchone()[0]
 
-        _monitor, session_id, (first, second) = self._two_segment_session("room-manual-split")
-        queued = self.client.post(f"/api/v1/live/segments/{second}/product-clips", headers=self.headers)
-        repeated = self.client.post(f"/api/v1/live/segments/{second}/product-clips", headers=self.headers)
+    def _generate_test_period(self, session_id, promotion_id="p1"):
+        from app.live_monitoring.service import generate_period_product_clips
+        job = self.live.request_period_product_clips(self._period_id(session_id, promotion_id), [])
+        result = generate_period_product_clips(self.store, self.settings, job["payload"])
+        with self.store.connection() as conn:
+            conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (job["id"],))
+        return result
+
+    def test_split_one_lecture_across_segments_and_repeated_click_is_idempotent(self):
+        from app.live_monitoring.service import generate_period_product_clips
+        monitor, session_id, (first, second) = self._two_segment_session("period-split")
+        period_id = self._period_id(session_id, "p2")
+        url = f"/api/v1/live/product-periods/{period_id}/product-clips"
+        queued = self.client.post(url, headers=self.headers, json={})
+        repeated = self.client.post(url, headers=self.headers, json={})
         self.assertEqual(queued.status_code, 202, queued.text)
         self.assertEqual(queued.json()["id"], repeated.json()["id"])
-        self.assertEqual(queued.json()["kind"], "live_product_clips")
-
+        for segment_id in (first, second):
+            denied = self.client.delete(f"/api/v1/live/segments/{segment_id}", headers=self.headers)
+            self.assertEqual(denied.status_code, 409, denied.text)
+        competing = self.client.post(f"/api/v1/live/product-periods/{self._period_id(session_id)}/product-clips",
+                                     headers=self.headers, json={})
+        self.assertEqual(competing.status_code, 409)
         calls = []
+        def write_clip(args, **kwargs):
+            if "-ss" in args:
+                calls.append(args)
+            return fake_media_process(args, **kwargs)
+        with (patch("app.media.processing.run_process", side_effect=write_clip),
+              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
+            result = generate_period_product_clips(self.store, self.settings, queued.json()["payload"])
+        self.assertEqual(result, {"period_id": period_id, "created": 2, "skipped": 0, "failed": 0})
+        self.assertEqual([(float(a[a.index("-ss")+1]), float(a[a.index("-t")+1])) for a in calls],
+                         [(5.0, 15.0), (0.0, 5.0)])
+        session = self.live.recording_session(monitor["id"], session_id)
+        self.assertEqual({clip["promotion_id"] for clip in session["product_clips"]}, {"p2"})
+        self.assertEqual({clip["segment_id"] for clip in session["product_clips"]}, {first, second})
+        self.assertTrue(all(segment["splitting"] for segment in session["segments"]))
+        with self.store.connection() as conn:
+            conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (queued.json()["id"],))
+        noop = self.client.post(url, headers=self.headers, json={})
+        self.assertEqual(noop.json()["state"], "noop")
 
-        def write_clip(args, **_kwargs):
-            if "-show_streams" in args:
-                return json.dumps({"streams": [
-                    {"codec_type": "video", "codec_name": "h264"},
-                    {"codec_type": "audio", "codec_name": "aac"},
-                ]})
-            calls.append(args)
-            Path(args[-1]).write_bytes(b"product-clip")
+    def test_current_lecture_cuts_sealed_part_then_supplements_newly_sealed_source(self):
+        _monitor, session_id, (first, second) = self._two_segment_session("period-supplement")
+        period_id = self._period_id(session_id, "p2")
+        with self.store.connection() as conn:
+            conn.execute("DELETE FROM live_product_periods WHERE session_id=? AND promotion_id='p3'", (session_id,))
+            conn.execute("UPDATE live_product_periods SET ended=NULL WHERE id=?", (period_id,))
+            conn.execute("UPDATE live_sessions SET status='recording',ended=NULL WHERE id=?", (session_id,))
+            conn.execute("UPDATE live_segments SET status='recording',duration_us=NULL WHERE id=?", (second,))
+        with (patch("app.media.processing.run_process", side_effect=fake_media_process),
+              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
+            first_result = self._generate_test_period(session_id, "p2")
+            self.assertEqual(first_result["created"], 1)
+            with self.store.connection() as conn:
+                conn.execute("UPDATE live_segments SET status='completed',duration_us=20000000 WHERE id=?", (second,))
+            second_result = self._generate_test_period(session_id, "p2")
+            self.assertEqual(second_result["created"], 1)
+        with self.store.connection() as conn:
+            rows = conn.execute("SELECT segment_id FROM live_segment_product_clips WHERE period_id=?", (period_id,)).fetchall()
+        self.assertEqual({row["segment_id"] for row in rows}, {first, second})
 
-        with (
-            patch("app.media.processing.run_process", side_effect=write_clip),
-            patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
-        ):
-            result = generate_segment_product_clips(self.store, self.settings, queued.json()["payload"])
+    def test_deleted_source_preserves_lecture_mapping_and_requires_partial_confirmation(self):
+        monitor, session_id, (first, second) = self._two_segment_session("period-delete")
+        period_id = self._period_id(session_id, "p2")
+        deleted = self.client.delete(f"/api/v1/live/segments/{first}", headers=self.headers)
+        self.assertEqual(deleted.status_code, 200)
+        session = self.live.recording_session(monitor["id"], session_id)
+        self.assertEqual([segment["segment_index"] for segment in session["segments"]], [2])
+        self.assertEqual(len(session["product_periods"]), 3)
+        plan = self.client.get(f"/api/v1/live/product-periods/{period_id}/split-plan", headers=self.headers).json()
+        self.assertEqual([(s["segment_index"], s["state"]) for s in plan["sources"]], [(1, "deleted"), (2, "ready")])
+        self.assertEqual(plan["sources"][1]["clip_start"], 0)
+        self.assertEqual(plan["sources"][1]["clip_end"], 5)
+        url = f"/api/v1/live/product-periods/{period_id}/product-clips"
+        confirmation = self.client.post(url, headers=self.headers, json={}).json()
+        self.assertEqual(confirmation["state"], "confirmation_required")
+        self.assertEqual(confirmation["available_count"], 1)
+        queued = self.client.post(url, headers=self.headers, json={"confirmed_missing_segment_ids": [first]})
+        self.assertEqual([window["segment_id"] for window in queued.json()["payload"]["windows"]], [second])
+        # Deleting a previous source does not move a later lecture's local start.
+        later = self.live.period_split_plan(self._period_id(session_id, "p3"))
+        self.assertEqual(later["sources"][0]["clip_start"], 5)
+        missing = self.client.post(f"/api/v1/live/product-periods/{self._period_id(session_id)}/product-clips",
+                                   headers=self.headers, json={})
+        self.assertEqual(missing.status_code, 409)
+        self.assertIn("没有对应", missing.json()["detail"])
 
-        # Segment 2 covers 20–40 s: p2 (20–25 s → local 0–5) and p3 (25–40 s → local 5–20).
-        self.assertEqual(result, {"segment_id": second, "created": 2, "skipped": 0, "failed": 0})
-        clip_calls = [args for args in calls if "-ss" in args]
-        windows = [(float(a[a.index("-ss") + 1]), float(a[a.index("-t") + 1])) for a in clip_calls]
-        self.assertEqual(windows, [(0.0, 5.0), (5.0, 15.0)])
-        session = self.live.list_monitors()[0]["sessions"][0]
-        self.assertEqual({clip["promotion_id"] for clip in session["product_clips"]}, {"p2", "p3"})
-        self.assertTrue(all(clip["segment_id"] == second for clip in session["product_clips"]))
-        self.assertTrue(all(Path(clip["path"]).suffix == ".mp4" for clip in session["product_clips"]))
-        segments = {segment["id"]: segment for segment in session["segments"]}
-        self.assertEqual(segments[second]["clip_job"]["id"], queued.json()["id"])
-        self.assertIsNone(segments[first]["clip_job"])
-        with (
-            patch("app.media.processing.run_process", side_effect=write_clip),
-            patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
-        ):
-            again = generate_segment_product_clips(self.store, self.settings, {"segment_id": second})
-        self.assertEqual(again["skipped"], 2)
+    def test_missing_file_and_changed_missing_set_are_rechecked_before_queueing(self):
+        _monitor, session_id, (first, second) = self._two_segment_session("period-missing")
+        period_id = self._period_id(session_id, "p2")
+        with self.store.connection() as conn:
+            Path(conn.execute("SELECT path FROM live_segments WHERE id=?", (first,)).fetchone()[0]).unlink()
+        confirmation = self.live.request_period_product_clips(period_id, [])
+        self.assertEqual(confirmation["missing_segments"][0]["state"], "missing")
+        with self.store.connection() as conn:
+            Path(conn.execute("SELECT path FROM live_segments WHERE id=?", (second,)).fetchone()[0]).unlink()
+        with self.assertRaisesRegex(ValueError, "没有对应"):
+            self.live.request_period_product_clips(period_id, [first])
 
-    def test_segment_scanner_does_not_register_generated_product_clips_as_recordings(self):
-        from app.live_monitoring.service import generate_segment_product_clips
+    def test_same_product_returning_is_a_separate_lecture_and_short_intersections_are_skipped(self):
+        monitor, session_id, _segments = self._two_segment_session("period-repeat")
+        with self.store.connection() as conn:
+            started = conn.execute("SELECT started FROM live_sessions WHERE id=?", (session_id,)).fetchone()[0]
+            conn.execute("UPDATE live_product_periods SET ended=? WHERE session_id=? AND promotion_id='p1'", (started + .5, session_id))
+        self.live.set_current_product(session_id, promotion_id="p1", received_at=started+41, event_time=started+41)
+        session = self.live.recording_session(monitor["id"], session_id)
+        self.assertEqual(len([p for p in session["product_periods"] if p["promotion_id"] == "p1"]), 2)
+        self.assertEqual(session["product_periods"][0]["promotion_id"], "p1")
+        response = self.live.request_period_product_clips(self._period_id(session_id), [])
+        self.assertEqual(response["state"], "noop")
+        self.assertIn("至少 1 秒", response["message"])
 
-        monitor, session_id, (segment_id, _second) = self._two_segment_session("room-scan-product-clips")
-        with (
-            patch("app.media.processing.run_process", side_effect=fake_media_process),
-            patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
-        ):
-            generate_segment_product_clips(self.store, self.settings, {"segment_id": segment_id})
+    def test_failed_piece_is_reported_and_retry_only_generates_that_piece(self):
+        from app.live_monitoring.service import generate_period_product_clips
+        monitor, session_id, _segments = self._two_segment_session("period-retry")
+        period_id = self._period_id(session_id, "p2")
+        job = self.live.request_period_product_clips(period_id, [])
+        def fail_second_piece(args, **kwargs):
+            if "-ss" in args and float(args[args.index("-ss") + 1]) == 0:
+                raise RuntimeError("模拟第二个片段失败")
+            return fake_media_process(args, **kwargs)
+        with (patch("app.media.processing.run_process", side_effect=fail_second_piece),
+              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
+            result = generate_period_product_clips(self.store, self.settings, job["payload"])
+        self.assertEqual((result["created"], result["failed"]), (1, 1))
+        before = self.live.recording_session(monitor["id"], session_id)["product_clips"]
+        failed_clip = next(clip for clip in before if clip["status"] == "failed")
+        self.assertIn("模拟第二个片段失败", failed_clip["error"])
+        with self.store.connection() as conn:
+            conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (job["id"],))
+        with (patch("app.media.processing.run_process", side_effect=fake_media_process),
+              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
+            retried = self._generate_test_period(session_id, "p2")
+        self.assertEqual(retried["created"], 1)
+        after = self.live.recording_session(monitor["id"], session_id)["product_clips"]
+        self.assertEqual({clip["id"] for clip in before}, {clip["id"] for clip in after})
+        self.assertTrue(all(clip["status"] == "completed" and not clip["error"] for clip in after))
 
+    def test_unmappable_source_is_rejected_instead_of_estimating_offsets(self):
+        _monitor, session_id, (first, _second) = self._two_segment_session("period-unknown-time")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET duration_us=NULL WHERE id=?", (first,))
+        with self.assertRaisesRegex(ValueError, "时长未知"):
+            self.live.request_period_product_clips(self._period_id(session_id, "p2"), [])
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET duration_us=20000000 WHERE id=?", (first,))
+            conn.execute("UPDATE live_segments SET duration_us=NULL WHERE id=?", (_second,))
+        # A broken later source does not prevent cutting an earlier complete lecture.
+        self.assertFalse(self.live.period_split_plan(self._period_id(session_id))["mapping_error"])
+        self.assertEqual(self.live.request_period_product_clips(self._period_id(session_id), [])["state"], "queued")
+
+    def test_segment_scanner_preserves_filename_indices_after_deleting_earlier_source(self):
+        monitor, session_id, (first, second) = self._two_segment_session("period-scan")
+        with (patch("app.media.processing.run_process", side_effect=fake_media_process),
+              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
+            self._generate_test_period(session_id)
+        self.live.delete_segment(first, self.settings.data_dir / "recordings" / "live")
         worker = LiveMonitorWorker(self.settings, resolver=object())
         worker._scan_segments(monitor["id"], session_id, final=True)
-
         with self.store.connection() as conn:
-            rows = conn.execute("SELECT path FROM live_segments WHERE session_id=?", (session_id,)).fetchall()
-        self.assertEqual(len(rows), 2)
-        self.assertTrue(all(not Path(row["path"]).name.startswith("商品片段_") for row in rows))
-
-    def test_manual_split_rejects_recording_segment_and_blocks_delete_while_active(self):
-        _monitor, _session_id, (first, _second) = self._two_segment_session("room-split-guards")
-        queued = self.client.post(f"/api/v1/live/segments/{first}/product-clips", headers=self.headers)
-        self.assertEqual(queued.status_code, 202, queued.text)
-        blocked = self.client.delete(f"/api/v1/live/segments/{first}", headers=self.headers)
-        self.assertEqual(blocked.status_code, 409, blocked.text)
-        with self.store.connection() as conn:
-            conn.execute("UPDATE live_segments SET status='recording' WHERE id=?", (first,))
-            conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (queued.json()["id"],))
-        rejected = self.client.post(f"/api/v1/live/segments/{first}/product-clips", headers=self.headers)
-        self.assertEqual(rejected.status_code, 409, rejected.text)
+            rows = conn.execute("SELECT id,segment_index,status FROM live_segments WHERE session_id=? ORDER BY segment_index", (session_id,)).fetchall()
+        self.assertEqual([(row["segment_index"], row["status"]) for row in rows], [(1, "deleted"), (2, "completed")])
+        self.assertEqual(rows[1]["id"], second)
+        self.assertEqual(len(self.live.recording_session(monitor["id"], session_id)["product_clips"]), 1)
 
     def _recording_worker(self, live_state: dict):
         class Resolver:
@@ -652,14 +748,13 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(started, [monitor["id"]])
 
     def test_open_product_clip_uses_system_player_or_explorer_and_stays_in_recordings_root(self):
-        from app.live_monitoring.service import generate_segment_product_clips
 
-        _monitor, _session_id, (first, _second) = self._two_segment_session("room-open-clip")
+        _monitor, session_id, (first, _second) = self._two_segment_session("room-open-clip")
         with (
             patch("app.media.processing.run_process", side_effect=fake_media_process),
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
-            generate_segment_product_clips(self.store, self.settings, {"segment_id": first})
+            self._generate_test_period(session_id)
         clip = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]
 
         with patch("app.live_monitoring.service.os.startfile") as startfile, \
@@ -709,14 +804,13 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 409, missing.text)
 
     def test_generated_product_clip_can_be_imported_and_reused(self):
-        from app.live_monitoring.service import generate_segment_product_clips
 
-        _monitor, _session_id, (first, _second) = self._two_segment_session("room-import-product-clip")
+        _monitor, session_id, (first, _second) = self._two_segment_session("room-import-product-clip")
         with (
             patch("app.media.processing.run_process", side_effect=fake_media_process),
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
-            generate_segment_product_clips(self.store, self.settings, {"segment_id": first})
+            self._generate_test_period(session_id)
         clip_id = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]["id"]
 
         first = self.client.post(f"/api/v1/live/product-clips/{clip_id}/import", headers=self.headers)
@@ -724,17 +818,16 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(first.status_code, 202, first.text)
         self.assertEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(first.json()["payload"]["live_product_clip_id"], clip_id)
-        self.assertEqual(first.json()["payload"]["product_name"], "半身裙")
+        self.assertEqual(first.json()["payload"]["product_name"], "针织开衫")
 
     def test_product_clip_delete_removes_unimported_file_and_retains_imported_project_file(self):
-        from app.live_monitoring.service import generate_segment_product_clips
 
-        _monitor, _session_id, (segment_id, _second) = self._two_segment_session("room-delete-product-clip")
+        _monitor, session_id, (segment_id, _second) = self._two_segment_session("room-delete-product-clip")
         with (
             patch("app.media.processing.run_process", side_effect=fake_media_process),
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
-            generate_segment_product_clips(self.store, self.settings, {"segment_id": segment_id})
+            self._generate_test_period(session_id)
         clip = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]
         path = Path(clip["path"])
         deleted = self.client.delete(f"/api/v1/live/product-clips/{clip['id']}", headers=self.headers)
@@ -746,7 +839,7 @@ class LiveMonitoringTests(unittest.TestCase):
             patch("app.media.processing.run_process", side_effect=fake_media_process),
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
-            generate_segment_product_clips(self.store, self.settings, {"segment_id": segment_id})
+            self._generate_test_period(session_id)
         clip = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]
         path = Path(clip["path"])
         with self.store.connection() as conn:

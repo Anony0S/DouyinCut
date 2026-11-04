@@ -23,8 +23,9 @@ global.clearInterval = callback => { polls.delete(callback) }
 const session = (id, started, ended, index) => ({
   id, started, ended, status: ended === null ? 'recording' : 'stopped', end_time_source: ended === null ? null : 'observed',
   product_events: [], product_listener: null, product_catalog_error: null,
+  product_periods: [{id: `period-${id}`, session_id: id, promotion_id: id, product_name: `讲解-${id}`, started, ended, sources: [], mapping_error: '', clip_job: null}],
   current_product: { promotion_id: id, product_name: `讲解-${id}`, event_time: started, received_at: started },
-  segments: [{ id: `segment-${id}`, path: `${id}.ts`, segment_index: index, status: 'completed', size_bytes: 100, duration_us: 1e6, asset_id: null, import_job_id: null, clip_job: null }],
+  segments: [{ id: `segment-${id}`, path: `${id}.ts`, segment_index: index, status: 'completed', size_bytes: 100, duration_us: 1e6, asset_id: null, import_job_id: null, splitting: false }],
   product_clips: [{ id: `clip-${id}`, segment_id: `segment-${id}`, segment_index: index, promotion_id: id, product_name: `片段-${id}`, start: 0, end: 1, path: `${id}.mp4`, status: 'completed', size_bytes: 100, duration_us: 1e6, asset_id: null, import_job_id: null, error: '' }],
 })
 const monitor = (id, sessions) => ({ id, sessions, name: `直播间-${id}`, url: `https://live.douyin.com/${id}`, auto_record: false, notify_live: false, live_state: 'offline', is_live: false, live_checked: null, error: null })
@@ -318,7 +319,7 @@ async function verify() {
     await settle()
     assert.ok(text(preserved.root).includes('讲解-移出窗口'), 'a new recording does not take over a manual selection')
     response = [monitor('一', [recent, session('新录制', now, null, 19)])]
-    detailResponse = { ...drifting, current_product: { ...drifting.current_product, product_name: '窗口外已更新' } }
+    detailResponse = { ...drifting, product_periods: drifting.product_periods.map(period => ({...period, product_name: '窗口外已更新'})) }
     clockNow += 32700000
     for (const poll of polls) poll()
     await settle()

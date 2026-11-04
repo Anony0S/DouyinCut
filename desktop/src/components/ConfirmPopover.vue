@@ -15,10 +15,12 @@ const props = withDefaults(defineProps<{
   confirmLabel?: string
   cancelLabel?: string
   disabled?: boolean
+  confirmColor?: "error" | "neutral"
 }>(), {
   confirmLabel: "确定删除",
   cancelLabel: "取消",
   disabled: false,
+  confirmColor: "error",
 })
 
 const opened = ref(false)
@@ -70,7 +72,7 @@ function close(restoreFocus = true) {
   if (restoreFocus) void nextTick(() => target?.focus())
 }
 
-async function open(event?: Event) {
+async function open(event?: { currentTarget?: EventTarget | null; target?: EventTarget | null }) {
   if (props.disabled || pending.value) return
   activeClose?.(false)
   const current = event?.currentTarget
@@ -146,7 +148,7 @@ onUnmounted(() => {
         <button ref="cancelButton" type="button" class="btn btn-ghost btn-sm" :disabled="pending" :aria-label="cancelLabel" @click="close()">
           {{ cancelLabel }}
         </button>
-        <button type="button" class="btn btn-error btn-sm" :disabled="pending || disabled" :aria-label="confirmLabel" @click="confirm">
+        <button type="button" class="btn btn-sm" :class="confirmColor === 'error' ? 'btn-error' : 'btn-neutral'" :disabled="pending || disabled" :aria-label="confirmLabel" @click="confirm">
           {{ pending ? "处理中…" : confirmLabel }}
         </button>
       </div>

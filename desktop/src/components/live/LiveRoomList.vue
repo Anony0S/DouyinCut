@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { LiveMonitor, LiveMonitorSettings } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
@@ -56,6 +56,19 @@ const filtered = computed(() =>
 const selected = computed(() =>
   props.monitors.find((item) => item.id === props.selectedId),
 );
+const now = ref(Date.now());
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  now.value = Date.now();
+  clockTimer = setInterval(() => { now.value = Date.now(); }, 5000);
+});
+onUnmounted(() => clearInterval(clockTimer));
+const selectedCheckTime = computed(() => {
+  const checked = selected.value?.last_checked;
+  if (!checked) return "尚未检测";
+  const minutes = Math.max(0, Math.floor((now.value - checked * 1000) / 60000));
+  return `${formatLiveTime(checked)}（${minutes}分钟前）`;
+});
 const selectedRecording = computed(() =>
   Boolean(selected.value && isRecording(selected.value)),
 );
@@ -256,7 +269,7 @@ onUnmounted(closeSettings);
       <div class="live-room-selected-meta">
         <span>
           <LiveIcon name="clock" />
-          最近检测 {{ formatLiveTime(selected.last_checked) }}
+          最近检测 {{ selectedCheckTime }}
         </span>
         <span>
           <LiveIcon name="video" />

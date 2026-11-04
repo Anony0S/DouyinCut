@@ -117,13 +117,6 @@
 .live-room-error p { margin-top: 4px; max-height: 96px; overflow-y: auto; }
 .live-section-kicker { color: var(--text-muted); font-size: 12px; font-weight: 500; }
 .live-session-content { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: 16px; }
-.live-product-current { display: flex; flex: none; flex-direction: column; gap: 5px; margin: 14px 16px 0; padding: 13px 14px; border: 1px solid color-mix(in oklab, var(--color-warning) 30%, var(--color-base-100)); border-radius: 10px; background: color-mix(in oklab, var(--color-warning) 10%, var(--color-base-100)); }
-.live-product-current > .live-section-kicker { color: var(--text-secondary); }
-.live-product-current > strong { font-size: 14px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
-.live-product-current > .live-event-meta { margin-top: 0; color: var(--text-secondary); }
-.live-product-current > p { color: var(--text-secondary); font-size: 12px; }
-.live-product-current.is-history { border-color: var(--live-border); background: var(--color-base-200); }
-.live-product-current.is-history > .live-section-kicker, .live-product-current.is-history > .live-event-meta { color: var(--text-muted); }
 .live-listener-note { display: flex; flex: none; align-items: flex-start; gap: 8px; margin: 10px 16px 0; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
 .live-listener-note .live-icon { width: 14px; height: 14px; margin-top: 2px; }
 .live-listener-note.is-error { color: var(--color-error); }
@@ -158,8 +151,8 @@
 .live-event-content { padding-bottom: 23px; }
 .live-event-time { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-bottom: 8px; }
 .live-event-time time { color: var(--color-primary); font: 600 12px/1.5 Consolas, monospace; font-variant-numeric: tabular-nums; }
-.live-event-time > span { color: var(--text-muted); font-size: 12px; }
-.live-event-content > strong { display: block; font-size: 12px; line-height: 1.75; font-weight: 500; overflow-wrap: anywhere; }
+.live-event-time > span:not(.badge) { color: var(--text-muted); font-size: 12px; }
+.live-event-info > strong { display: block; font-size: 12px; line-height: 1.75; font-weight: 500; overflow-wrap: anywhere; }
 .live-event-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
 .live-event-content > small { margin-top: 5px; color: var(--text-muted); font-size: 12px; }
 .live-card-foot { display: flex; align-items: center; gap: 7px; margin-top: auto; padding: 13px 18px; border-top: 1px solid var(--color-base-300); background: var(--color-base-100); color: var(--text-muted); font-size: 12px; line-height: 1.7; }
@@ -191,7 +184,6 @@
 .live-recording-actions .live-segment-action:focus-visible { width: calc(34px + var(--live-action-label-width)); min-width: calc(34px + var(--live-action-label-width)); max-width: calc(34px + var(--live-action-label-width)); }
 .live-recording-actions .live-segment-action-open-file { --live-action-label-width: 5em; }
 .live-recording-actions .live-segment-action-open-folder { --live-action-label-width: 6em; }
-.live-recording-actions .live-segment-action-split,
 .live-recording-actions .live-segment-action-import,
 .live-recording-actions .live-segment-action-importing,
 .live-recording-actions .live-segment-action-project,

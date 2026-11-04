@@ -24,7 +24,7 @@ from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
 from .core.storage import SessionStopping, Store
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, ProjectDraft, delete_plan, delete_project, job_summary,
                        project_detail, project_list, save_draft)
-from .live_monitoring import (LiveClipOpen, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
+from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
 
 
 class ExportRequest(Model):
@@ -113,6 +113,18 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                 "douyin_resolver": "streamget", "cloud_integration": "awaiting_live_validation",
                 "credentials": storage_status()}
 
+    @app.post("/api/v1/settings/work-directory/open")
+    def open_work_directory():
+        if not settings.data_dir.is_dir():
+            raise HTTPException(409, "工作目录不存在，请检查存储设备及目录位置")
+        if os.name != "nt":
+            raise HTTPException(409, "打开工作目录仅支持 Windows")
+        try:
+            os.startfile(str(settings.data_dir.resolve()))
+        except OSError as exc:
+            raise HTTPException(409, f"打开工作目录失败：{exc}") from None
+        return {"opened": True}
+
     @app.get("/api/v1/live/monitors")
     def live_monitors(window_start: float | None = Query(None, ge=0, allow_inf_nan=False),
                       window_end: float | None = Query(None, gt=0, allow_inf_nan=False),
@@ -189,10 +201,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
 
-    @app.post("/api/v1/live/segments/{segment_id}/product-clips", status_code=202)
-    def split_live_segment(segment_id: str):
+    @app.get("/api/v1/live/product-periods/{period_id}/split-plan")
+    def live_period_split_plan(period_id: str):
+        return live_store.period_split_plan(period_id)
+
+    @app.post("/api/v1/live/product-periods/{period_id}/product-clips", status_code=202)
+    def split_live_period(period_id: str, body: LivePeriodSplit):
         try:
-            return live_store.request_segment_product_clips(segment_id)
+            return live_store.request_period_product_clips(period_id, body.confirmed_missing_segment_ids)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
 

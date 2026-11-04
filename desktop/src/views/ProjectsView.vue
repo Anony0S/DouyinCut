@@ -40,7 +40,7 @@ watch(()=>route.query,()=>{
             <option value="all">全部状态</option>
             <option v-for="(label,value) in projectStatusLabels" :key="value" :value="value">{{ label }}</option>
           </select>
-          <button class="btn btn-sm" :disabled="busy||projectLoading">搜索</button>
+          <button class="btn btn-md" :disabled="busy||projectLoading">搜索</button>
         </form>
         <button class="btn btn-primary" :disabled="busy||!connected||Boolean(pendingImportId)" @click="chooseNewVideo">
           {{ pendingImportId?'正在导入…':'＋ 新建视频项目' }}

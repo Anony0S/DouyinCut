@@ -9,6 +9,7 @@ import {
   type LiveMonitor,
   type LiveMonitorSettings,
   type LiveSession,
+  type LiveSplitResult,
 } from "../services/liveMonitoring";
 import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
@@ -274,19 +275,25 @@ async function openSegmentFile(segmentId: string, reveal: boolean) {
     if (reveal) session.message = "已在文件夹中显示录制分段";
   });
 }
-async function splitSegment(segmentId: string) {
-  await session.act(async () => {
-    await liveMonitoringApi.splitSegment(segmentId);
-    session.message = "已提交商品片段切分任务；完成后在“商品视频片段”中查看";
+async function splitPeriod(periodId: string, confirmedMissingSegmentIds: string[]): Promise<LiveSplitResult> {
+  try {
+    session.error = "";
+    const result = await liveMonitoringApi.splitPeriod(periodId, confirmedMissingSegmentIds);
+    if (result.state === "confirmation_required") return result;
+    session.message = "message" in result ? result.message : "已提交该次讲解的切分任务；完成后在“商品视频片段”中查看";
     await refresh();
-  });
+    return result;
+  } catch (cause) {
+    session.report(cause);
+    throw cause;
+  }
 }
 async function deleteSegment(segmentId: string) {
   await session.act(async () => {
     const result = await liveMonitoringApi.deleteSegment(segmentId);
     session.message = result.file_deleted
       ? "分段及本地录制文件已删除"
-      : "分段记录已删除；本地文件原已不存在";
+      : "分段已移除；本地文件原已不存在，商品讲解记录保留";
     await refresh();
   });
 }
@@ -504,11 +511,11 @@ onUnmounted(() => {
           @open="workspace.openProject"
           :on-delete="deleteSegment"
           :on-delete-product-clip="deleteProductClip"
-          @split="splitSegment"
+          :on-split="splitPeriod"
           @open-file="openClipFile"
           @open-segment-file="openSegmentFile" />
         <div v-else class="live-content-columns">
-          <section v-for="title in ['商品讲解', '录制分段', '商品视频片段']" :key="title"
+          <section v-for="title in ['录制分段', '商品讲解', '商品视频片段']" :key="title"
             class="card card-border bg-base-100 live-content-card">
             <div class="live-content-card-heading"><h3>{{ title }}</h3></div>
             <div class="live-card-empty"><strong>{{ recordingWindow.date ? '当天无录制' : '今天无录制' }}</strong></div>

@@ -45,6 +45,10 @@ class LiveClipOpen(Model):
     reveal: bool = False
 
 
+class LivePeriodSplit(Model):
+    confirmed_missing_segment_ids: list[str] = Field(default_factory=list, max_length=1000)
+
+
 def normalize_douyin_url(raw: str) -> str:
     match = re.search(r"https?://[^\s，。；;]+", raw.strip())
     value = (match.group(0) if match else raw.strip()).rstrip(".,，。;；)")
@@ -231,20 +235,22 @@ class LiveStore:
     @staticmethod
     def _session_detail(conn, session):
         item = dict(session)
-        clip_jobs = {}
-        for job in conn.execute(
-            "SELECT id,state,error,json_extract(payload,'$.segment_id') AS segment_id FROM jobs "
+        clip_jobs = [dict(job) for job in conn.execute(
+            "SELECT id,state,error,payload FROM jobs "
             "WHERE kind=? AND json_extract(payload,'$.session_id')=? ORDER BY created DESC",
             (PRODUCT_CLIP_JOB, session["id"]),
-        ).fetchall():
-            clip_jobs.setdefault(job["segment_id"], {"id": job["id"], "state": job["state"],
-                                                     "error": job["error"]})
-        item["segments"] = [
-            {**dict(segment), "clip_job": clip_jobs.get(segment["id"])}
-            for segment in conn.execute(
-                "SELECT * FROM live_segments WHERE session_id=? ORDER BY segment_index DESC LIMIT 100",
-                (session["id"],)).fetchall()
-        ]
+        ).fetchall()]
+        locked_segments = set()
+        period_jobs = {}
+        for job in clip_jobs:
+            payload = json.loads(job.pop("payload"))
+            period_jobs.setdefault(payload["period_id"], job)
+            if job["state"] in ACTIVE_JOB_STATES:
+                locked_segments.update(window["segment_id"] for window in payload["windows"])
+        all_segments = [dict(row) for row in conn.execute(
+            "SELECT * FROM live_segments WHERE session_id=? ORDER BY segment_index", (session["id"],))]
+        item["segments"] = [{**segment, "splitting": segment["id"] in locked_segments}
+                            for segment in reversed(all_segments) if segment["status"] != "deleted"]
         item["product_events"] = [dict(event) for event in conn.execute(
             "SELECT id,promotion_id,product_name,explain_type,event_time,received_at,source "
             "FROM live_product_events WHERE session_id=? ORDER BY event_time,event_key",
@@ -253,6 +259,8 @@ class LiveStore:
             "SELECT * FROM live_segment_product_clips WHERE session_id=? "
             "ORDER BY segment_index DESC,start DESC",
             (session["id"],)).fetchall()]
+        item["product_periods"] = LiveStore._period_details(
+            conn, session, all_segments, item["product_clips"], period_jobs)
         current_product = conn.execute(
             "SELECT promotion_id,product_name,event_time,received_at "
             "FROM live_session_current_product WHERE session_id=?",
@@ -518,6 +526,8 @@ class LiveStore:
         with self.store.connection() as conn:
             row = conn.execute("SELECT id,status FROM live_segments WHERE path=?", (path_text,)).fetchone()
             if row:
+                if row["status"] == "deleted":
+                    return row["id"]
                 final_status = row["status"] if row["status"] in {"importing", "imported"} else status
                 conn.execute("UPDATE live_segments SET status=?,size_bytes=?,duration_us=COALESCE(?,duration_us),"
                              "ended=CASE WHEN ?='recording' THEN NULL ELSE COALESCE(ended,?) END WHERE id=?",
@@ -547,69 +557,109 @@ class LiveStore:
                          "WHERE session_id=? AND ended IS NULL",
                          (now, session_id))
 
-    def request_segment_product_clips(self, segment_id: str):
-        """Queue a manual split of one sealed recording segment into product clips."""
+    @staticmethod
+    def _period_details(conn, session, segments, clips, period_jobs):
+        """Use one media timeline for both the lecture list and its split requests.
+
+        Deleted segments retain their duration, so later offsets never close the gap.
+        A missing/unknown duration is an error, never a guessed 20-minute boundary.
+        """
+        timeline, offset_us, mapping_error = [], 0, ""
+        unmapped_start = None
+        now = time.time()
+        for expected_index, segment in enumerate(segments, 1):
+            if segment["segment_index"] != expected_index:
+                mapping_error = "录制分段时间范围不完整，无法准确定位商品讲解"
+                unmapped_start = float(session["started"]) + offset_us / 1_000_000
+                break
+            start = float(session["started"]) + offset_us / 1_000_000
+            length = segment["duration_us"]
+            if length is None:
+                if segment["status"] != "recording":
+                    mapping_error = "录制分段时长未知，无法准确定位商品讲解"
+                    unmapped_start = start
+                    break
+                end = max(start, now)
+            else:
+                end = start + length / 1_000_000
+                offset_us += length
+            state = ("deleted" if segment["status"] == "deleted" else
+                     "missing" if not Path(segment["path"]).is_file() else
+                     "recording" if segment["status"] == "recording" else
+                     "ready" if segment["status"] in {"completed", "importing", "imported"} else "failed")
+            timeline.append((segment, start, end, state))
+        by_period_segment = {(clip["period_id"], clip["segment_id"]): clip for clip in clips}
+        periods = []
+        for row in conn.execute("SELECT * FROM live_product_periods WHERE session_id=? ORDER BY started DESC,id DESC",
+                                (session["id"],)):
+            period = dict(row)
+            end = float(period["ended"] if period["ended"] is not None else now)
+            sources = []
+            for segment, segment_start, segment_end, state in timeline:
+                start, stop = max(float(period["started"]), segment_start), min(end, segment_end)
+                if stop <= start:
+                    continue
+                clip = by_period_segment.get((period["id"], segment["id"]))
+                sources.append({"segment_id": segment["id"], "segment_index": segment["segment_index"],
+                                "state": state, "start": start, "end": stop,
+                                "clip_start": start - segment_start, "clip_end": stop - segment_start,
+                                "clip_status": clip["status"] if clip else None,
+                                "clip_id": clip["id"] if clip else None})
+            period.update(sources=sources, mapping_error=mapping_error if unmapped_start is not None and end > unmapped_start else "",
+                          clip_job=period_jobs.get(period["id"]))
+            periods.append(period)
+        return periods
+
+    def period_split_plan(self, period_id: str):
+        with self.store.connection() as conn:
+            return self._period_split_plan(conn, period_id)
+
+    def _period_split_plan(self, conn, period_id):
+        row = conn.execute("SELECT session_id FROM live_product_periods WHERE id=?", (period_id,)).fetchone()
+        if row is None:
+            raise KeyError(period_id)
+        session = conn.execute("SELECT * FROM live_sessions WHERE id=?", (row["session_id"],)).fetchone()
+        detail = self._session_detail(conn, session)
+        return next(period for period in detail["product_periods"] if period["id"] == period_id)
+
+    def request_period_product_clips(self, period_id: str, confirmed_missing_segment_ids: list[str]):
+        """Freeze only this lecture's sealed intersections, after checking missing-source consent."""
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            segment = conn.execute("SELECT * FROM live_segments WHERE id=?", (segment_id,)).fetchone()
-            if segment is None:
-                raise KeyError(segment_id)
-            if segment["status"] not in {"completed", "importing", "imported"}:
-                raise ValueError("只有已封存的分段可以切分商品片段")
-            if not Path(segment["path"]).is_file():
-                raise ValueError("录制分段文件已不存在")
-            placeholders = ",".join("?" * len(ACTIVE_JOB_STATES))
-            active = conn.execute(
-                f"SELECT id FROM jobs WHERE kind=? AND json_extract(payload,'$.segment_id')=? "
-                f"AND state IN ({placeholders}) ORDER BY created DESC LIMIT 1",
-                (PRODUCT_CLIP_JOB, segment_id, *ACTIVE_JOB_STATES),
-            ).fetchone()
-            if active:
+            period = self._period_split_plan(conn, period_id)
+            active = period["clip_job"]
+            if active and active["state"] in ACTIVE_JOB_STATES:
                 return self.store.job(active["id"])
+            if period["mapping_error"]:
+                raise ValueError(period["mapping_error"])
+            sources = period["sources"]
+            missing = [source for source in sources if source["state"] in {"deleted", "missing", "failed"}]
+            available = [source for source in sources if source["state"] == "ready"
+                         and source["end"] - source["start"] >= 1]
+            pending = any(source["state"] == "recording" for source in sources)
+            if not available and missing and not pending:
+                raise ValueError("没有对应的可用录制分段，无法切分商品（源分段已删除、文件不存在或文件异常）")
+            if missing and {source["segment_id"] for source in missing} != set(confirmed_missing_segment_ids):
+                return {"state": "confirmation_required", "missing_segments": missing,
+                        "available_count": len(available)}
+            windows = [source for source in available
+                       if source["clip_status"] not in {"completed", "importing", "imported"}]
+            if not windows:
+                return {"state": "noop", "message": "已封存部分均已生成，其他部分等待封存后可补切" if pending and available
+                        else "等待对应录制分段封存后再切分" if pending
+                        else "该次讲解的可用片段均已生成，无需重复切分" if available
+                        else "没有至少 1 秒的可切分讲解区间"}
+            target_segments = {source["segment_id"] for source in windows}
+            placeholders = ",".join("?" * len(ACTIVE_JOB_STATES))
+            for row in conn.execute(f"SELECT payload FROM jobs WHERE kind=? AND state IN ({placeholders})",
+                                    (PRODUCT_CLIP_JOB, *ACTIVE_JOB_STATES)):
+                if any(window["segment_id"] in target_segments for window in json.loads(row["payload"])["windows"]):
+                    raise ValueError("对应分段正在切分其他讲解，请等待该任务完成后重试")
             job_id, now = new_id("job"), time.time()
-            payload = {"segment_id": segment_id, "session_id": segment["session_id"],
-                       "segment_index": segment["segment_index"]}
+            payload = {"period_id": period_id, "session_id": period["session_id"], "windows": windows}
             conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
                          (job_id, PRODUCT_CLIP_JOB, json.dumps(payload, ensure_ascii=False), now, now))
         return self.store.job(job_id)
-
-    def segment_clip_plan(self, segment_id: str):
-        """Map product periods onto one segment's local timeline (seconds from the segment start)."""
-        with self.store.connection() as conn:
-            segment = conn.execute("SELECT * FROM live_segments WHERE id=?", (segment_id,)).fetchone()
-            if segment is None:
-                raise KeyError(segment_id)
-            segment = dict(segment)
-            session = conn.execute("SELECT started FROM live_sessions WHERE id=?",
-                                   (segment["session_id"],)).fetchone()
-            earlier = conn.execute(
-                "SELECT segment_index,duration_us FROM live_segments WHERE session_id=? AND segment_index<? "
-                "ORDER BY segment_index", (segment["session_id"], segment["segment_index"]),
-            ).fetchall()
-            periods = [dict(row) for row in conn.execute(
-                "SELECT * FROM live_product_periods WHERE session_id=? ORDER BY started",
-                (segment["session_id"],),
-            ).fetchall()]
-        if not segment["duration_us"]:
-            raise ValueError("分段时长未知，无法切分商品片段")
-        complete = (len(earlier) == segment["segment_index"] - 1
-                    and all(row["duration_us"] for row in earlier))
-        # Segments are cut back-to-back, so their durations give the most accurate offset;
-        # fall back to the time the file first appeared when an earlier segment was deleted.
-        offset = (sum(row["duration_us"] for row in earlier) / 1_000_000 if complete
-                  else max(0.0, float(segment["started"]) - float(session["started"])))
-        length = segment["duration_us"] / 1_000_000
-        now = time.time()
-        windows = []
-        for period in periods:
-            start = float(period["started"]) - float(session["started"]) - offset
-            end = float(period["ended"] if period["ended"] is not None else now) - float(session["started"]) - offset
-            start, end = max(0.0, start), min(length, end)
-            if end - start >= 1.0:
-                windows.append({**period, "clip_start": start, "clip_end": end,
-                                "abs_start": float(session["started"]) + offset + start,
-                                "abs_end": float(session["started"]) + offset + end})
-        return segment, windows
 
     def begin_segment_product_clip(self, segment: dict, window: dict, path: Path):
         """Return the clip id to (re)generate, or None when a usable clip already exists."""
@@ -729,7 +779,7 @@ class LiveStore:
     def open_segment(self, segment_id: str, recordings_root: Path, reveal: bool = False):
         """Open a recording segment in the system player, or select it in Explorer."""
         with self.store.connection() as conn:
-            row = conn.execute("SELECT path FROM live_segments WHERE id=?", (segment_id,)).fetchone()
+            row = conn.execute("SELECT path FROM live_segments WHERE id=? AND status!='deleted'", (segment_id,)).fetchone()
         if row is None:
             raise KeyError(segment_id)
         path = Path(row["path"]).resolve()
@@ -780,11 +830,14 @@ class LiveStore:
             if row is None:
                 raise KeyError(segment_id)
             segment = dict(row)
+            if segment["status"] == "deleted":
+                return {"deleted_segment_id": segment_id, "file_deleted": False}
             if segment["status"] in {"recording", "importing"}:
                 raise ValueError("录制中或导入中的分段不能删除")
             placeholders = ",".join("?" * len(ACTIVE_JOB_STATES))
             if conn.execute(
-                f"SELECT 1 FROM jobs WHERE kind=? AND json_extract(payload,'$.segment_id')=? "
+                f"SELECT 1 FROM jobs,json_each(jobs.payload,'$.windows') AS window WHERE kind=? "
+                f"AND json_extract(window.value,'$.segment_id')=? "
                 f"AND state IN ({placeholders}) LIMIT 1",
                 (PRODUCT_CLIP_JOB, segment_id, *ACTIVE_JOB_STATES),
             ).fetchone():
@@ -807,7 +860,7 @@ class LiveStore:
             converted = path.with_name(f"{path.stem}_剪辑源.mp4")
             if converted.is_file() and converted.parent == path.parent:
                 converted.unlink()
-            conn.execute("DELETE FROM live_segments WHERE id=?", (segment_id,))
+            conn.execute("UPDATE live_segments SET status='deleted',size_bytes=0 WHERE id=?", (segment_id,))
         return {"deleted_segment_id": segment_id, "file_deleted": file_deleted}
 
     def finish_import(self, segment_id: str, asset_id: str):
@@ -821,25 +874,36 @@ class LiveStore:
                          (segment_id,))
 
 
-def generate_segment_product_clips(store, settings: Settings, payload: dict,
-                                   checkpoint=None, progress=None) -> dict:
-    """Convert one sealed segment to MP4, then create per-product MP4 clips."""
+def generate_period_product_clips(store, settings: Settings, payload: dict,
+                                 checkpoint=None, progress=None) -> dict:
+    """Generate the frozen sealed pieces of exactly one lecture, one clip per source."""
     from ..media.processing import convert_to_mp4, probe, run_process
 
     live = LiveStore(store)
-    segment, windows = live.segment_clip_plan(payload["segment_id"])
-    original = Path(segment["path"])
-    if not original.is_file():
-        raise ValueError("录制分段文件已不存在")
-    if not windows:
-        raise ValueError("该分段没有可切分的商品讲解区间（需要至少 1 秒）")
-    source = original.with_name(f"{original.stem}_剪辑源.mp4") if original.suffix.lower() == ".ts" else original
-    if original.suffix.lower() == ".ts":
-        convert_to_mp4(original, source, settings, checkpoint)
+    with store.connection() as conn:
+        row = conn.execute("SELECT * FROM live_product_periods WHERE id=? AND session_id=?",
+                           (payload["period_id"], payload["session_id"])).fetchone()
+        if row is None:
+            raise ValueError("商品讲解记录已不存在")
+        period = dict(row)
+    windows = payload["windows"]
     created = skipped = failed = 0
-    for index, window in enumerate(windows):
+    for index, piece in enumerate(windows):
         if checkpoint:
             checkpoint()
+        with store.connection() as conn:
+            row = conn.execute("SELECT * FROM live_segments WHERE id=? AND session_id=?",
+                               (piece["segment_id"], payload["session_id"])).fetchone()
+        if row is None or row["status"] not in {"completed", "importing", "imported"}:
+            raise ValueError("对应录制分段已不可用，无法切分商品")
+        segment = dict(row)
+        original = Path(segment["path"]).resolve()
+        if not original.is_relative_to((settings.data_dir / "recordings" / "live").resolve()):
+            raise ValueError("录制分段不在直播录制目录中，拒绝切分")
+        if not original.is_file():
+            raise ValueError("对应录制分段文件已不存在")
+        window = {**period, **piece, "abs_start": piece["start"], "abs_end": piece["end"]}
+        source = original.with_name(f"{original.stem}_剪辑源.mp4") if original.suffix.lower() == ".ts" else original
         safe_product = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", window["product_name"]).strip(" ._")[:48]
         label = safe_product or window["promotion_id"]
         target = source.parent / f"商品片段_{segment['segment_index']:02d}_{label}_{window['id'][-8:]}.mp4"
@@ -849,6 +913,8 @@ def generate_segment_product_clips(store, settings: Settings, payload: dict,
             continue
         length = window["clip_end"] - window["clip_start"]
         try:
+            if original.suffix.lower() == ".ts":
+                convert_to_mp4(original, source, settings, checkpoint)
             run_process([
                 settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
                 "-i", str(source), "-ss", f"{window['clip_start']:.3f}", "-t", f"{length:.3f}",
@@ -870,7 +936,7 @@ def generate_segment_product_clips(store, settings: Settings, payload: dict,
             progress((index + 1) / len(windows))
     if failed and not created and not skipped:
         raise RuntimeError(f"{failed} 个商品片段全部生成失败，详见片段错误信息")
-    return {"segment_id": segment["id"], "created": created, "skipped": skipped, "failed": failed}
+    return {"period_id": period["id"], "created": created, "skipped": skipped, "failed": failed}
 
 
 class DouyinResolver:
@@ -1183,10 +1249,13 @@ class LiveMonitorWorker:
         directory = self.settings.data_dir / "recordings" / "live" / monitor_id / session_id
         files = sorted(path for path in directory.glob("*.ts")
                        if not path.name.startswith("商品片段_"))
-        for index, path in enumerate(files):
-            active = not final and index == len(files) - 1
+        for file_index, path in enumerate(files):
+            active = not final and file_index == len(files) - 1
+            index = int(path.stem.rsplit("-", 1)[-1])
             size = path.stat().st_size
             known = self.live.segment_status(path)
+            if known and known["status"] == "deleted":
+                continue
             if not active and known and known["status"] in {"completed", "importing", "imported", "failed"}:
                 self.live.upsert_segment(session_id, path, index + 1, known["status"], size,
                                          known["duration_us"])

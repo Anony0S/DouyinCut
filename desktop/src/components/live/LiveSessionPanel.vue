@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { duration, seconds } from "../../api";
-import type { LiveSegment, LiveSession } from "../../services/liveMonitoring";
+import type { LiveSegment, LiveSession, LiveProductPeriod, LivePeriodSource, LiveSplitResult } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
+import LivePeriodSplit from "./LivePeriodSplit.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
 import {
-  activeClipJobStates,
   clipBadgeClasses,
   clipNames,
   formatBytes,
-  formatLiveTime,
   formatOffset,
   listenerBadgeClasses,
   listenerNames,
@@ -22,13 +21,13 @@ const props = defineProps<{
   busy: boolean;
   onDelete: (id: string) => Promise<void>;
   onDeleteProductClip: (id: string) => Promise<void>;
+  onSplit: (id: string, confirmedMissingSegmentIds: string[]) => Promise<LiveSplitResult>;
 }>();
 const visiblePathKey = ref<string | null>(null);
 defineEmits<{
   import: [id: string];
   "import-product-clip": [id: string];
   open: [assetId: string];
-  split: [id: string];
   "open-file": [id: string, reveal: boolean];
   "open-segment-file": [id: string, reveal: boolean];
 }>();
@@ -42,8 +41,7 @@ function togglePath(kind: "segment" | "clip", id: string) {
   const key = pathKey(kind, id);
   visiblePathKey.value = visiblePathKey.value === key ? null : key;
 }
-const splitting = (segment: LiveSegment) =>
-  Boolean(segment.clip_job && activeClipJobStates.has(segment.clip_job.state));
+const splitting = (segment: LiveSegment) => segment.splitting;
 function deleteSegment(segment: LiveSegment) {
   return props.onDelete(segment.id);
 }
@@ -56,11 +54,25 @@ function productClipMessage(status: string, name: string) {
     : `将删除“${name}”商品片段及其本地文件。`;
 }
 const segmentFilter = ref("all");
-const events = computed(() =>
-  [...props.session.product_events].sort(
-    (a, b) => b.event_time - a.event_time || b.received_at - a.received_at,
+const periods = computed(() =>
+  [...props.session.product_periods].sort(
+    (a, b) => Number(b.ended === null) - Number(a.ended === null) || b.started - a.started || b.id.localeCompare(a.id),
   ),
 );
+const sourceStates: Record<LivePeriodSource["state"], string> = {
+  ready: "", recording: "录制中", deleted: "已删除", missing: "文件不存在", failed: "文件异常",
+};
+function splitSummary(period: LiveProductPeriod) {
+  const generated = period.sources.filter(source => ["completed", "importing", "imported"].includes(source.clip_status || "")).length;
+  const ready = period.sources.filter(source => source.state === "ready" && source.end - source.start >= 1 && !["completed", "importing", "imported"].includes(source.clip_status || "")).length;
+  const pending = period.sources.some(source => source.state === "recording");
+  const short = period.sources.filter(source => source.state !== "recording" && source.end - source.start < 1).length;
+  return [generated ? `已生成 ${generated} 个片段` : "", ready ? `${ready} 个可切分` : "", pending ? "部分待封存" : "", short ? `${short} 处不足 1 秒，跳过` : ""].filter(Boolean).join(" · ");
+}
+function clipPeriodTime(periodId: string) {
+  const period = props.session.product_periods.find(item => item.id === periodId);
+  return period ? `${formatOffset(period.started, props.session.started)} – ${period.ended === null ? "至今" : formatOffset(period.ended, props.session.started)}` : "";
+}
 const readyCount = computed(
   () =>
     props.session.segments.filter((item) => item.status === "completed").length,
@@ -93,115 +105,6 @@ const filters = computed(() => [
 <template>
   <div class="live-session-content">
     <div class="live-content-columns">
-      <section
-        class="card card-border bg-base-100 w-full live-content-card live-events-card">
-        <div class="live-content-card-heading">
-          <div>
-            <span class="live-section-icon"><LiveIcon name="bag" /></span>
-            <h3>商品讲解</h3>
-            <span class="badge badge-ghost badge-sm live-count">
-              {{ events.length }}
-            </span>
-          </div>
-          <span
-            :class="[
-              'badge',
-              'badge-sm',
-              listenerBadgeClasses[listenerStatus] || 'badge-soft badge-neutral',
-            ]">
-            {{ listenerNames[listenerStatus] || "商品监听未启动" }}
-          </span>
-        </div>
-        <section
-          class="live-product-current"
-          :class="{ 'is-history': session.status !== 'recording' }"
-          aria-label="当前讲解商品">
-          <span class="live-section-kicker">
-            {{ session.status === "recording" ? "正在讲解" : "场次结束时讲解" }}
-          </span>
-          <strong>
-            {{
-              session.current_product
-                ? session.current_product.product_name ||
-                  `商品 ${session.current_product.promotion_id}`
-                : "暂未获取到讲解商品"
-            }}
-          </strong>
-          <div v-if="session.current_product" class="live-event-meta">
-            <span>ID {{ session.current_product.promotion_id }}</span>
-            <span>
-              · 记录于
-              {{
-                formatOffset(session.current_product.event_time, session.started)
-              }}
-            </span>
-          </div>
-          <p v-else>商品列表加载完成或收到商品消息后自动更新。</p>
-        </section>
-        <details v-if="session.product_catalog_error" class="live-catalog-error">
-          <summary>
-            <LiveIcon name="alert" />
-            <span>商品列表获取失败</span>
-            <span>展开请求详情</span>
-          </summary>
-          <pre>{{
-            JSON.stringify(session.product_catalog_error.detail, null, 2)
-          }}</pre>
-        </details>
-        <p
-          v-if="session.product_listener?.detail"
-          class="live-listener-note pl-6"
-          :class="{ 'is-error': listenerStatus === 'error' }">
-          <LiveIcon :name="listenerStatus === 'error' ? 'alert' : 'radio'" />
-          {{ session.product_listener.detail }}
-        </p>
-        <div class="live-subheading">
-          <span>讲解变更</span>
-          <span>最新在前</span>
-        </div>
-        <div v-if="events.length" class="live-product-event-list">
-          <article
-            v-for="(event, index) in events"
-            :key="event.id"
-            class="live-product-event"
-            :class="{ 'is-latest': index === 0 }">
-            <div class="live-event-marker">
-              <i></i>
-              <span></span>
-            </div>
-            <div class="live-event-content">
-              <div class="live-event-time">
-                <time
-                  :title="`${Math.max(0, event.event_time - session.started).toFixed(1)} 秒`">
-                  {{ formatOffset(event.event_time, session.started) }}
-                </time>
-                <span>{{ index === 0 ? "最近一次变更" : "讲解切换" }}</span>
-              </div>
-              <strong>
-                {{ event.product_name || `商品 ${event.promotion_id}` }}
-              </strong>
-              <div class="live-event-meta">
-                <span>商品 ID {{ event.promotion_id }}</span>
-                <span v-if="event.explain_type !== null">
-                  讲解类型 {{ event.explain_type }}
-                </span>
-              </div>
-              <small :title="formatLiveTime(event.received_at)">
-                <span class="text-zinc-500 font-bold">接收于 {{ formatLiveTime(event.received_at, true) }}</span>
-              </small>
-            </div>
-          </article>
-        </div>
-        <div v-else class="live-card-empty">
-          <LiveIcon name="clock" />
-          <strong>还没有商品切换记录</strong>
-        </div>
-        <div class="live-card-foot">
-          <LiveIcon name="clock" />
-          时间为相对本场录制开始的位置。
-        </div>
-      </section>
-
       <section
         class="card card-border bg-base-100 w-full live-content-card live-recordings-card">
         <div class="live-content-card-heading">
@@ -288,11 +191,7 @@ const filters = computed(() => [
                   </span>
                 </span>
               </div>
-              <p
-                v-if="segment.clip_job?.state === 'failed' && segment.clip_job.error"
-                class="live-product-clip-error">
-                切分失败：{{ segment.clip_job.error }}
-              </p>
+              <p v-if="segment.splitting" class="text-base-content/60 text-xs mt-2">正在切分商品讲解，暂不可删除</p>
             </div>
             <div class="live-segment-actions live-recording-actions">
               <button
@@ -312,18 +211,6 @@ const filters = computed(() => [
                 @click="$emit('open-segment-file', segment.id, true)">
                 <LiveIcon name="folder" />
                 <span class="live-segment-action-label" aria-hidden="true">打开文件夹</span>
-              </button>
-              <button
-                v-if="['completed', 'importing', 'imported'].includes(segment.status)"
-                class="btn btn-soft btn-sm live-segment-action live-segment-action-split"
-                :disabled="busy || splitting(segment)"
-                :aria-label="splitting(segment) ? '切分任务进行中' : '切分商品'"
-                :title="splitting(segment) ? '切分任务进行中' : '按本分段内的商品讲解区间切分'"
-                @click="$emit('split', segment.id)">
-                <LiveIcon name="layers" />
-                <span class="live-segment-action-label" aria-hidden="true">
-                  {{ splitting(segment) ? "切分中…" : "切分商品" }}
-                </span>
               </button>
               <button
                 v-if="segment.status === 'completed'"
@@ -355,7 +242,7 @@ const filters = computed(() => [
               <ConfirmPopover
                 v-if="!['recording', 'importing'].includes(segment.status)"
                 :title="`删除分段 ${segment.segment_index}？`"
-                message="将删除该分段及其本地录制文件；已被视频项目引用的分段不能删除。"
+                message="将删除该分段的本地录制文件，商品讲解、分段编号和已生成商品片段保留；已被视频项目引用的分段不能删除。"
                 :confirm-action="() => deleteSegment(segment)"
                 :disabled="busy || splitting(segment)"
                 v-slot="{ open, expanded, popoverId }">
@@ -396,7 +283,107 @@ const filters = computed(() => [
         </div>
         <div class="live-card-foot">
           <LiveIcon name="folder" />
-          封存后可导入剪辑或切分商品片段，录制中内容持续写入。
+          封存后可导入剪辑；在讲解列表中切分商品，录制中内容持续写入。
+        </div>
+      </section>
+
+      <section
+        class="card card-border bg-base-100 w-full live-content-card live-events-card">
+        <div class="live-content-card-heading">
+          <div>
+            <span class="live-section-icon"><LiveIcon name="bag" /></span>
+            <h3>商品讲解</h3>
+            <span class="badge badge-ghost badge-sm live-count">
+              {{ periods.length }}
+            </span>
+          </div>
+          <span
+            :class="[
+              'badge',
+              'badge-sm',
+              listenerBadgeClasses[listenerStatus] || 'badge-soft badge-neutral',
+            ]">
+            {{ listenerNames[listenerStatus] || "商品监听未启动" }}
+          </span>
+        </div>
+        <details v-if="session.product_catalog_error" class="live-catalog-error">
+          <summary>
+            <LiveIcon name="alert" />
+            <span>商品列表获取失败</span>
+            <span>展开请求详情</span>
+          </summary>
+          <pre>{{
+            JSON.stringify(session.product_catalog_error.detail, null, 2)
+          }}</pre>
+        </details>
+        <p
+          v-if="session.product_listener?.detail"
+          class="live-listener-note pl-6"
+          :class="{ 'is-error': listenerStatus === 'error' }">
+          <LiveIcon :name="listenerStatus === 'error' ? 'alert' : 'radio'" />
+          {{ session.product_listener.detail }}
+        </p>
+        <div class="live-subheading">
+          <span>讲解列表</span>
+          <span>最新在前</span>
+        </div>
+        <div v-if="periods.length" class="live-product-event-list">
+          <article
+            v-for="(period, index) in periods"
+            :key="period.id"
+            class="live-product-event"
+            :class="{ 'is-latest': index === 0 }">
+            <div class="live-event-marker">
+              <i></i>
+              <span></span>
+            </div>
+            <div class="live-event-content">
+              <div class="live-event-time">
+                <time>
+                  {{ formatOffset(period.started, session.started) }} –
+                  {{ period.ended === null ? "至今" : formatOffset(period.ended, session.started) }}
+                </time>
+                <span v-if="period.ended === null" class="badge badge-soft badge-info badge-xs">正在讲解</span>
+                <span v-else-if="index === 0">最近讲解</span>
+                <span v-if="period.ended !== null">{{ duration(Math.max(0, period.ended - period.started) * 1000000) }}</span>
+              </div>
+              <div class="flex items-center gap-4">
+                <div class="live-event-info min-w-0 flex-1">
+                  <strong>
+                    {{ period.product_name || `商品 ${period.promotion_id}` }}
+                  </strong>
+                  <div class="live-event-meta mb-1">
+                    <span>商品 ID {{ period.promotion_id }}</span>
+                  </div>
+                  <p v-if="splitSummary(period)" class="text-base-content/60 text-xs mt-2">{{ splitSummary(period) }}</p>
+                  <p v-if="period.mapping_error" class="live-product-clip-error">{{ period.mapping_error }}</p>
+                  <p v-if="period.clip_job?.state === 'failed' && period.clip_job.error" class="live-product-clip-error">
+                    切分失败：{{ period.clip_job.error }}
+                  </p>
+                  <div class="flex flex-wrap gap-1.5 mt-1" aria-label="来源录制分段">
+                    <span v-for="source in period.sources" :key="source.segment_id"
+                      class="badge badge-soft badge-sm"
+                      :class="['deleted', 'missing', 'failed'].includes(source.state) ? 'badge-warning' : 'badge-neutral'">
+                      分段 {{ String(source.segment_index).padStart(2, "0") }}{{ sourceStates[source.state] ? `（${sourceStates[source.state]}）` : '' }}
+                    </span>
+                    <span v-if="!period.sources.length" class="text-base-content/60 text-xs">暂无对应分段</span>
+                  </div>
+                </div>
+                <div class="shrink-0">
+                  <LivePeriodSplit :period="period" :busy="busy" :on-split="onSplit" />
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div v-else class="live-card-empty">
+          <LiveIcon name="clock" />
+          <strong>还没有商品讲解记录</strong>
+          <p>获取到讲解商品后自动记录，首次讲解也会出现在这里。</p>
+        </div>
+        <div class="live-card-foot">
+          <LiveIcon name="clock" />
+          时间为本场录制内的位置；每次只切所选讲解的已封存部分。
         </div>
       </section>
 
@@ -410,7 +397,7 @@ const filters = computed(() => [
               {{ session.product_clips.length }}
             </span>
           </div>
-          <span>从录制分段手动切分</span>
+          <span>从讲解列表手动切分</span>
         </div>
         <div v-if="session.product_clips.length" class="live-segment-list">
           <article
@@ -464,6 +451,7 @@ const filters = computed(() => [
                   </span>
                 </span>
               </div>
+              <p v-if="clipPeriodTime(clip.period_id)" class="text-base-content/60 text-xs mt-2">所属讲解 {{ clipPeriodTime(clip.period_id) }}</p>
               <p v-if="clip.error" class="live-product-clip-error">
                 {{ clip.error }}
               </p>
@@ -541,7 +529,7 @@ const filters = computed(() => [
         <div v-else class="live-card-empty">
           <LiveIcon name="layers" />
           <strong>还没有商品视频片段</strong>
-          <p>在录制分段中点击“切分商品”，按该分段内的商品讲解区间裁切，原始录制文件保留。</p>
+          <p>在讲解列表中点击“切分商品”，每个来源分段各生成一个片段，原始录制文件保留。</p>
         </div>
         <div class="live-card-foot">
           <LiveIcon name="video" />

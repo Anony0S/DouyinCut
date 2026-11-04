@@ -93,8 +93,8 @@ class Worker:
                                  checkpoint=ctx.checkpoint, progress=ctx.progress, preview=job["kind"] == "preview")
             objects.append(("export", result))
         elif job["kind"] == "live_product_clips":
-            from .live_monitoring.service import generate_segment_product_clips
-            result = generate_segment_product_clips(store, settings, payload,
+            from .live_monitoring.service import generate_period_product_clips
+            result = generate_period_product_clips(store, settings, payload,
                                                     checkpoint=ctx.checkpoint, progress=ctx.progress)
         elif job["kind"] == "jianying":
             from .integrations.jianying.service import create_jianying_draft

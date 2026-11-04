@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onUnmounted, ref } from "vue";
+import { api } from "../api";
 
 type TauriInternals = {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -56,6 +57,14 @@ function changeWorkDirectory() {
   });
 }
 
+async function openWorkDirectory() {
+  try {
+    await api<{ opened: boolean }>("/settings/work-directory/open", "POST");
+  } catch (error) {
+    openDialog({ title: "无法打开工作目录", message: String(error), kind: "error" });
+  }
+}
+
 async function openLogDirectory() {
   try {
     await tauri().invoke("open_log_directory");
@@ -106,9 +115,10 @@ async function checkForUpdate() {
       <li class="list-row">
         <div class="local-setting-copy">
           <h2>工作目录管理</h2>
-          <p>重新选择工作数据存储位置，需要重启应用。</p>
+          <p>打开当前工作数据目录，或重新选择存储位置（需要重启应用）。</p>
         </div>
         <div class="local-setting-actions">
+          <button class="btn btn-outline" type="button" @click="openWorkDirectory">打开目录</button>
           <button class="btn btn-outline" type="button" @click="changeWorkDirectory">更换目录</button>
         </div>
       </li>

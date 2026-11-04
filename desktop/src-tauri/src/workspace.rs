@@ -109,6 +109,9 @@ pub async fn workspace_action(window: tauri::WebviewWindow, action: String) -> R
                 let state = host.query("inspect", None)?;
                 if state["state"] != "ready" { return Ok(state); }
                 let work = state["path"].as_str().ok_or("缺少工作目录")?;
+                if let Ok(position) = window.outer_position() {
+                    app.state::<crate::window_preferences::WindowPreferencesHost>().save_position(position);
+                }
                 crate::session::open_workbench(app, &host.executable, Path::new(work), Some(&host.config))?;
                 window.destroy().map_err(|e| e.to_string())?;
                 Ok(serde_json::json!({"state":"opened","path":work,"message":""}))
@@ -226,7 +229,7 @@ pub async fn clear_logs(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn check_for_update() -> Result<serde_json::Value, String> {
     // Placeholder implementation - you can integrate with GitHub releases or your update server
-    let current_version = "0.2.99";
+    let current_version = "0.2.101";
 
     // For now, just return that we're up to date
     // In a real implementation, you would fetch the latest version from GitHub/server

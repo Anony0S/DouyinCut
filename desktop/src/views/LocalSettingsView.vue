@@ -10,7 +10,7 @@ function tauri(): TauriInternals {
   if (!internals) throw new Error("此操作需要在桌面应用中使用");
   return internals;
 }
-const appVersion = "0.2.99";
+const appVersion = "0.2.101";
 const checkingUpdate = ref(false);
 const updateResult = ref<{ hasUpdate: boolean; message: string } | null>(null);
 type DialogState = { title: string; message: string; kind: "confirm" | "info" | "error"; action?: () => Promise<void | DialogState> };

@@ -2,6 +2,7 @@
 
 mod instance;
 mod session;
+mod window_preferences;
 mod workspace;
 
 fn main() {
@@ -20,6 +21,7 @@ fn main() {
         }
     };
     let application = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(instance)
         .invoke_handler(tauri::generate_handler![
             workspace::workspace_action,
@@ -28,7 +30,9 @@ fn main() {
             workspace::open_log_directory,
             workspace::clear_logs,
             workspace::check_for_update,
-            session::complete_exit
+            session::complete_exit,
+            window_preferences::get_window_preferences,
+            window_preferences::set_window_preferences
         ])
         .on_window_event(session::handle_window_event)
         .setup(session::setup)
@@ -36,6 +40,7 @@ fn main() {
     match application {
         Ok(app) => app.run(|handle, event| {
             if let tauri::RunEvent::Exit = event {
+                window_preferences::save_active_position(handle);
                 if let Some(instance) = handle.try_state::<instance::CurrentUserInstance>() {
                     instance.stop_activation_listener();
                 }

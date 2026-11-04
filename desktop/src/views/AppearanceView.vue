@@ -1,11 +1,57 @@
 <script setup lang="ts">
+import { onMounted, ref } from "vue";
 import { appearance, setAppearance, type Appearance } from "../appearance";
+import {
+  defaultWindowPreferences,
+  loadWindowPreferences,
+  saveWindowPreferences,
+  type WindowPreferences,
+  type StartupWindowSize,
+} from "../window-preferences";
 
 const themes: { value: Appearance; label: string }[] = [
   { value: "system", label: "跟随系统" },
   { value: "light", label: "浅色" },
   { value: "dark", label: "深色" },
 ];
+
+const windowPreferences = ref<WindowPreferences>({ ...defaultWindowPreferences });
+const loadingWindowPreferences = ref(true);
+const savingWindowPreferences = ref(false);
+const windowPreferencesError = ref("");
+
+onMounted(async () => {
+  try {
+    windowPreferences.value = await loadWindowPreferences();
+  } catch (error) {
+    windowPreferencesError.value = error instanceof Error ? error.message : "读取窗口设置失败。";
+  } finally {
+    loadingWindowPreferences.value = false;
+  }
+});
+
+async function updateWindowPreferences(next: WindowPreferences) {
+  if (savingWindowPreferences.value || loadingWindowPreferences.value) return;
+  savingWindowPreferences.value = true;
+  windowPreferencesError.value = "";
+  try {
+    windowPreferences.value = await saveWindowPreferences(next);
+  } catch (error) {
+    windowPreferencesError.value = error instanceof Error ? error.message : "保存窗口设置失败。";
+  } finally {
+    savingWindowPreferences.value = false;
+  }
+}
+
+function rememberPositionChanged(event: Event) {
+  const rememberPosition = (event.currentTarget as HTMLInputElement).checked;
+  void updateWindowPreferences({ ...windowPreferences.value, rememberPosition });
+}
+
+function startupSizeChanged(event: Event) {
+  const startupSize = (event.currentTarget as HTMLSelectElement).value as StartupWindowSize;
+  void updateWindowPreferences({ ...windowPreferences.value, startupSize });
+}
 </script>
 
 <template>
@@ -46,6 +92,44 @@ const themes: { value: Appearance; label: string }[] = [
         </label>
       </fieldset>
     </section>
+
+    <section class="card card-border bg-base-100 appearance-card" aria-labelledby="window-title">
+      <div class="appearance-card-heading">
+        <h2 id="window-title">窗口</h2>
+        <p>设置应用打开时的位置和大小</p>
+      </div>
+      <div class="window-preferences">
+        <div class="window-preference-row">
+          <div class="window-preference-copy">
+            <strong>记住窗口位置</strong>
+            <p>下次启动时恢复上次关闭前的位置</p>
+          </div>
+          <input
+            type="checkbox"
+            class="toggle"
+            aria-label="记住窗口位置"
+            :checked="windowPreferences.rememberPosition"
+            :disabled="loadingWindowPreferences || savingWindowPreferences"
+            @change="rememberPositionChanged" />
+        </div>
+        <label class="window-preference-field">
+          <span>启动窗口大小</span>
+          <select
+            class="select"
+            :value="windowPreferences.startupSize"
+            :disabled="loadingWindowPreferences || savingWindowPreferences"
+            @change="startupSizeChanged">
+            <option value="standard">1440 × 810</option>
+            <option value="full-hd">1920 × 1080</option>
+            <option value="qhd">2560 × 1440</option>
+          </select>
+          <small>更改后立即生效，并用于下次启动。</small>
+        </label>
+        <p v-if="windowPreferencesError" class="window-preferences-error" role="alert">
+          {{ windowPreferencesError }}
+        </p>
+      </div>
+    </section>
   </section>
 </template>
 
@@ -69,6 +153,54 @@ const themes: { value: Appearance; label: string }[] = [
 .appearance-card-heading p {
   margin: 5px 0 0;
   color: var(--text-muted);
+}
+
+.window-preferences {
+  display: grid;
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.window-preference-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.window-preference-copy {
+  min-width: 0;
+}
+
+.window-preference-copy strong,
+.window-preference-field > span {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.window-preference-copy p,
+.window-preference-field small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.window-preference-field {
+  display: grid;
+  justify-items: start;
+}
+
+.window-preference-field .select {
+  width: min(100%, 280px);
+  margin-top: 9px;
+}
+
+.window-preferences-error {
+  margin: 0;
+  color: var(--color-error);
+  font-size: 12px;
 }
 
 .theme-options {

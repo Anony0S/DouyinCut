@@ -6,6 +6,7 @@
   "windows": ["main"],
   "permissions": [
     "allow-workspace-action",
+    "allow-window-preferences",
     "core:default"
   ]
 }

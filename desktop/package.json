@@ -17,6 +17,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vue-tsc --noEmit && vite build",
     "test:appearance": "node scripts/verify-appearance.cjs",
+    "test:window-preferences": "node scripts/verify-window-preferences.cjs",
     "test:secret-input": "node scripts/verify-secret-input.cjs",
     "test:events": "node scripts/verify-events.cjs",
     "test:runtime-session": "node scripts/verify-runtime-session.cjs",
@@ -27,11 +28,13 @@
     "test:confirmation-popover": "node scripts/verify-confirmation-popover.cjs",
     "test:delete-wiring": "node scripts/verify-delete-confirmation-wiring.cjs",
     "test:live-timeline": "node scripts/verify-live-recording-timeline.cjs",
+    "test:live-badge-contrast": "pnpm build && node scripts/verify-live-badge-contrast.cjs",
     "test:roughcut": "node scripts/verify-roughcut.cjs",
     "test:routing": "node scripts/verify-routing.cjs",
     "tauri": "tauri"
   },
   "dependencies": {
+    "@tauri-apps/plugin-opener": "^2.7.2",
     "cally": "^0.9.2",
     "pinia": "^3.0.4",
     "vue": "^3.5.0",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSessionStore } from "../stores/session";
 import { useWorkspace } from "../workspace";
 import {
@@ -174,6 +175,27 @@ async function refresh() {
   } finally {
     if (version === refreshVersion) loading.value = false;
   }
+}
+function openExternalUrl(url: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    session.report(new Error("直播间链接无效"));
+    return;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (
+    !["http:", "https:"].includes(parsed.protocol) ||
+    !(host === "douyin.com" || host.endsWith(".douyin.com")) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.port
+  ) {
+    session.report(new Error("仅支持打开抖音直播间链接"));
+    return;
+  }
+  void openUrl(parsed.href).catch((cause) => session.report(cause));
 }
 async function addMonitor() {
   await session.act(async () => {
@@ -442,6 +464,7 @@ onUnmounted(() => {
         :loading="loading && updatedAt === null"
         :busy="busy"
         @select="selectMonitor"
+        @open-url="openExternalUrl"
         @settings="updateSettings"
         @record="record"
         :on-remove="remove" />

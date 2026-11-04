@@ -21,6 +21,7 @@ const emit = defineEmits<{
   select: [id: string];
   settings: [monitor: LiveMonitor, changes: LiveMonitorSettings];
   record: [monitor: LiveMonitor, action: "start" | "stop"];
+  "open-url": [url: string];
 }>();
 const search = ref(""),
   filter = ref("all");
@@ -80,6 +81,11 @@ function selectMonitor(monitor: LiveMonitor, event: Event) {
   if (event.type === "keydown") event.preventDefault();
   if (props.busy) return;
   emit("select", monitor.id);
+}
+
+function openSelectedRoom(event: MouseEvent) {
+  event.preventDefault();
+  if (selected.value) emit("open-url", selected.value.url);
 }
 
 // The list scrolls, so the settings popover is teleported to <body> and anchored to its
@@ -243,8 +249,7 @@ onUnmounted(closeSettings);
         class="live-room-selected-url"
         :href="selected.url"
         :title="selected.url"
-        target="_blank"
-        rel="noreferrer">
+        @click="openSelectedRoom">
         <span>{{ selected.url }}</span>
         <LiveIcon name="external" />
       </a>

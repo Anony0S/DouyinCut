@@ -31,8 +31,14 @@ const monitor = (id, sessions) => ({ id, sessions, name: `直播间-${id}`, url:
 let response = [monitor('一', [session('历史', now - 18000, now - 10800, 7), session('当前', now - 3600, null, 8)])]
 let lastWindow
 let detailResponse = null
-const api = async url => {
+const openedUrls = []
+const openedSegments = []
+const api = async (url, method, body) => {
   if (url === '/auth') return {}
+  if (/^\/live\/segments\/[^/]+\/open$/.test(url)) {
+    openedSegments.push({ url, method, body })
+    return { opened: true, revealed: Boolean(body?.reveal), path: 'segment.ts' }
+  }
   if (/^\/live\/monitors\/[^/]+\/sessions\//.test(url)) {
     return structuredClone(typeof detailResponse === 'function' ? await detailResponse(url) : detailResponse)
   }
@@ -58,6 +64,7 @@ function load(file) {
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   new Function('require', 'module', 'exports', code)(name => {
     if (name === 'vue') return { ...vue, vModelText: {}, vModelCheckbox: {} }
+    if (name === '@tauri-apps/plugin-opener') return { openUrl: async url => openedUrls.push(url) }
     if (!name.startsWith('.')) return require(name)
     const dep = path.resolve(path.dirname(file), name)
     return load(path.extname(dep) ? dep : `${dep}.ts`)
@@ -93,6 +100,12 @@ async function mount() {
   return { root, app }
 }
 async function verify() {
+  const workbenchCapability = JSON.parse(fs.readFileSync(path.join(__dirname, '../src-tauri/capabilities/workbench.json'), 'utf8'))
+  assert.ok(workbenchCapability.windows.includes('main'), 'the development workbench window can open approved external URLs')
+  assert.ok(workbenchCapability.windows.includes('workbench'), 'the production workbench window can open approved external URLs')
+  const openerPermission = workbenchCapability.permissions.find(permission => typeof permission === 'object' && permission.identifier === 'opener:allow-open-url')
+  assert.ok(openerPermission, 'workbench capability grants the scoped opener permission')
+  assert.ok(openerPermission.allow.every(({ url }) => /^(https?):\/\/([^/]*\.)?douyin\.com\/\*$/.test(url)), 'opener only permits Douyin room domains')
   const { root, app } = await mount()
   try {
     assert.ok(text(root).includes('今天 · 2026-10-23 · 00:00–24:00'), 'page shows recording timeline')
@@ -102,6 +115,24 @@ async function verify() {
     assert.equal(all(root, el => el.type === 'select').length, 0, 'timeline replaces the dropdown')
     assert.ok(text(root).includes('讲解-当前'), 'recording is selected before finished sessions')
     assert.ok(text(root).includes('片段-当前'))
+    await click(all(root, el => el.type === 'button' && text(el).trim() === '打开文件')[0])
+    await click(all(root, el => el.type === 'button' && text(el).trim() === '打开文件夹')[0])
+    assert.equal(openedSegments.length, 2, 'recording segment exposes file and folder actions')
+    assert.equal(openedSegments[0].method, 'POST')
+    assert.equal(openedSegments[0].body.reveal, false, 'file action opens the recording')
+    assert.equal(openedSegments[1].body.reveal, true, 'folder action reveals the recording')
+    const roomUrl = all(root, el => el.type === 'a' && el.props.class === 'live-room-selected-url')[0]
+    assert.ok(roomUrl, 'selected room URL is a link')
+    assert.equal(roomUrl.props.href, 'https://live.douyin.com/一')
+    assert.equal(typeof roomUrl.props.onClick, 'function', 'selected room link explicitly opens in the system browser')
+    let defaultPrevented = false
+    await roomUrl.props.onClick({
+      currentTarget: roomUrl,
+      target: roomUrl,
+      preventDefault() { defaultPrevented = true },
+    })
+    assert.equal(defaultPrevented, true, 'room link does not navigate inside the WebView')
+    assert.deepEqual(openedUrls, [new URL(roomUrl.props.href).href], 'room link is passed to the external URL opener')
     const ticks = all(root, el => el.props.class === 'live-recording-timeline-ticks')[0]
     assert.deepEqual(ticks.children.filter(el => el.type === 'span').map(text), ['00:00', '06:00', '12:00', '18:00', '24:00'])
     const recentButton = selectButton(root, '回到今天')
@@ -403,6 +434,15 @@ async function verifyDenseSessions() {
       assert.equal(choices()[i].props['aria-pressed'], true)
     }
   } finally { app.unmount() }
+
+  response = [{ ...monitor('一', []), url: 'https://example.com/not-a-douyin-room' }]
+  const unsafe = await mount()
+  try {
+    const openedBeforeUnsafeUrl = [...openedUrls]
+    const roomUrl = all(unsafe.root, el => el.type === 'a' && el.props.class === 'live-room-selected-url')[0]
+    await roomUrl.props.onClick({ preventDefault() {} })
+    assert.deepEqual(openedUrls, openedBeforeUnsafeUrl, 'non-Douyin room URLs are rejected before opening')
+  } finally { unsafe.app.unmount() }
 }
 async function verifyLocalCalendarDay() {
   const date = checkMidnightDst ? '2018-11-04' : '2026-11-01'

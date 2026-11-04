@@ -13,6 +13,7 @@
   min-height: 0;
   color: var(--live-ink);
 }
+.live-page .badge-soft { color: var(--color-base-content); }
 .live-page *, .live-page *::before, .live-page *::after { min-width: 0; }
 .live-page h2, .live-page h3, .live-page p { margin: 0; }
 .live-page button:focus-visible, .live-page input:focus-visible, .live-page select:focus-visible, .live-page summary:focus-visible, .live-page a:focus-visible { outline: 2px solid var(--live-blue); outline-offset: 3px; }

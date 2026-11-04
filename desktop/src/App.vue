@@ -126,7 +126,7 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
           :aria-label="connected ? '本地服务已连接' : '本地服务未连接'">
           <LiveIcon name="server" :class="{online:connected}"/>
         </span>
-        <span class="app-version">v0.2.99</span>
+        <span class="app-version">v0.2.101</span>
       </div>
     </aside>
 

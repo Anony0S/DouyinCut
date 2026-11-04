@@ -11,6 +11,11 @@ description = "允许工作台请求安全退出"
 commands.allow = ["complete_exit"]
 
 [[permission]]
+identifier = "allow-window-preferences"
+description = "允许工作台读取和保存窗口位置、启动大小"
+commands.allow = ["get_window_preferences", "set_window_preferences"]
+
+[[permission]]
 identifier = "allow-local-maintenance"
 description = "允许工作台执行本地目录、日志和版本维护操作"
 commands.allow = ["delete_workspace_config", "relaunch", "open_log_directory", "clear_logs", "check_for_update"]

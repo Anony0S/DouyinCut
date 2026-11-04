@@ -291,8 +291,17 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let _ = main_thread_app.run_on_main_thread(move || restore_main_window(&restore_app));
         })
         .map_err(std::io::Error::other)?;
+    let preferences_path = app.path().app_config_dir()?.join("window-preferences.json");
+    app.manage(crate::window_preferences::WindowPreferencesHost::load(preferences_path)?);
     if cfg!(debug_assertions) {
-        tauri::WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?.build()?;
+        let mut config = app.config().app.windows[0].clone();
+        let (width, height) = app.state::<crate::window_preferences::WindowPreferencesHost>().startup_size().dimensions();
+        config.width = f64::from(width);
+        config.height = f64::from(height);
+        config.visible = false;
+        let window = tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
+        app.state::<crate::window_preferences::WindowPreferencesHost>().restore_position(&window);
+        window.show()?;
         return Ok(());
     }
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -330,15 +339,19 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(crate::workspace::WorkDirectoryHost::new(executable, config));
     let mut config = app.config().app.windows[0].clone();
     config.url = tauri::WebviewUrl::App("setup.html".into());
+    let (width, height) = app.state::<crate::window_preferences::WindowPreferencesHost>().startup_size().dimensions();
+    config.width = f64::from(width);
+    config.height = f64::from(height);
     config.visible = false; // Start hidden to avoid flash
-    tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
+    let window = tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
+    app.state::<crate::window_preferences::WindowPreferencesHost>().restore_position(&window);
+    window.show()?;
     Ok(())
 }
 
 #[cfg(all(windows, not(debug_assertions)))]
 static TRAY_CLOSE_NOTICE_SHOWN: AtomicBool = AtomicBool::new(false);
 
-#[cfg(all(windows, not(debug_assertions)))]
 pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if !matches!(window.label(), "main" | "workbench") {
         return;
@@ -346,15 +359,22 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     let tauri::WindowEvent::CloseRequested { api, .. } = event else {
         return;
     };
-    api.prevent_close();
-    let _ = window.hide();
-    if !TRAY_CLOSE_NOTICE_SHOWN.swap(true, Ordering::SeqCst) {
-        show_tray_notice();
+    if let Some(preferences) = window.app_handle().try_state::<crate::window_preferences::WindowPreferencesHost>() {
+        if let Ok(position) = window.outer_position() {
+            preferences.save_position(position);
+        }
     }
+    #[cfg(all(windows, not(debug_assertions)))]
+    {
+        api.prevent_close();
+        let _ = window.hide();
+        if !TRAY_CLOSE_NOTICE_SHOWN.swap(true, Ordering::SeqCst) {
+            show_tray_notice();
+        }
+    }
+    #[cfg(not(all(windows, not(debug_assertions))))]
+    let _ = api;
 }
-
-#[cfg(any(not(windows), debug_assertions))]
-pub fn handle_window_event(_: &tauri::Window, _: &tauri::WindowEvent) {}
 
 #[cfg(all(windows, not(debug_assertions)))]
 fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -481,12 +501,18 @@ pub fn open_workbench(
     let mut config = app.config().app.windows[0].clone();
     config.url = tauri::WebviewUrl::External(url);
     config.label = "workbench".into();
-    tauri::WebviewWindowBuilder::from_config(app, &config)
+    let (width, height) = app.state::<crate::window_preferences::WindowPreferencesHost>().startup_size().dimensions();
+    config.width = f64::from(width);
+    config.height = f64::from(height);
+    config.visible = false;
+    let window = tauri::WebviewWindowBuilder::from_config(app, &config)
         .map_err(|e| e.to_string())?
         .initialization_script(script)
         .on_navigation(move |url| url.origin().ascii_serialization() == origin)
         .build()
         .map_err(|e| e.to_string())?;
+    app.state::<crate::window_preferences::WindowPreferencesHost>().restore_position(&window);
+    window.show().map_err(|e| e.to_string())?;
     app.manage(host);
     Ok(())
 }

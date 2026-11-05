@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -19,6 +20,7 @@ from pydantic import Field
 from ..core.config import Settings
 from ..core.domain import Model, new_id
 from ..core.storage import Store
+from ..work_directory import REQUIRED_COLUMNS
 from .catalog import ProductCatalogRefresher
 
 SEGMENT_SECONDS = 1200
@@ -47,6 +49,8 @@ class LiveClipOpen(Model):
 
 class LivePeriodSplit(Model):
     confirmed_missing_segment_ids: list[str] = Field(default_factory=list, max_length=1000)
+    start: float | None = None
+    end: float | None = None
 
 
 def normalize_douyin_url(raw: str) -> str:
@@ -164,6 +168,16 @@ class LiveStore:
                 CREATE INDEX IF NOT EXISTS live_segments_session ON live_segments(session_id,segment_index);
                 CREATE INDEX IF NOT EXISTS live_product_events_session ON live_product_events(session_id,event_time);
             """)
+            for table, required in REQUIRED_COLUMNS.items():
+                if not table.startswith("live_"):
+                    continue
+                present = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                missing = required - present
+                if missing:
+                    raise RuntimeError(
+                        f"直播监控数据库结构不符合当前 SPEC.md：{table} 缺少字段 {', '.join(sorted(missing))}。"
+                        "请先备份并修复当前工作目录数据库后重新启动。"
+                    )
 
     def create_monitor(self, url: str, name: str):
         url = normalize_douyin_url(url)
@@ -812,7 +826,8 @@ class LiveStore:
         detail = self._session_detail(conn, session)
         return next(period for period in detail["product_periods"] if period["id"] == period_id)
 
-    def request_period_product_clips(self, period_id: str, confirmed_missing_segment_ids: list[str]):
+    def request_period_product_clips(self, period_id: str, confirmed_missing_segment_ids: list[str],
+                                     start: float | None = None, end: float | None = None):
         """Freeze only this lecture's sealed intersections, after checking missing-source consent."""
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -822,7 +837,23 @@ class LiveStore:
                 return self.store.job(active["id"])
             if period["mapping_error"]:
                 raise ValueError(period["mapping_error"])
+            period_start = float(period["started"])
+            period_end = float(period["ended"] if period["ended"] is not None else time.time())
+            selected_start = period_start if start is None else start
+            selected_end = period_end if end is None else end
+            if (start is not None or end is not None) and (
+                not math.isfinite(selected_start) or not math.isfinite(selected_end)
+                or selected_start < period_start or selected_end > period_end
+                or selected_end - selected_start < 1
+            ):
+                raise ValueError("切分范围必须位于该次商品讲解内，且至少 1 秒")
             sources = period["sources"]
+            sources = [{**source,
+                        "start": max(source["start"], selected_start),
+                        "end": min(source["end"], selected_end),
+                        "clip_start": source["clip_start"] + max(0, selected_start - source["start"]),
+                        "clip_end": source["clip_end"] - max(0, source["end"] - selected_end)}
+                       for source in sources if min(source["end"], selected_end) > max(source["start"], selected_start)]
             missing = [source for source in sources if source["state"] in {"deleted", "missing", "failed"}]
             available = [source for source in sources if source["state"] == "ready"
                          and source["end"] - source["start"] >= 1]
@@ -846,7 +877,8 @@ class LiveStore:
                 if any(window["segment_id"] in target_segments for window in json.loads(row["payload"])["windows"]):
                     raise ValueError("对应分段正在切分其他讲解，请等待该任务完成后重试")
             job_id, now = new_id("job"), time.time()
-            payload = {"period_id": period_id, "session_id": period["session_id"], "windows": windows}
+            payload = {"period_id": period_id, "session_id": period["session_id"],
+                       "selection": {"start": selected_start, "end": selected_end}, "windows": windows}
             conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
                          (job_id, PRODUCT_CLIP_JOB, json.dumps(payload, ensure_ascii=False), now, now))
         return self.store.job(job_id)

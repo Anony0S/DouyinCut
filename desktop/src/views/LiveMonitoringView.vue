@@ -15,6 +15,7 @@ import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
 import LiveSessionPanel from "../components/live/LiveSessionPanel.vue";
 import LiveRecordingTimeline from "../components/live/LiveRecordingTimeline.vue";
+import LiveProductTimeline from "../components/live/LiveProductTimeline.vue";
 import {
   formatLiveTime,
   monitorNeedsAttention,
@@ -32,6 +33,7 @@ const url = ref(""),
 const selectedId = ref(""),
   updatedAt = ref<number | null>(null);
 const selectedSession = ref<LiveSession>();
+const selectedPeriodId = ref("");
 const refreshError = ref("");
 let refreshVersion = 0;
 let disposed = false;
@@ -100,7 +102,11 @@ function selectSession(id: string) {
   if (!item) return;
   chooseRoomDefault = false;
   selectedSession.value = item;
+  selectedPeriodId.value = "";
   if (loading.value) void refresh();
+}
+function focusPeriod(id: string) {
+  document.getElementById(`live-period-${id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 function viewSelectedDate() {
   if (selectedSession.value) void changeDate(localDate(new Date(selectedSession.value.started * 1000)));
@@ -275,10 +281,10 @@ async function openSegmentFile(segmentId: string, reveal: boolean) {
     if (reveal) session.message = "已在文件夹中显示录制分段";
   });
 }
-async function splitPeriod(periodId: string, confirmedMissingSegmentIds: string[]): Promise<LiveSplitResult> {
+async function splitPeriod(periodId: string, confirmedMissingSegmentIds: string[], range?: {start:number; end:number}): Promise<LiveSplitResult> {
   try {
     session.error = "";
-    const result = await liveMonitoringApi.splitPeriod(periodId, confirmedMissingSegmentIds);
+    const result = await liveMonitoringApi.splitPeriod(periodId, confirmedMissingSegmentIds, range);
     if (result.state === "confirmation_required") return result;
     session.message = "message" in result ? result.message : "已提交该次讲解的切分任务；完成后在“商品视频片段”中查看";
     await refresh();
@@ -514,7 +520,22 @@ onUnmounted(() => {
           :empty-message="emptyMessage"
           :on-delete-session="deleteSession"
           @date-change="changeDate"
-          @select="selectSession" />
+          @select="selectSession">
+          <LiveProductTimeline
+            v-if="selectedSession"
+            :key="selectedSession.id"
+            v-model:selected-period-id="selectedPeriodId"
+            :session="selectedSession"
+            :busy="busy"
+            :on-split="splitPeriod"
+            @select="focusPeriod" />
+          <section v-else class="live-product-rail live-product-rail-empty" aria-label="商品讲解轨">
+            <div class="live-product-rail-heading">
+              <div class="live-product-rail-label"><LiveIcon name="clock" /><strong>商品讲解</strong><span>0 段</span></div>
+              <span class="live-product-rail-hint">选择录制场次后显示讲解区间</span>
+            </div>
+          </section>
+        </LiveRecordingTimeline>
         <div v-if="selectionOutsideWindow" role="status"
           class="alert alert-info alert-vertical sm:alert-horizontal mb-3 flex-none text-sm">
           <span>所选场次已不在当前时间范围内</span>
@@ -525,6 +546,7 @@ onUnmounted(() => {
           v-if="selectedSession"
           :key="selectedSession.id"
           :session="selectedSession"
+          :selected-period-id="selectedPeriodId"
           :monitor-id="selectedMonitor.id"
           :busy="busy"
           @import="importSegment"
@@ -533,11 +555,11 @@ onUnmounted(() => {
           :on-delete="deleteSegment"
           :on-delete-product-clip="deleteProductClip"
           :on-retry-product-listener="retryProductListener"
-          :on-split="splitPeriod"
+          @select-period="selectedPeriodId = $event"
           @open-file="openClipFile"
           @open-segment-file="openSegmentFile" />
         <div v-else class="live-content-columns">
-          <section v-for="title in ['录制分段', '商品讲解', '商品视频片段']" :key="title"
+          <section v-for="title in ['商品讲解', '商品视频片段']" :key="title"
             class="card card-border bg-base-100 live-content-card">
             <div class="live-content-card-heading"><h3>{{ title }}</h3></div>
             <div class="live-card-empty"><strong>{{ recordingWindow.date ? '当天无录制' : '今天无录制' }}</strong></div>

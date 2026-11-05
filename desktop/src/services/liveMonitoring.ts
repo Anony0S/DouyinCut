@@ -29,6 +29,6 @@ export const liveMonitoringApi = {
   importProductClip: (id:string) => api<Job|{asset_id:string;state:'imported'}>(`/live/product-clips/${encodeURIComponent(id)}/import`,'POST'),
   openProductClip: (id:string,reveal=false) => api<{opened:boolean;revealed:boolean;path:string}>(`/live/product-clips/${encodeURIComponent(id)}/open`,'POST',{reveal}),
   deleteProductClip: (id:string) => api<{deleted_clip_id:string;file_deleted:boolean;project_file_retained:boolean}>(`/live/product-clips/${encodeURIComponent(id)}`,'DELETE'),
-  splitPeriod: (id:string, confirmedMissingSegmentIds:string[] = []) => api<LiveSplitResult>(`/live/product-periods/${encodeURIComponent(id)}/product-clips`,'POST',{confirmed_missing_segment_ids:confirmedMissingSegmentIds}),
+  splitPeriod: (id:string, confirmedMissingSegmentIds:string[] = [], range?: {start:number; end:number}) => api<LiveSplitResult>(`/live/product-periods/${encodeURIComponent(id)}/product-clips`,'POST',{confirmed_missing_segment_ids:confirmedMissingSegmentIds, ...(range || {})}),
   deleteSegment: (id:string) => api<{deleted_segment_id:string;file_deleted:boolean}>(`/live/segments/${encodeURIComponent(id)}`,'DELETE'),
 }

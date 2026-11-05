@@ -22,15 +22,19 @@ const props = defineProps<{
   onDeleteSession: (id: string) => Promise<void>
 }>()
 const emit = defineEmits<{ select: [id: string]; 'date-change': [date: string] }>()
-const hoveredId = ref('')
-const focusedId = ref('')
 const chronological = computed(() => [...props.sessions].sort((a, b) => a.started - b.started || a.id.localeCompare(b.id)))
-const preview = computed(() => props.sessions.find(item => item.id === hoveredId.value)
-  ?? props.sessions.find(item => item.id === focusedId.value)
-  ?? props.selectedSession)
-function previewFocus(id: string) {
-  focusedId.value = id
-  hoveredId.value = ''
+function previousDay() {
+  if (props.loading) return
+  const day = new Date(`${props.date || props.maxDate}T12:00:00`)
+  day.setDate(day.getDate() - 1)
+  emit('date-change', `${String(day.getFullYear()).padStart(4, '0')}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`)
+}
+function nextDay() {
+  if (props.loading || !props.date) return
+  const day = new Date(`${props.date}T12:00:00`)
+  day.setDate(day.getDate() + 1)
+  const nextDate = `${String(day.getFullYear()).padStart(4, '0')}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
+  if (nextDate <= props.maxDate) emit('date-change', nextDate)
 }
 const ticks = computed(() => Array.from({ length: 5 }, (_, index) => {
   const instant = new Date(props.start * 1000)
@@ -90,11 +94,39 @@ function clipsLabel(item: LiveSession) {
 </script>
 
 <template>
-  <section class="card card-border bg-base-100 live-recording-timeline" aria-label="录制时间线" @mouseleave="hoveredId = ''">
+  <section class="card card-border bg-base-100 live-recording-timeline" aria-label="录制时间线">
     <div class="live-recording-timeline-heading">
       <h3>录制场次</h3>
       <span class="text-base-content/60">{{ label }} · {{ sessions.length }} 场</span>
+      <div v-if="selectedSession" class="live-recording-timeline-summary" aria-live="polite">
+        <span>当前选择：</span>
+        <span>{{ formatLiveTime(selectedSession.started) }} — {{ selectedSession.status === 'recording' ? '至今' : formatLiveTime(selectedSession.ended) }}</span>
+        <span class="live-recording-timeline-duration">{{ duration(selectedSession) }}</span>
+        <span class="text-base-content/60">· {{ state(selectedSession) }}</span>
+        <ConfirmPopover
+          :key="selectedSession.id"
+          :title="`删除录制场次「${formatLiveTime(selectedSession.started)}」？`"
+          :message="deleteMessage(selectedSession)"
+          confirm-label="确定删除场次"
+          :confirm-action="() => deleteSession(selectedSession)"
+          :disabled="busy || loading || selectedSession.status === 'recording'"
+          v-slot="{ open, expanded, popoverId }">
+          <button type="button" class="btn btn-ghost btn-sm text-error"
+            :disabled="busy || loading || selectedSession.status === 'recording'"
+            :title="selectedSession.status === 'recording' ? '录制中的场次不能删除' : '删除当前录制场次'"
+            :aria-label="`删除录制场次：${summary(selectedSession)}`"
+            :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog"
+            @click="open">
+            <LiveIcon name="trash" />
+            删除场次
+          </button>
+        </ConfirmPopover>
+      </div>
       <div class="live-recording-timeline-controls">
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="loading"
+          aria-label="前一天" @click="previousDay">前一天</button>
+        <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || !date || date >= maxDate"
+          aria-label="后一天" @click="nextDay">后一天</button>
         <RecordingDatePicker :value="date" :max="maxDate" :disabled="loading"
           @change="emit('date-change', $event)" />
         <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || !date"
@@ -113,7 +145,6 @@ function clipsLabel(item: LiveSession) {
             :class="{ 'is-selected': item.id === selectedId, 'is-recording': item.status === 'recording' }"
             :style="position(item)" :aria-label="`选择录制场次：${summary(item)}`"
             :aria-pressed="item.id === selectedId"
-            @mouseenter="hoveredId = item.id" @focus="previewFocus(item.id)" @blur="focusedId = ''"
             @click="$emit('select', item.id)">
             <span v-if="item.started < start" class="live-recording-timeline-continuation" aria-label="开始于窗口之前">‹</span>
             <span class="live-sr-only">{{ state(item) }}</span>
@@ -122,32 +153,7 @@ function clipsLabel(item: LiveSession) {
         </div>
       </div>
     </div>
-    <div v-if="preview" class="live-recording-timeline-summary">
-      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <span>{{ formatLiveTime(preview.started) }} — {{ preview.status === 'recording' ? '至今' : formatLiveTime(preview.ended) }}</span>
-        <span class="live-recording-timeline-duration">{{ duration(preview) }}</span>
-        <span class="text-base-content/60">· {{ state(preview) }}</span>
-      </div>
-      <ConfirmPopover
-        v-if="preview.id === selectedId"
-        :key="preview.id"
-        :title="`删除录制场次「${formatLiveTime(preview.started)}」？`"
-        :message="deleteMessage(preview)"
-        confirm-label="确定删除场次"
-        :confirm-action="() => deleteSession(preview)"
-        :disabled="busy || loading || preview.status === 'recording'"
-        v-slot="{ open, expanded, popoverId }">
-        <button type="button" class="btn btn-ghost btn-sm text-error"
-          :disabled="busy || loading || preview.status === 'recording'"
-          :title="preview.status === 'recording' ? '录制中的场次不能删除' : '删除当前录制场次'"
-          :aria-label="`删除录制场次：${summary(preview)}`"
-          :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog"
-          @click="open">
-          <LiveIcon name="trash" />
-          删除场次
-        </button>
-      </ConfirmPopover>
-    </div>
-    <p v-else class="live-recording-timeline-empty text-base-content/60">{{ emptyMessage }}</p>
+    <slot />
+    <p v-if="!selectedSession" class="live-recording-timeline-empty text-base-content/60">{{ emptyMessage }}</p>
   </section>
 </template>

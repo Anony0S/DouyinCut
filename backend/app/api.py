@@ -256,7 +256,9 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.post("/api/v1/live/product-periods/{period_id}/product-clips", status_code=202)
     def split_live_period(period_id: str, body: LivePeriodSplit):
         try:
-            return live_store.request_period_product_clips(period_id, body.confirmed_missing_segment_ids)
+            return live_store.request_period_product_clips(
+                period_id, body.confirmed_missing_segment_ids, body.start, body.end
+            )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
 

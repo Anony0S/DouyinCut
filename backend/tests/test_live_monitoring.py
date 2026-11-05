@@ -543,6 +543,15 @@ class LiveMonitoringTests(unittest.TestCase):
         stopped = self.client.post(url, headers=self.headers)
         self.assertEqual(stopped.status_code, 409, stopped.text)
 
+    def test_live_store_rejects_incomplete_current_schema_before_monitor_cycle(self):
+        with self.store.connection() as conn:
+            conn.execute("ALTER TABLE live_product_listener_retries DROP COLUMN refresh_catalog")
+        with self.assertRaisesRegex(RuntimeError, "live_product_listener_retries.*refresh_catalog"):
+            LiveStore(self.store)
+        with self.store.connection() as conn:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(live_product_listener_retries)")}
+        self.assertNotIn("refresh_catalog", columns, "startup validation must not migrate the database")
+
     def test_live_worker_restarts_only_the_product_listener_for_retry_request(self):
         monitor = self.live.create_monitor("https://live.douyin.com/retry-product-worker", "room")
         session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "retry-product-worker")
@@ -681,6 +690,32 @@ class LiveMonitoringTests(unittest.TestCase):
             conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (queued.json()["id"],))
         noop = self.client.post(url, headers=self.headers, json={})
         self.assertEqual(noop.json()["state"], "noop")
+
+    def test_split_accepts_custom_range_inside_one_lecture(self):
+        monitor, session_id, _segments = self._two_segment_session("period-range")
+        period_id = self._period_id(session_id, "p2")
+        with self.store.connection() as conn:
+            period = conn.execute("SELECT started,ended FROM live_product_periods WHERE id=?", (period_id,)).fetchone()
+        response = self.client.post(
+            f"/api/v1/live/product-periods/{period_id}/product-clips",
+            headers=self.headers,
+            json={"start": period["started"] + 7, "end": period["started"] + 19},
+        )
+        self.assertEqual(response.status_code, 202, response.text)
+        payload = response.json()["payload"]
+        self.assertEqual(payload["selection"]["end"] - payload["selection"]["start"], 12)
+        self.assertEqual([(round(window["clip_start"], 1), round(window["clip_end"], 1)) for window in payload["windows"]], [(12.0, 20.0), (0.0, 4.0)])
+
+    def test_split_rejects_range_outside_lecture_or_shorter_than_one_second(self):
+        _monitor, session_id, _segments = self._two_segment_session("period-range-invalid")
+        period_id = self._period_id(session_id, "p2")
+        with self.store.connection() as conn:
+            period = conn.execute("SELECT started,ended FROM live_product_periods WHERE id=?", (period_id,)).fetchone()
+        url = f"/api/v1/live/product-periods/{period_id}/product-clips"
+        outside = self.client.post(url, headers=self.headers, json={"start": period["started"] - 1, "end": period["ended"]})
+        short = self.client.post(url, headers=self.headers, json={"start": period["started"], "end": period["started"] + .5})
+        self.assertEqual(outside.status_code, 409)
+        self.assertEqual(short.status_code, 409)
 
     def test_current_lecture_cuts_sealed_part_then_supplements_newly_sealed_source(self):
         _monitor, session_id, (first, second) = self._two_segment_session("period-supplement")

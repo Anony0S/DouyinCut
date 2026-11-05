@@ -30,6 +30,7 @@
     "test:confirmation-popover": "node scripts/verify-confirmation-popover.cjs",
     "test:delete-wiring": "node scripts/verify-delete-confirmation-wiring.cjs",
     "test:live-timeline": "node scripts/verify-live-recording-timeline.cjs",
+    "test:live-product-rail": "node scripts/verify-live-product-rail.cjs",
     "test:live-badge-contrast": "pnpm build && node scripts/verify-live-badge-contrast.cjs",
     "test:roughcut": "node scripts/verify-roughcut.cjs",
     "test:routing": "node scripts/verify-routing.cjs",

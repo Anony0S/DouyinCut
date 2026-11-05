@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { duration, seconds } from "../../api";
-import type { LiveSegment, LiveSession, LiveProductPeriod, LivePeriodSource, LiveSplitResult } from "../../services/liveMonitoring";
+import type { LiveSegment, LiveSession, LiveProductPeriod } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
-import LivePeriodSplit from "./LivePeriodSplit.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
 import ProductSearchDialog from "../product/ProductSearchDialog.vue";
 import {
@@ -21,9 +20,9 @@ const props = defineProps<{
   session: LiveSession;
   monitorId: string;
   busy: boolean;
+  selectedPeriodId: string;
   onDelete: (id: string) => Promise<void>;
   onDeleteProductClip: (id: string) => Promise<void>;
-  onSplit: (id: string, confirmedMissingSegmentIds: string[]) => Promise<LiveSplitResult>;
   onRetryProductListener: (monitorId: string, sessionId: string) => Promise<void>;
 }>();
 const visiblePathKey = ref<string | null>(null);
@@ -34,6 +33,7 @@ defineEmits<{
   open: [assetId: string];
   "open-file": [id: string, reveal: boolean];
   "open-segment-file": [id: string, reveal: boolean];
+  "select-period": [id: string];
 }>();
 function pathKey(kind: "segment" | "clip", id: string) {
   return `${kind}:${id}`;
@@ -46,11 +46,11 @@ function togglePath(kind: "segment" | "clip", id: string) {
   visiblePathKey.value = visiblePathKey.value === key ? null : key;
 }
 const splitting = (segment: LiveSegment) => segment.splitting;
-function deleteSegment(segment: LiveSegment) {
-  return props.onDelete(segment.id);
-}
 function deleteProductClip(clip: LiveSession["product_clips"][number]) {
   return props.onDeleteProductClip(clip.id);
+}
+function deleteSegment(segment: LiveSegment) {
+  return props.onDelete(segment.id);
 }
 function productClipMessage(status: string, name: string) {
   return status === "imported"
@@ -63,9 +63,9 @@ const periods = computed(() =>
     (a, b) => Number(b.ended === null) - Number(a.ended === null) || b.started - a.started || b.id.localeCompare(a.id),
   ),
 );
-const sourceStates: Record<LivePeriodSource["state"], string> = {
-  ready: "", recording: "录制中", deleted: "已删除", missing: "文件不存在", failed: "文件异常",
-};
+const readyCount = computed(() => props.session.segments.filter(item => item.status === "completed").length);
+const importedCount = computed(() => props.session.segments.filter(item => item.status === "imported").length);
+const segments = computed(() => [...props.session.segments].filter(item => segmentFilter.value === "all" || (segmentFilter.value === "ready" ? item.status === "completed" : item.status === "imported")).sort((a, b) => b.segment_index - a.segment_index));
 function splitSummary(period: LiveProductPeriod) {
   const generated = period.sources.filter(source => ["completed", "importing", "imported"].includes(source.clip_status || "")).length;
   const ready = period.sources.filter(source => source.state === "ready" && source.end - source.start >= 1 && !["completed", "importing", "imported"].includes(source.clip_status || "")).length;
@@ -77,25 +77,6 @@ function clipPeriodTime(periodId: string) {
   const period = props.session.product_periods.find(item => item.id === periodId);
   return period ? `${formatOffset(period.started, props.session.started)} – ${period.ended === null ? "至今" : formatOffset(period.ended, props.session.started)}` : "";
 }
-const readyCount = computed(
-  () =>
-    props.session.segments.filter((item) => item.status === "completed").length,
-);
-const importedCount = computed(
-  () =>
-    props.session.segments.filter((item) => item.status === "imported").length,
-);
-const segments = computed(() =>
-  [...props.session.segments]
-    .filter(
-      (item) =>
-        segmentFilter.value === "all" ||
-        (segmentFilter.value === "ready"
-          ? item.status === "completed"
-          : item.status === "imported"),
-    )
-    .sort((a, b) => b.segment_index - a.segment_index),
-);
 const listenerStatus = computed(
   () => props.session.product_listener?.status || "",
 );
@@ -115,7 +96,7 @@ const filters = computed(() => [
 <template>
   <div class="live-session-content">
     <div class="live-content-columns">
-      <section
+      <section v-if="false"
         class="card card-border bg-base-100 w-full live-content-card live-recordings-card">
         <div class="live-content-card-heading">
           <div>
@@ -125,7 +106,7 @@ const filters = computed(() => [
               {{ session.segments.length }}
             </span>
           </div>
-          <span>每 20 分钟封存</span>
+          <span>内部媒体分块</span>
         </div>
         <div class="live-segment-filters join" aria-label="筛选录制分段">
           <button
@@ -167,7 +148,7 @@ const filters = computed(() => [
                 <span>
                   {{
                     segment.duration_us
-                      ? duration(segment.duration_us)
+                      ? duration(segment.duration_us ?? 0)
                       : segment.status === "recording"
                         ? "录制进行中"
                         : "时长待探测"
@@ -196,7 +177,7 @@ const filters = computed(() => [
                     role="tooltip">
                     <code>{{ segment.path }}</code>
                     <small v-if="segment.duration_us">
-                      时长 {{ seconds(segment.duration_us) }} 秒
+                      时长 {{ seconds(segment.duration_us ?? 0) }} 秒
                     </small>
                   </span>
                 </span>
@@ -349,9 +330,11 @@ const filters = computed(() => [
         <div v-if="periods.length" class="live-product-event-list">
           <article
             v-for="(period, index) in periods"
+            :id="`live-period-${period.id}`"
             :key="period.id"
             class="live-product-event"
-            :class="{ 'is-latest': index === 0 }">
+            :class="{ 'is-latest': index === 0, 'is-selected': period.id === selectedPeriodId }"
+            @click="$emit('select-period', period.id)">
             <div class="live-event-marker">
               <i></i>
               <span></span>
@@ -379,21 +362,12 @@ const filters = computed(() => [
                   <p v-if="period.clip_job?.state === 'failed' && period.clip_job.error" class="live-product-clip-error">
                     切分失败：{{ period.clip_job.error }}
                   </p>
-                  <div class="flex flex-wrap gap-1.5 mt-1" aria-label="来源录制分段">
-                    <span v-for="source in period.sources" :key="source.segment_id"
-                      class="badge badge-soft badge-sm"
-                      :class="['deleted', 'missing', 'failed'].includes(source.state) ? 'badge-warning' : 'badge-neutral'">
-                      分段 {{ String(source.segment_index).padStart(2, "0") }}{{ sourceStates[source.state] ? `（${sourceStates[source.state]}）` : '' }}
-                    </span>
-                    <span v-if="!period.sources.length" class="text-base-content/60 text-xs">暂无对应分段</span>
-                  </div>
                 </div>
                 <div class="flex shrink-0 flex-col items-stretch gap-2">
                   <button type="button" class="btn btn-soft btn-sm"
                     :disabled="busy || !period.product_name.trim()"
                     :title="period.product_name.trim() ? '查询星斗商品平台中的商品信息' : '暂无商品名称，无法查询'"
-                    @click="queryProductName = period.product_name.trim()"><LiveIcon name="search" />查询商品</button>
-                  <LivePeriodSplit :period="period" :busy="busy" :on-split="onSplit" />
+                    @click.stop="queryProductName = period.product_name.trim()"><LiveIcon name="search" />查询商品</button>
                 </div>
               </div>
             </div>

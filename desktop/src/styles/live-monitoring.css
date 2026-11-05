@@ -92,6 +92,28 @@
 .live-room-list-empty { padding: 60px 5px; text-align: center; color: var(--text-muted); font-size: 12px; }
 .live-room-list-empty > .live-icon { width: 26px; height: 26px; margin-bottom: 12px; color: var(--text-muted); }
 .live-detail { container: live-detail / inline-size; display: flex; flex-direction: column; min-height: 0; }
+.live-product-rail { flex: none; padding: 10px 0 0; margin: 0; border-top: 1px solid var(--color-base-300); min-width: 0; }
+.live-product-rail-empty { min-height: 42px; }
+.live-product-rail-heading { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: 10px; }
+.live-product-rail-label, .live-product-rail-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.live-product-rail-label { color: var(--text-muted); font-size: 12px; }
+.live-product-rail-label .live-icon { width: 14px; height: 14px; }
+.live-product-rail-label strong { color: var(--live-ink); font-weight: 600; }
+.live-product-rail-label > span, .live-product-rail-hint, .live-product-rail-selected-name { color: var(--text-muted); font-size: 12px; }
+.live-product-rail-selected-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-product-rail-range-label { color: var(--live-ink); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.live-product-rail-track { position: relative; height: 24px; margin-top: 2px; border-radius: 4px; }
+.live-product-rail-period { position: absolute; top: 0; height: 24px; min-width: 4px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
+.live-product-rail-period::after { position: absolute; top: 10px; right: 0; left: 0; height: 4px; border-inline: 1px solid var(--period-color); background: var(--period-color); content: ""; }
+.live-product-rail-period:hover::after, .live-product-rail-period:focus-visible::after { top: 8px; height: 8px; box-shadow: 0 0 0 2px color-mix(in oklab, var(--period-color) 30%, transparent); }
+.live-product-rail-period.is-selected { z-index: 1; }
+.live-product-rail-period.is-selected::after { top: 8px; height: 8px; border: 2px solid var(--period-color); background: transparent; }
+.live-product-range-overlay { position: absolute; top: -5px; height: 34px; z-index: 3; }
+.live-product-range-fill { position: absolute; top: 10px; height: 8px; background: var(--period-color); border: 1px solid color-mix(in oklab, var(--period-color) 55%, var(--color-base-content)); border-radius: 4px; pointer-events: none; }
+.live-product-range-handle { position: absolute; top: 3px; width: 14px; height: 28px; min-height: 0; padding: 0; transform: translateX(-50%); border: 2px solid var(--period-color); border-radius: 5px; background: var(--color-base-100); box-shadow: 0 1px 4px rgb(0 0 0 / 28%); cursor: ew-resize; touch-action: none; }
+.live-product-range-handle:hover, .live-product-range-handle:focus-visible { outline: 2px solid color-mix(in oklab, var(--period-color) 50%, transparent); outline-offset: 2px; }
+.live-product-rail-scale { display: flex; justify-content: space-between; margin-top: 1px; color: var(--text-muted); font: 10px/1.2 Consolas, monospace; font-variant-numeric: tabular-nums; }
+.live-product-rail-note { margin-top: 4px; color: var(--text-muted); font-size: 11px; }
 .live-recording-timeline { flex: none; gap: 12px; padding: 16px 18px 12px; margin-bottom: 16px; min-width: 0; }
 .live-recording-timeline-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 12px; }
 .live-recording-timeline-heading h3 { font-size: 13px; font-weight: 600; }
@@ -110,7 +132,7 @@
 .live-recording-timeline-period.btn.is-selected { outline: 2px solid var(--color-primary); outline-offset: 2px; z-index: 1; }
 .live-recording-timeline-period.btn:focus-visible { outline: 3px solid var(--color-primary); outline-offset: 3px; z-index: 2; }
 .live-recording-timeline-continuation { color: var(--color-base-content); margin-inline: 4px; font-size: 16px; }
-.live-recording-timeline-summary { display: flex; align-self: flex-start; align-items: center; max-width: 100%; padding: 5px 8px; flex-wrap: wrap; gap: 5px 12px; color: var(--color-base-content); text-align: left; font-size: 12px; font-weight: 500; }
+.live-recording-timeline-summary { display: flex; align-items: center; max-width: 100%; flex-wrap: wrap; gap: 5px 8px; color: var(--color-base-content); text-align: left; font-size: 12px; font-weight: 500; }
 .live-recording-timeline-duration { color: var(--color-primary); font-weight: 700; font-variant-numeric: tabular-nums; }
 .live-recording-timeline-empty { min-height: 30px; padding: 5px 0; font-size: 12px; }
 .live-room-error { padding: 10px 12px; font-size: 12px; overflow-wrap: anywhere; }
@@ -129,7 +151,7 @@
 .live-catalog-error[open] summary span:last-child { font-size: 0; }
 .live-catalog-error[open] summary span:last-child::after { content: '收起请求详情'; font-size: 12px; }
 .live-catalog-error pre { max-height: 300px; overflow: auto; margin: 0; padding: 16px; border-top: 1px solid color-mix(in oklab, var(--color-error) 25%, var(--color-base-100)); background: color-mix(in oklab, var(--color-error) 8%, var(--color-base-100)); color: var(--color-error); white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 Consolas, monospace; user-select: text; }
-.live-content-columns { display: grid; flex: 1; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: stretch; min-height: 0; }
+.live-content-columns { display: grid; flex: 1; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 18px; align-items: stretch; min-height: 0; }
 .live-content-card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .live-segment-row.live-product-clip-row { grid-template-columns: minmax(0, 1fr) auto; }
 .live-product-clip-row .live-segment-title > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -143,6 +165,9 @@
 .live-product-event-list, .live-segment-list { flex: 1; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-gutter: stable; }
 .live-product-event-list { padding: 20px 18px 5px; }
 .live-product-event { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 10px; }
+.live-product-event { cursor: pointer; }
+.live-product-event.is-selected .live-event-content { margin: -6px -8px 13px -6px; padding: 6px 8px 10px 10px; border-left: 2px solid var(--color-primary); border-radius: 0 5px 5px 0; background: color-mix(in oklab, var(--color-primary) 8%, var(--color-base-100)); }
+.live-product-event.is-selected .live-event-marker i { border-color: var(--color-primary); }
 .live-event-marker { display: flex; flex-direction: column; align-items: center; padding-top: 5px; }
 .live-event-marker i { display: block; flex: none; width: 7px; height: 7px; border: 2px solid var(--color-base-300); border-radius: 50%; background: var(--color-base-100); }
 .live-event-marker > span { width: 1px; flex: 1; min-height: 25px; margin-top: 7px; background: var(--color-base-300); }
@@ -217,7 +242,7 @@
 .live-monitoring-main > header { flex: none; }
 .live-page .is-spinning { animation: live-rotate 1.4s linear infinite; }
 @keyframes live-rotate { to { transform: rotate(360deg); } }
-/* 三列卡片各约 1/3 宽：分段行在列内收窄，操作按钮换到信息下方 */
+/* 卡片变窄时，分段行内操作换到信息下方 */
 @container live-detail (max-width: 1500px) {
   .live-segment-row { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; }
   .live-segment-row.live-product-clip-row { grid-template-columns: minmax(0, 1fr); }
@@ -225,7 +250,7 @@
   .live-segment-actions { grid-column: -2 / -1; justify-content: flex-start; margin-top: 0; }
 }
 @container live-detail (max-width: 1100px) {
-  .live-content-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(360px, auto); overflow-y: auto; }
+  .live-content-columns { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); grid-auto-rows: minmax(360px, auto); overflow-y: auto; }
   .live-content-card { min-height: 360px; }
 }
 @container live-detail (max-width: 680px) {

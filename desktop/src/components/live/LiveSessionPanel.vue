@@ -12,6 +12,7 @@ import {
   formatOffset,
   listenerBadgeClasses,
   listenerNames,
+  productPeriodColor,
   segmentBadgeClasses,
   segmentNames,
 } from "./presentation";
@@ -76,6 +77,9 @@ function splitSummary(period: LiveProductPeriod) {
 function clipPeriodTime(periodId: string) {
   const period = props.session.product_periods.find(item => item.id === periodId);
   return period ? `${formatOffset(period.started, props.session.started)} – ${period.ended === null ? "至今" : formatOffset(period.ended, props.session.started)}` : "";
+}
+function productColorStyle(promotionId: string) {
+  return { "--period-color": productPeriodColor(promotionId) };
 }
 const listenerStatus = computed(
   () => props.session.product_listener?.status || "",
@@ -317,7 +321,7 @@ const filters = computed(() => [
           重试商品连接
         </button>
         <p
-          v-if="session.product_listener?.detail"
+          v-if="session.product_listener?.detail && (listenerStatus === 'error' || session.product_listener.detail !== '商品消息连接已建立')"
           class="live-listener-note pl-4 pt-2"
           :class="{ 'is-error': listenerStatus === 'error' }">
           <LiveIcon :name="listenerStatus === 'error' ? 'alert' : 'radio'" />
@@ -334,6 +338,7 @@ const filters = computed(() => [
             :key="period.id"
             class="live-product-event"
             :class="{ 'is-latest': index === 0, 'is-selected': period.id === selectedPeriodId }"
+            :style="productColorStyle(period.promotion_id)"
             @click="$emit('select-period', period.id)">
             <div class="live-event-marker">
               <i></i>
@@ -416,6 +421,7 @@ const filters = computed(() => [
                 </span>
               </div>
               <div class="live-segment-meta items-center">
+                <span v-if="clipPeriodTime(clip.period_id)" class="live-clip-period-time" :style="productColorStyle(clip.promotion_id)">所属讲解 {{ clipPeriodTime(clip.period_id) }}</span>
                 <span>
                   {{ formatOffset(clip.start, session.started) }} –
                   {{ formatOffset(clip.end, session.started) }}
@@ -447,7 +453,6 @@ const filters = computed(() => [
                   </span>
                 </span>
               </div>
-              <p v-if="clipPeriodTime(clip.period_id)" class="text-base-content/60 text-xs mt-2">所属讲解 {{ clipPeriodTime(clip.period_id) }}</p>
               <p v-if="clip.error" class="live-product-clip-error">
                 {{ clip.error }}
               </p>

@@ -74,6 +74,8 @@ const load = file => {
 }
 
 async function verify() {
+  const { productPeriodColor } = load(path.join(src, 'components/live/presentation.ts'))
+  const expectedColor = productPeriodColor(session.product_periods[0].promotion_id)
   const { default: Component } = load(path.join(src, 'components/live/LiveProductTimeline.vue'))
   const root = makeNode('root')
   const app = renderer.createApp(Component, {
@@ -83,6 +85,8 @@ async function verify() {
   app.mount(root)
   try {
     await settle()
+    const periodButton = all(root, element => element.props.class?.includes('live-product-rail-period'))[0]
+    assert.equal(periodButton.props.style['--period-color'], expectedColor, 'the rail uses the shared product color mapping')
     const splitButton = all(root, element => element.type === 'button' && element.props.class?.includes('btn-primary'))[0]
     await splitButton.props.onClick()
     await settle()
@@ -123,6 +127,13 @@ async function verify() {
   } finally {
     app.unmount()
   }
+
+  const sessionPanel = fs.readFileSync(path.join(src, 'components/live/LiveSessionPanel.vue'), 'utf8')
+  const liveStyles = fs.readFileSync(path.resolve(src, '../src/styles/live-monitoring.css'), 'utf8')
+  assert.match(sessionPanel, /:style="productColorStyle\(period\.promotion_id\)"/, 'lecture list entries use the shared product color')
+  assert.match(sessionPanel, /<span v-if="clipPeriodTime\(clip\.period_id\)" class="live-clip-period-time" :style="productColorStyle\(clip\.promotion_id\)">/, 'clip lecture labels use the shared product color in the metadata row')
+  assert.match(liveStyles, /\.live-event-time time \{ color: var\(--period-color\)/, 'lecture timestamps display their product color')
+  assert.match(liveStyles, /\.live-clip-period-time \{ color: var\(--period-color\)/, 'clip lecture labels display their product color')
 
   session.product_periods[0].sources.pop()
   session.status = 'stopped'

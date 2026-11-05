@@ -141,6 +141,10 @@ async function verify() {
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   assert.equal(button(noRetry.root, '重试商品连接'), undefined, 'healthy product listener has no manual retry')
+  assert.equal(all(noRetry.root, el => el.props.class?.includes('live-listener-note')).length, 0,
+    'the connected detail is not repeated below the product listener badge')
+  assert.equal((text(noRetry.root).match(/商品消息连接已建立/g) || []).length, 1,
+    'a healthy product listener shows its connected state once')
   retryPanel.app.unmount(); noRetry.app.unmount()
 
   const timelineSessions = [

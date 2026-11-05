@@ -1,5 +1,13 @@
 import type { LiveMonitor } from '../../services/liveMonitoring'
 
+const productPeriodColors = ['#2563eb', '#0f766e', '#c2410c', '#7c3aed', '#be123c', '#4d7c0f']
+
+export function productPeriodColor(promotionId: string) {
+  let hash = 0
+  for (const char of promotionId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return productPeriodColors[hash % productPeriodColors.length]
+}
+
 export const segmentNames: Record<string, string> = { recording: '正在写入', completed: '待导入', failed: '文件异常', importing: '正在导入', imported: '已导入' }
 export const listenerNames: Record<string, string> = { preparing: '准备连接', connecting: '正在连接', listening: '商品消息连接已建立', retrying: '正在重试', error: '商品连接中断', stopped: '已停止' }
 export const segmentBadgeClasses: Record<string, string> = { completed: 'badge-soft badge-info', recording: 'badge-soft badge-error', failed: 'badge-soft badge-error', importing: 'badge-soft badge-warning', imported: 'badge-soft badge-success' }

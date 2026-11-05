@@ -43,7 +43,7 @@ const text = root => root.text + root.children.map(text).join('')
 const button = (root, label) => all(root, el => el.type === 'button' && (text(el).trim() === label || el.props['aria-label'] === label))[0]
 const settle = async () => { for (let i = 0; i < 30; i++) { await Promise.resolve(); await vue.nextTick() } }
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r }); return { promise, resolve } }
-const click = async el => { assert.ok(el); assert.ok(!el.props.disabled); const result = el.props.onClick?.({ currentTarget: el, target: el }); await settle(); return result }
+const click = async el => { assert.ok(el); assert.ok(!el.props.disabled); const result = el.props.onClick?.({ currentTarget: el, target: el, stopPropagation() {}, preventDefault() {} }); await settle(); return result }
 const input = (root, suffix, value) => {
   const field = all(root, el => el.type === 'input' && el.props.id?.endsWith(suffix))[0]
   assert.ok(field); field.props['onUpdate:modelValue'](value)
@@ -159,6 +159,28 @@ async function verifySearch() {
   respond = () => ({ product: firstProduct, scope_name: '店铺 A' })
   await click(button(body, '重试'))
   assert.ok(text(body).includes('测试商品')); mounted.app.unmount()
+
+  const initialKeyword = '独束大码女装【轻羽小蛮腰】修身显瘦羽绒服26DS84096（国补）'
+  let customSearch = false
+  respond = (_url, options) => {
+    if (options.body.keyword === initialKeyword && !customSearch) return { product: null, scope_name: '店铺 A' }
+    return { product: firstProduct, scope_name: '店铺 A' }
+  }
+  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: initialKeyword })
+  try {
+    const queryField = all(body, el => el.type === 'input' && el.props['aria-label'] === '商品查询词')[0]
+    assert.ok(queryField)
+    assert.equal(calls.filter(call => call.url.endsWith('/products/search')).at(-1).body.keyword, initialKeyword,
+      'the full lecture product title is searched first')
+    queryField.props['onUpdate:modelValue']('独束大码女装【轻羽小蛮腰】修身显瘦羽绒服26DS84096')
+    customSearch = true
+    const searchForm = all(body, el => el.type === 'form' && el.props.onSubmit)[0]
+    assert.ok(searchForm)
+    searchForm.props.onSubmit({ preventDefault() {} }); await settle()
+    assert.equal(calls.filter(call => call.url.endsWith('/products/search')).at(-1).body.keyword,
+      '独束大码女装【轻羽小蛮腰】修身显瘦羽绒服26DS84096', 'edited query is sent to product search')
+    assert.ok(text(body).includes('测试商品'))
+  } finally { mounted.app.unmount() }
 }
 
 async function main() {

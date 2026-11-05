@@ -8,6 +8,7 @@ const props = defineProps<{ keyword: string }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const id = useId(), router = useRouter(), session = useSessionStore()
+const query = ref(props.keyword.trim())
 const loading = ref(false), error = ref(''), scopeName = ref(''), imageFailed = ref(false)
 const product = ref<XingdouProduct | null>(null)
 let disposed = false
@@ -31,9 +32,11 @@ const facts = computed(() => product.value ? [
 function close() { disposed = true; emit('close') }
 async function search() {
   if (loading.value) return
+  const keyword = query.value.trim()
+  if (!keyword) { error.value = '请输入查询词'; return }
   loading.value = true; error.value = ''; product.value = null; imageFailed.value = false
   try {
-    const result = await productPlatformApi.search(props.keyword)
+    const result = await productPlatformApi.search(keyword)
     if (disposed) return
     product.value = result.product; scopeName.value = result.scope_name
   } catch (cause) {
@@ -57,10 +60,18 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <h2 :id="`${id}-title`" class="text-lg font-semibold">商品查询</h2>
-            <p class="mt-2 break-words text-sm text-base-content/60">查询词：{{ keyword }}</p>
           </div>
           <button class="btn btn-ghost btn-sm btn-square shrink-0" aria-label="关闭商品查询" autofocus @click="close">✕</button>
         </div>
+        <form class="mt-3 flex items-center gap-2" @submit.prevent="search">
+          <span class="label-text shrink-0 whitespace-nowrap text-xs text-base-content/60">查询词</span>
+          <input v-model="query" class="input input-bordered input-sm min-w-0 flex-1" maxlength="200"
+            :disabled="loading" aria-label="商品查询词" />
+          <button type="submit" class="btn btn-primary btn-sm shrink-0" :disabled="loading || !query.trim()">
+            <span v-if="loading" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+            {{ loading ? '查询中…' : '搜索' }}
+          </button>
+        </form>
         <div v-if="loading" role="status" class="py-16 text-center text-sm text-base-content/60">
           <span class="loading loading-spinner loading-md mb-3" aria-hidden="true"></span>
           <p>正在查询商品…</p>
@@ -100,7 +111,7 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
         </template>
         <div v-else role="status" class="py-16 text-center">
           <p class="font-medium">未查询到商品</p>
-          <p class="mt-2 text-sm text-base-content/60">当前范围“{{ scopeName || '合作商品' }}”内暂无匹配结果。</p>
+          <p class="mt-2 text-sm text-base-content/60">当前范围“{{ scopeName || '合作商品' }}”内暂无匹配结果</p>
         </div>
         <div class="modal-action"><button class="btn" @click="close">关闭</button></div>
       </div>

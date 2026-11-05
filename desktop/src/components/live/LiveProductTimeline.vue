@@ -3,7 +3,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { LivePeriodSource, LiveSession, LiveProductPeriod, LiveSplitResult } from "../../services/liveMonitoring";
 import ConfirmPopover from "../ConfirmPopover.vue";
 import LiveIcon from "./LiveIcon.vue";
-import { formatOffset } from "./presentation";
+import { formatOffset, productPeriodColor } from "./presentation";
 import { activeClipJobStates } from "./presentation";
 
 const props = defineProps<{
@@ -20,7 +20,6 @@ const timelineEnd = computed(() => Math.max(props.session.ended ?? now.value, ..
 const frozenTimelineEnd = ref<number | null>(null);
 const displayEnd = computed(() => frozenTimelineEnd.value ?? timelineEnd.value);
 const timelineDuration = computed(() => Math.max(1, displayEnd.value - props.session.started));
-const colors = ["#2563eb", "#0f766e", "#c2410c", "#7c3aed", "#be123c", "#4d7c0f"];
 const selectedColor = computed(() => selected.value ? colorFor(selected.value) : "var(--color-primary)");
 const editing = ref(false);
 const rangeStart = ref(0);
@@ -49,9 +48,7 @@ watch(() => props.session.id, () => { editing.value = false; frozenTimelineEnd.v
 watch(() => props.selectedPeriodId, () => { editing.value = false; frozenTimelineEnd.value = null; frozenCuttableSeconds.value = null; });
 
 function colorFor(period: LiveProductPeriod) {
-  let hash = 0;
-  for (const char of period.promotion_id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return colors[hash % colors.length];
+  return productPeriodColor(period.promotion_id);
 }
 function periodStyle(period: LiveProductPeriod) {
   const left = Math.max(0, (period.started - props.session.started) / timelineDuration.value * 100);

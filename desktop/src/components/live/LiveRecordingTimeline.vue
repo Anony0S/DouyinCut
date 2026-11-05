@@ -125,10 +125,10 @@ function clipsLabel(item: LiveSession) {
       <div class="live-recording-timeline-controls">
         <button type="button" class="btn btn-ghost btn-sm" :disabled="loading"
           aria-label="前一天" @click="previousDay">前一天</button>
-        <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || !date || date >= maxDate"
-          aria-label="后一天" @click="nextDay">后一天</button>
-        <RecordingDatePicker :value="date" :max="maxDate" :disabled="loading"
+          <RecordingDatePicker :value="date" :max="maxDate" :disabled="loading"
           @change="emit('date-change', $event)" />
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || !date || date >= maxDate"
+            aria-label="后一天" @click="nextDay">后一天</button>
         <button type="button" class="btn btn-ghost btn-sm" :disabled="loading || !date"
           aria-label="回到今天" @click="$emit('date-change', '')">回到今天</button>
         <span v-if="loading" role="status" class="live-sr-only">正在读取…</span>

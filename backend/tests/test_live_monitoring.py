@@ -21,6 +21,10 @@ def fake_media_process(args, **_kwargs):
     return Path(args[-1]).write_bytes(b"clip")
 
 
+def fake_video_info(duration_us=5_000_000):
+    return {"duration_us": duration_us, "width": 320, "height": 240, "has_audio": True}
+
+
 class LiveMonitoringTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -677,19 +681,38 @@ class LiveMonitoringTests(unittest.TestCase):
                 calls.append(args)
             return fake_media_process(args, **kwargs)
         with (patch("app.media.processing.run_process", side_effect=write_clip),
-              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
+              patch("app.media.processing.probe", return_value=fake_video_info())):
             result = generate_period_product_clips(self.store, self.settings, queued.json()["payload"])
-        self.assertEqual(result, {"period_id": period_id, "created": 2, "skipped": 0, "failed": 0})
+        self.assertEqual(result, {"period_id": period_id, "created": 1, "skipped": 0, "failed": 0})
         self.assertEqual([(float(a[a.index("-ss")+1]), float(a[a.index("-t")+1])) for a in calls],
                          [(5.0, 15.0), (0.0, 5.0)])
         session = self.live.recording_session(monitor["id"], session_id)
         self.assertEqual({clip["promotion_id"] for clip in session["product_clips"]}, {"p2"})
-        self.assertEqual({clip["segment_id"] for clip in session["product_clips"]}, {first, second})
+        self.assertEqual(len(session["product_clips"]), 1)
+        self.assertEqual({source["clip_id"] for source in next(
+            period for period in session["product_periods"] if period["id"] == period_id
+        )["sources"]}, {session["product_clips"][0]["id"]})
         self.assertTrue(all(segment["splitting"] for segment in session["segments"]))
         with self.store.connection() as conn:
             conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (queued.json()["id"],))
         noop = self.client.post(url, headers=self.headers, json={})
         self.assertEqual(noop.json()["state"], "noop")
+
+    def test_selected_range_crossing_source_boundary_generates_one_video(self):
+        from app.live_monitoring.service import generate_period_product_clips
+        monitor, session_id, _segments = self._two_segment_session("one-selected-video")
+        period_id = self._period_id(session_id, "p2")
+        with self.store.connection() as conn:
+            started = conn.execute("SELECT started FROM live_product_periods WHERE id=?", (period_id,)).fetchone()[0]
+        job = self.live.request_period_product_clips(period_id, [], started + 7, started + 19)
+        with (patch("app.media.processing.run_process", side_effect=fake_media_process),
+              patch("app.media.processing.probe", return_value=fake_video_info(12_000_000))):
+            result = generate_period_product_clips(self.store, self.settings, job["payload"])
+        clips = self.live.recording_session(monitor["id"], session_id)["product_clips"]
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(len(clips), 1)
+        self.assertEqual((clips[0]["start"], clips[0]["end"]), (started + 7, started + 19))
+        self.assertEqual(clips[0]["duration_us"], 12_000_000)
 
     def test_split_accepts_custom_range_inside_one_lecture(self):
         monitor, session_id, _segments = self._two_segment_session("period-range")
@@ -788,7 +811,7 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(response["state"], "noop")
         self.assertIn("至少 1 秒", response["message"])
 
-    def test_failed_piece_is_reported_and_retry_only_generates_that_piece(self):
+    def test_failed_internal_piece_fails_whole_selection_and_retry_generates_one_video(self):
         from app.live_monitoring.service import generate_period_product_clips
         monitor, session_id, _segments = self._two_segment_session("period-retry")
         period_id = self._period_id(session_id, "p2")
@@ -798,16 +821,19 @@ class LiveMonitoringTests(unittest.TestCase):
                 raise RuntimeError("模拟第二个片段失败")
             return fake_media_process(args, **kwargs)
         with (patch("app.media.processing.run_process", side_effect=fail_second_piece),
-              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
-            result = generate_period_product_clips(self.store, self.settings, job["payload"])
-        self.assertEqual((result["created"], result["failed"]), (1, 1))
+              patch("app.media.processing.probe", return_value=fake_video_info())):
+            with self.assertRaisesRegex(RuntimeError, "模拟第二个片段失败"):
+                generate_period_product_clips(self.store, self.settings, job["payload"])
         before = self.live.recording_session(monitor["id"], session_id)["product_clips"]
+        self.assertEqual(len(before), 1)
+        self.assertFalse(Path(before[0]["path"]).exists())
+        self.assertFalse(list(Path(before[0]["path"]).parent.glob(".product-clip-*")))
         failed_clip = next(clip for clip in before if clip["status"] == "failed")
         self.assertIn("模拟第二个片段失败", failed_clip["error"])
         with self.store.connection() as conn:
             conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (job["id"],))
         with (patch("app.media.processing.run_process", side_effect=fake_media_process),
-              patch("app.media.processing.probe", return_value={"duration_us": 5_000_000})):
+              patch("app.media.processing.probe", return_value=fake_video_info())):
             retried = self._generate_test_period(session_id, "p2")
         self.assertEqual(retried["created"], 1)
         after = self.live.recording_session(monitor["id"], session_id)["product_clips"]

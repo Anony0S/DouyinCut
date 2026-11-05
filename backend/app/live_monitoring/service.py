@@ -7,6 +7,7 @@ import math
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -792,7 +793,9 @@ class LiveStore:
                      "recording" if segment["status"] == "recording" else
                      "ready" if segment["status"] in {"completed", "importing", "imported"} else "failed")
             timeline.append((segment, start, end, state))
-        by_period_segment = {(clip["period_id"], clip["segment_id"]): clip for clip in clips}
+        clips_by_period = {}
+        for clip in clips:
+            clips_by_period.setdefault(clip["period_id"], []).append(clip)
         periods = []
         for row in conn.execute("SELECT * FROM live_product_periods WHERE session_id=? ORDER BY started DESC,id DESC",
                                 (session["id"],)):
@@ -803,7 +806,10 @@ class LiveStore:
                 start, stop = max(float(period["started"]), segment_start), min(end, segment_end)
                 if stop <= start:
                     continue
-                clip = by_period_segment.get((period["id"], segment["id"]))
+                # A single output can span multiple internal media files. Reflect
+                # that output on every source it covers, not just its anchor file.
+                clip = next((clip for clip in clips_by_period.get(period["id"], [])
+                             if clip["start"] < stop and clip["end"] > start), None)
                 sources.append({"segment_id": segment["id"], "segment_index": segment["segment_index"],
                                 "state": state, "start": start, "end": stop,
                                 "clip_start": start - segment_start, "clip_end": stop - segment_start,
@@ -1098,7 +1104,7 @@ class LiveStore:
 
 def generate_period_product_clips(store, settings: Settings, payload: dict,
                                  checkpoint=None, progress=None) -> dict:
-    """Generate the frozen sealed pieces of exactly one lecture, one clip per source."""
+    """Render one output for the frozen selection, joining internal source files."""
     from ..media.processing import convert_to_mp4, probe, run_process
 
     live = LiveStore(store)
@@ -1108,9 +1114,11 @@ def generate_period_product_clips(store, settings: Settings, payload: dict,
         if row is None:
             raise ValueError("商品讲解记录已不存在")
         period = dict(row)
-    windows = payload["windows"]
-    created = skipped = failed = 0
-    for index, piece in enumerate(windows):
+    windows = sorted(payload["windows"], key=lambda piece: piece["start"])
+    if not windows:
+        raise ValueError("没有可切分的商品讲解区间")
+    sources = []
+    for piece in windows:
         if checkpoint:
             checkpoint()
         with store.connection() as conn:
@@ -1124,41 +1132,73 @@ def generate_period_product_clips(store, settings: Settings, payload: dict,
             raise ValueError("录制分段不在直播录制目录中，拒绝切分")
         if not original.is_file():
             raise ValueError("对应录制分段文件已不存在")
-        window = {**period, **piece, "abs_start": piece["start"], "abs_end": piece["end"]}
         source = original.with_name(f"{original.stem}_剪辑源.mp4") if original.suffix.lower() == ".ts" else original
-        safe_product = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", window["product_name"]).strip(" ._")[:48]
-        label = safe_product or window["promotion_id"]
-        target = source.parent / f"商品片段_{segment['segment_index']:02d}_{label}_{window['id'][-8:]}.mp4"
-        clip_id = live.begin_segment_product_clip(segment, window, target)
-        if clip_id is None:
-            skipped += 1
-            continue
-        length = window["clip_end"] - window["clip_start"]
-        try:
-            if original.suffix.lower() == ".ts":
-                convert_to_mp4(original, source, settings, checkpoint)
-            run_process([
-                settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                "-i", str(source), "-ss", f"{window['clip_start']:.3f}", "-t", f"{length:.3f}",
-                "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
-                "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
-                "-movflags", "+faststart", "-f", "mp4", str(target),
-            ], checkpoint=checkpoint, timeout=max(300, int(length) + 120))
-            live.finish_segment_product_clip(clip_id, target, probe(target, settings)["duration_us"])
-            created += 1
-        except Exception as exc:
-            live.fail_segment_product_clip(clip_id, f"{type(exc).__name__}: {str(exc)[:800]}")
-            if type(exc).__name__ in {"Paused", "Cancelled"}:
-                raise
-            failed += 1
-            logging.getLogger(__name__).exception(
-                "直播商品片段生成失败 (segment=%s, period=%s)", segment["id"], window["id"]
-            )
+        sources.append((segment, original, source, piece))
+    # The first source anchors the database record; start/end describe the whole
+    # output. Internal pieces are temporary files, never independent clip records.
+    anchor = sources[0][0]
+    window = {**period, "abs_start": windows[0]["start"], "abs_end": windows[-1]["end"]}
+    safe_product = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", period["product_name"]).strip(" ._")[:48]
+    label = safe_product or period["promotion_id"]
+    target = sources[0][2].parent / f"商品片段_{anchor['segment_index']:02d}_{label}_{period['id'][-8:]}.mp4"
+    clip_id = live.begin_segment_product_clip(anchor, window, target)
+    if clip_id is None:
+        return {"period_id": period["id"], "created": 0, "skipped": 1, "failed": 0}
+    try:
+        with tempfile.TemporaryDirectory(prefix=".product-clip-", dir=target.parent) as directory:
+            stage = Path(directory)
+            canvas = None
+            for index, (_segment, original, source, piece) in enumerate(sources):
+                if checkpoint:
+                    checkpoint()
+                if original.suffix.lower() == ".ts":
+                    convert_to_mp4(original, source, settings, checkpoint)
+                length = piece["clip_end"] - piece["clip_start"]
+                args = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                        "-ss", f"{piece['clip_start']:.6f}", "-i", str(source)]
+                if len(sources) > 1:
+                    info = probe(source, settings)
+                    if canvas is None:
+                        canvas = (info["width"] // 2 * 2, info["height"] // 2 * 2)
+                    width, height = canvas
+                    if not info["has_audio"]:
+                        args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+                    args += ["-map", "0:v:0", "-map", "0:a:0" if info["has_audio"] else "1:a:0",
+                             "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30",
+                             "-af", "aresample=48000,apad", "-ar", "48000", "-ac", "2"]
+                else:
+                    args += ["-map", "0:v:0", "-map", "0:a?"]
+                args += ["-t", f"{length:.6f}", "-c:v", "libx264", "-preset", "veryfast",
+                         "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
+                         "-movflags", "+faststart", "-f", "mp4", str(stage / f"{index:04d}.mp4")]
+                run_process(args, checkpoint=checkpoint, timeout=max(300, int(length) + 120))
+                if progress:
+                    progress((index + 1) / (len(sources) + 1))
+            output = stage / "0000.mp4"
+            if len(sources) > 1:
+                concat = stage / "concat.txt"
+                concat.write_text("".join(f"file '{index:04d}.mp4'\n" for index in range(len(sources))), encoding="utf-8")
+                output = stage / "joined.mp4"
+                length = sum(piece["clip_end"] - piece["clip_start"] for piece in windows)
+                run_process([
+                    settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts",
+                    "-f", "concat", "-safe", "1", "-i", str(concat), "-t", f"{length:.6f}",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-ar", "48000", "-ac", "2", "-fps_mode", "cfr",
+                    "-movflags", "+faststart", str(output),
+                ], checkpoint=checkpoint, timeout=max(300, int(length) + 120))
+            duration_us = probe(output, settings)["duration_us"]
+            if checkpoint:
+                checkpoint()
+            output.replace(target)
+            live.finish_segment_product_clip(clip_id, target, duration_us)
         if progress:
-            progress((index + 1) / len(windows))
-    if failed and not created and not skipped:
-        raise RuntimeError(f"{failed} 个商品片段全部生成失败，详见片段错误信息")
-    return {"period_id": period["id"], "created": created, "skipped": skipped, "failed": failed}
+            progress(1)
+    except Exception as exc:
+        live.fail_segment_product_clip(clip_id, f"{type(exc).__name__}: {str(exc)[:800]}")
+        raise
+    return {"period_id": period["id"], "created": 1, "skipped": 0, "failed": 0}
 
 
 class DouyinResolver:

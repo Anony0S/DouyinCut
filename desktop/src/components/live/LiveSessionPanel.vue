@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { duration, seconds } from "../../api";
 import type { LiveSegment, LiveSession, LiveProductPeriod } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
@@ -28,7 +28,7 @@ const props = defineProps<{
 }>();
 const visiblePathKey = ref<string | null>(null);
 const queryProductName = ref("");
-defineEmits<{
+const emit = defineEmits<{
   import: [id: string];
   "import-product-clip": [id: string];
   open: [assetId: string];
@@ -77,6 +77,11 @@ function splitSummary(period: LiveProductPeriod) {
 function clipPeriodTime(periodId: string) {
   const period = props.session.product_periods.find(item => item.id === periodId);
   return period ? `${formatOffset(period.started, props.session.started)} – ${period.ended === null ? "至今" : formatOffset(period.ended, props.session.started)}` : "";
+}
+async function selectClipPeriod(periodId: string) {
+  emit("select-period", periodId);
+  await nextTick();
+  document.getElementById(`live-period-${periodId}`)?.scrollIntoView({ block: "nearest" });
 }
 function productColorStyle(promotionId: string) {
   return { "--period-color": productPeriodColor(promotionId) };
@@ -421,7 +426,14 @@ const filters = computed(() => [
                 </span>
               </div>
               <div class="live-segment-meta items-center">
-                <span v-if="clipPeriodTime(clip.period_id)" class="live-clip-period-time" :style="productColorStyle(clip.promotion_id)">所属讲解 {{ clipPeriodTime(clip.period_id) }}</span>
+                <span v-if="clipPeriodTime(clip.period_id)" class="live-clip-period-time" :style="productColorStyle(clip.promotion_id)">
+                  <button type="button"
+                    class="btn btn-link btn-xs h-auto min-h-0 border-0 p-0 text-xs text-inherit no-underline hover:underline"
+                    :aria-pressed="clip.period_id === selectedPeriodId"
+                    :aria-controls="`live-period-${clip.period_id}`"
+                    title="选中对应讲解并定位到讲解列表"
+                    @click="selectClipPeriod(clip.period_id)">所属讲解 {{ clipPeriodTime(clip.period_id) }}</button>
+                </span>
                 <span>
                   {{ formatOffset(clip.start, session.started) }} –
                   {{ formatOffset(clip.end, session.started) }}

@@ -102,16 +102,20 @@
 .live-product-rail-label > span, .live-product-rail-hint, .live-product-rail-selected-name { color: var(--text-muted); font-size: 12px; }
 .live-product-rail-selected-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-product-rail-range-label { color: var(--live-ink); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.live-product-rail-track { position: relative; height: 24px; margin-top: 2px; border-radius: 4px; }
-.live-product-rail-period { position: absolute; top: 0; height: 24px; min-width: 4px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
-.live-product-rail-period::after { position: absolute; top: 10px; right: 0; left: 0; height: 4px; border-inline: 1px solid var(--period-color); background: var(--period-color); content: ""; }
-.live-product-rail-period:hover::after, .live-product-rail-period:focus-visible::after { top: 8px; height: 8px; box-shadow: 0 0 0 2px color-mix(in oklab, var(--period-color) 30%, transparent); }
+.live-product-rail-track { position: relative; height: 28px; margin-top: 2px; border-radius: 4px; }
+.live-product-rail-period { position: absolute; top: 0; height: 28px; min-width: 4px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
+.live-product-rail-period::after { position: absolute; top: 12px; right: 0; left: 0; height: 4px; border-inline: 1px solid var(--period-color); background: var(--period-color); content: ""; }
+.live-product-rail-period:hover::after, .live-product-rail-period:focus-visible::after { top: 10px; height: 8px; box-shadow: 0 0 0 2px color-mix(in oklab, var(--period-color) 30%, transparent); }
 .live-product-rail-period.is-selected { z-index: 1; }
-.live-product-rail-period.is-selected::after { top: 8px; height: 8px; border: 2px solid var(--period-color); background: transparent; }
-.live-product-range-overlay { position: absolute; top: -5px; height: 34px; z-index: 3; }
-.live-product-range-fill { position: absolute; top: 10px; height: 8px; background: var(--period-color); border: 1px solid color-mix(in oklab, var(--period-color) 55%, var(--color-base-content)); border-radius: 4px; pointer-events: none; }
-.live-product-range-handle { position: absolute; top: 3px; width: 14px; height: 28px; min-height: 0; padding: 0; transform: translateX(-50%); border: 2px solid var(--period-color); border-radius: 5px; background: var(--color-base-100); box-shadow: 0 1px 4px rgb(0 0 0 / 28%); cursor: ew-resize; touch-action: none; }
+.live-product-rail-period.is-selected::after { top: 10px; height: 8px; border: 2px solid var(--period-color); background: transparent; }
+.live-product-range-overlay { position: absolute; top: -3px; height: 34px; z-index: 3; }
+.live-product-range-fill { position: absolute; top: 13px; height: 8px; background: var(--period-color); border: 1px solid color-mix(in oklab, var(--period-color) 55%, var(--color-base-content)); border-radius: 4px; cursor: grab; touch-action: none; }
+.live-product-range-fill:active { cursor: grabbing; }
+.live-product-range-handle { position: absolute; top: 6px; width: 10px; min-width: 10px; height: 22px; min-height: 0; padding: 0; transform: translateX(-50%); border: 2px solid var(--period-color); border-radius: 4px; background: var(--color-base-100); box-shadow: 0 1px 4px rgb(0 0 0 / 28%); cursor: ew-resize; touch-action: none; transition: background-color 100ms ease, box-shadow 100ms ease, transform 100ms ease; }
 .live-product-range-handle:hover, .live-product-range-handle:focus-visible { outline: 2px solid color-mix(in oklab, var(--period-color) 50%, transparent); outline-offset: 2px; }
+.live-product-range-handle.is-snapped { transform: translateX(-50%) scale(1.12); background: var(--period-color); box-shadow: 0 0 0 4px color-mix(in oklab, var(--period-color) 24%, transparent), 0 0 12px color-mix(in oklab, var(--period-color) 72%, transparent); animation: live-product-handle-snap 180ms ease-out; }
+@keyframes live-product-handle-snap { 50% { box-shadow: 0 0 0 7px color-mix(in oklab, var(--period-color) 20%, transparent), 0 0 16px color-mix(in oklab, var(--period-color) 85%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .live-product-range-handle { transition: none; } .live-product-range-handle.is-snapped { animation: none; } }
 .live-product-rail-scale { display: flex; justify-content: space-between; margin-top: 1px; color: var(--text-muted); font: 10px/1.2 Consolas, monospace; font-variant-numeric: tabular-nums; }
 .live-product-rail-note { margin-top: 4px; color: var(--text-muted); font-size: 11px; }
 .live-recording-timeline { flex: none; gap: 12px; padding: 16px 18px 12px; margin-bottom: 16px; min-width: 0; }

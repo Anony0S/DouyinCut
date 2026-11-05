@@ -26,7 +26,14 @@ const rangeStart = ref(0);
 const rangeEnd = ref(0);
 const rangeOverlay = ref<HTMLElement | null>(null);
 const frozenCuttableSeconds = ref<number | null>(null);
-const activeDrag = ref<{ edge: "start" | "end"; pointerId: number } | null>(null);
+const activeDrag = ref<{
+  edge: "start" | "end" | "range";
+  pointerId: number;
+  snapped?: boolean;
+  startX?: number;
+  initialStart?: number;
+  initialEnd?: number;
+} | null>(null);
 const pending = ref(false);
 const missing = ref<LivePeriodSource[]>([]);
 const availableCount = ref(0);
@@ -71,7 +78,7 @@ function choose(period: LiveProductPeriod) {
 function beginSplit() {
   if (!selected.value || cuttableSeconds.value < 1 || splitting.value || props.busy) return;
   rangeStart.value = 0;
-  rangeEnd.value = cuttableSeconds.value;
+  rangeEnd.value = Math.min(cuttableSeconds.value, 20 * 60);
   frozenTimelineEnd.value = timelineEnd.value;
   frozenCuttableSeconds.value = cuttableSeconds.value;
   editing.value = true;
@@ -87,16 +94,51 @@ function updateFromPointer(event: PointerEvent, edge: "start" | "end") {
   const rect = rangeOverlay.value?.getBoundingClientRect();
   if (!rect || rect.width <= 0) return;
   const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-  const value = Math.round(ratio * selectionLimit.value * 10) / 10;
+  let value = Math.round(ratio * selectionLimit.value * 10) / 10;
+  const snapSeconds = Math.max(1, Math.min(45, selectionLimit.value / rect.width * 16));
+  const otherEdge = edge === "start" ? rangeEnd.value : rangeStart.value;
+  const distance = edge === "start" ? otherEdge - value : value - otherEdge;
+  const snappedDuration = Math.round(distance / 300) * 300;
+  const snapValue = edge === "start" ? otherEdge - snappedDuration : otherEdge + snappedDuration;
+  const snapped = snappedDuration >= 300
+    && snapValue >= 0
+    && snapValue <= selectionLimit.value
+    && Math.abs(value - snapValue) <= snapSeconds;
+  activeDrag.value.snapped = snapped;
+  if (snapped) value = snapValue;
   if (edge === "start") setStart(value);
   else setEnd(value);
 }
+function updateRangeFromPointer(event: PointerEvent) {
+  const drag = activeDrag.value;
+  if (drag?.edge !== "range" || drag.pointerId !== event.pointerId) return;
+  const rect = rangeOverlay.value?.getBoundingClientRect();
+  if (!rect || rect.width <= 0) return;
+  const delta = (event.clientX - (drag.startX ?? event.clientX)) / rect.width * selectionLimit.value;
+  const duration = (drag.initialEnd ?? rangeEnd.value) - (drag.initialStart ?? rangeStart.value);
+  const start = Math.max(0, Math.min(selectionLimit.value - duration, (drag.initialStart ?? rangeStart.value) + delta));
+  rangeStart.value = Math.round(start * 10) / 10;
+  rangeEnd.value = Math.round((start + duration) * 10) / 10;
+}
 function startDrag(event: PointerEvent, edge: "start" | "end") {
-  activeDrag.value = { edge, pointerId: event.pointerId };
+  activeDrag.value = {
+    edge,
+    pointerId: event.pointerId,
+  };
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   updateFromPointer(event, edge);
 }
-function endDrag(event: PointerEvent, edge: "start" | "end") {
+function startRangeDrag(event: PointerEvent) {
+  activeDrag.value = {
+    edge: "range",
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    initialStart: rangeStart.value,
+    initialEnd: rangeEnd.value,
+  };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+}
+function endDrag(event: PointerEvent, edge: "start" | "end" | "range") {
   if (activeDrag.value?.edge === edge && activeDrag.value.pointerId === event.pointerId) activeDrag.value = null;
 }
 function keyHandle(event: KeyboardEvent, edge: "start" | "end") {
@@ -170,9 +212,9 @@ async function confirmPartial() {
     <div class="live-product-rail-track" role="group" aria-label="选择商品讲解区间">
       <button v-for="period in periods" :key="period.id" type="button" class="live-product-rail-period" :class="{ 'is-selected': period.id === selectedPeriodId }" :style="periodStyle(period)" :title="(period.product_name || ('商品 ' + period.promotion_id)) + ' · ' + formatOffset(period.started, session.started) + '–' + (period.ended === null ? '至今' : formatOffset(period.ended, session.started))" :aria-label="'选择商品讲解 ' + (period.product_name || period.promotion_id) + '，' + formatOffset(period.started, session.started) + ' 至 ' + (period.ended === null ? '至今' : formatOffset(period.ended, session.started))" :aria-pressed="period.id === selectedPeriodId" @click="choose(period)" />
       <div v-if="editing && selected && cuttableSeconds > 0" ref="rangeOverlay" class="live-product-range-overlay" :style="rangeStyle()">
-        <div class="live-product-range-fill" :style="{ left: (rangeStart / selectionLimit * 100) + '%', width: ((rangeEnd - rangeStart) / selectionLimit * 100) + '%' }" />
-        <button type="button" class="live-product-range-handle" :style="handleStyle('start')" role="slider" tabindex="0" aria-label="切分起点" :aria-valuemin="0" :aria-valuemax="Math.max(0, rangeEnd - 1)" :aria-valuenow="rangeStart" :aria-valuetext="formatOffset(selected.started + rangeStart, session.started)" @pointerdown.prevent="startDrag($event, 'start')" @pointermove="updateFromPointer($event, 'start')" @pointerup="endDrag($event, 'start')" @pointercancel="endDrag($event, 'start')" @lostpointercapture="endDrag($event, 'start')" @keydown="keyHandle($event, 'start')" />
-        <button type="button" class="live-product-range-handle" :style="handleStyle('end')" role="slider" tabindex="0" aria-label="切分终点" :aria-valuemin="rangeStart + 1" :aria-valuemax="selectionLimit" :aria-valuenow="rangeEnd" :aria-valuetext="formatOffset(selected.started + rangeEnd, session.started)" @pointerdown.prevent="startDrag($event, 'end')" @pointermove="updateFromPointer($event, 'end')" @pointerup="endDrag($event, 'end')" @pointercancel="endDrag($event, 'end')" @lostpointercapture="endDrag($event, 'end')" @keydown="keyHandle($event, 'end')" />
+        <div class="live-product-range-fill" :style="{ left: (rangeStart / selectionLimit * 100) + '%', width: ((rangeEnd - rangeStart) / selectionLimit * 100) + '%' }" @pointerdown.prevent="startRangeDrag" @pointermove="updateRangeFromPointer" @pointerup="endDrag($event, 'range')" @pointercancel="endDrag($event, 'range')" @lostpointercapture="endDrag($event, 'range')" />
+        <button type="button" class="live-product-range-handle" :class="{ 'is-snapped': activeDrag?.edge === 'start' && activeDrag.snapped }" :style="handleStyle('start')" role="slider" tabindex="0" aria-label="切分起点" :aria-valuemin="0" :aria-valuemax="Math.max(0, rangeEnd - 1)" :aria-valuenow="rangeStart" :aria-valuetext="formatOffset(selected.started + rangeStart, session.started)" @pointerdown.prevent="startDrag($event, 'start')" @pointermove="updateFromPointer($event, 'start')" @pointerup="endDrag($event, 'start')" @pointercancel="endDrag($event, 'start')" @lostpointercapture="endDrag($event, 'start')" @keydown="keyHandle($event, 'start')" />
+        <button type="button" class="live-product-range-handle" :class="{ 'is-snapped': activeDrag?.edge === 'end' && activeDrag.snapped }" :style="handleStyle('end')" role="slider" tabindex="0" aria-label="切分终点" :aria-valuemin="rangeStart + 1" :aria-valuemax="selectionLimit" :aria-valuenow="rangeEnd" :aria-valuetext="formatOffset(selected.started + rangeEnd, session.started)" @pointerdown.prevent="startDrag($event, 'end')" @pointermove="updateFromPointer($event, 'end')" @pointerup="endDrag($event, 'end')" @pointercancel="endDrag($event, 'end')" @lostpointercapture="endDrag($event, 'end')" @keydown="keyHandle($event, 'end')" />
       </div>
     </div>
     <div class="live-product-rail-scale"><span>00:00</span><span>{{ formatOffset(displayEnd, session.started) }}</span></div>

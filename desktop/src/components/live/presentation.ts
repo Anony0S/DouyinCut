@@ -1,11 +1,10 @@
 import type { LiveMonitor } from '../../services/liveMonitoring'
 
-const productPeriodColors = ['#2563eb', '#0f766e', '#c2410c', '#7c3aed', '#be123c', '#4d7c0f']
-
 export function productPeriodColor(promotionId: string) {
-  let hash = 0
-  for (const char of promotionId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
-  return productPeriodColors[hash % productPeriodColors.length]
+  let hash = 2166136261
+  for (const char of promotionId) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0
+  const hue = hash / 0xffffffff * 360
+  return `hsl(${hue.toFixed(4)} 88% 42%)`
 }
 
 export const segmentNames: Record<string, string> = { recording: '正在写入', completed: '待导入', failed: '文件异常', importing: '正在导入', imported: '已导入' }

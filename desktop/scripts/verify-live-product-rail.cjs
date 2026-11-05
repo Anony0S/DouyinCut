@@ -76,6 +76,9 @@ const load = file => {
 async function verify() {
   const { productPeriodColor } = load(path.join(src, 'components/live/presentation.ts'))
   const expectedColor = productPeriodColor(session.product_periods[0].promotion_id)
+  assert.equal(productPeriodColor('product'), expectedColor, 'a product keeps the same color across views and renders')
+  const distinctColors = new Set(Array.from({ length: 30 }, (_, index) => productPeriodColor(`product-${index}`)))
+  assert.ok(distinctColors.size >= 29, 'many product IDs receive distinct colors without a small repeating palette')
   const { default: Component } = load(path.join(src, 'components/live/LiveProductTimeline.vue'))
   const root = makeNode('root')
   const app = renderer.createApp(Component, {
@@ -126,6 +129,62 @@ async function verify() {
     assert.equal(handles[0].props['aria-valuenow'], 10, 'pointer movement after release does not move the handle')
   } finally {
     app.unmount()
+  }
+
+  const longSession = {
+    id: 'long-session', started: 1000, ended: 5000, status: 'stopped',
+    product_periods: [{
+      id: 'long-period', session_id: 'long-session', promotion_id: 'long-product', product_name: '长视频商品',
+      started: 1000, ended: 4000, mapping_error: '', clip_job: null,
+      sources: [{ segment_id: 'long-segment', segment_index: 1, state: 'ready', start: 1000, end: 4000 }],
+    }],
+  }
+  let submittedRange = null
+  const longRoot = makeNode('root')
+  const longApp = renderer.createApp(Component, {
+    session: longSession, selectedPeriodId: 'long-period', busy: false,
+    onSplit: async (_id, _confirmed, range) => { submittedRange = range; return { state: 'noop', message: 'done' } },
+  })
+  longApp.mount(longRoot)
+  try {
+    await settle()
+    const splitButton = all(longRoot, element => element.type === 'button' && element.props.class?.includes('btn-primary'))[0]
+    await splitButton.props.onClick()
+    await settle()
+    const overlay = all(longRoot, element => element.props.class === 'live-product-range-overlay')[0]
+    const fill = all(overlay, element => element.props.class === 'live-product-range-fill')[0]
+    const handles = all(overlay, element => element.props.role === 'slider')
+    assert.equal(handles[0].props['aria-valuenow'], 0)
+    assert.equal(handles[1].props['aria-valuenow'], 1200, 'long lectures initially select only 20 minutes')
+
+    fill.props.onPointerdown({ currentTarget: fill, pointerId: 3, clientX: 200, preventDefault() {} })
+    fill.props.onPointermove({ pointerId: 3, clientX: 280 })
+    await settle()
+    assert.equal(handles[0].props['aria-valuenow'], 300, 'dragging the selected range moves its start')
+    assert.equal(handles[1].props['aria-valuenow'], 1500, 'dragging the selected range preserves its duration')
+    fill.props.onPointerup({ pointerId: 3 })
+
+    handles[1].props.onPointerdown({ currentTarget: handles[1], pointerId: 4, clientX: 600, preventDefault() {} })
+    handles[1].props.onPointermove({ pointerId: 4, clientX: 653.333 })
+    await settle()
+    assert.equal(handles[1].props['aria-valuenow'], 1700, 'a handle may move away from the previous duration grid when outside the snap zone')
+    handles[1].props.onPointerup({ pointerId: 4 })
+
+    handles[1].props.onPointerdown({ currentTarget: handles[1], pointerId: 5, clientX: 653.333, preventDefault() {} })
+    handles[1].props.onPointermove({ pointerId: 5, clientX: 674.667 })
+    await settle()
+    assert.equal(handles[1].props['aria-valuenow'], 1800, 'the selected duration snaps to a five-minute multiple from the opposite handle')
+    assert.ok(handles[1].props.class.includes('is-snapped'), 'a handle shows a visual state while snapped')
+    handles[1].props.onPointerup({ pointerId: 5 })
+    await settle()
+    assert.equal(handles[1].props.class.includes('is-snapped'), false, 'the visual snap state clears after releasing the handle')
+
+    const confirmButton = all(longRoot, element => element.type === 'button' && element.props.class?.includes('btn-primary'))[0]
+    await confirmButton.props.onClick({ currentTarget: confirmButton, target: confirmButton, preventDefault() {}, stopPropagation() {} })
+    await settle()
+    assert.deepEqual(submittedRange, { start: 1300, end: 2800 }, 'confirmation submits only the selected absolute range')
+  } finally {
+    longApp.unmount()
   }
 
   const sessionPanel = fs.readFileSync(path.join(src, 'components/live/LiveSessionPanel.vue'), 'utf8')

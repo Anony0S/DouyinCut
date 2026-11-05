@@ -416,7 +416,6 @@ const filters = computed(() => [
                 </span>
               </div>
               <div class="live-segment-meta items-center">
-                <span>分段 {{ String(clip.segment_index).padStart(2, "0") }}</span>
                 <span>
                   {{ formatOffset(clip.start, session.started) }} –
                   {{ formatOffset(clip.end, session.started) }}
@@ -526,7 +525,7 @@ const filters = computed(() => [
         <div v-else class="live-card-empty">
           <LiveIcon name="layers" />
           <strong>还没有商品视频片段</strong>
-          <p>在讲解列表中点击“切分商品”，每个来源分段各生成一个片段，原始录制文件保留。</p>
+          <p>在商品讲解轨中选择范围并切分商品；原始录制内容会保留。</p>
         </div>
         <div class="live-card-foot">
           <LiveIcon name="video" />

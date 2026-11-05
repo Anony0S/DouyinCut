@@ -242,7 +242,7 @@ async function record(monitor: LiveMonitor, action: "start" | "stop") {
     session.message =
       action === "start"
         ? "已开始录制"
-        : "已停止录制；正在写入的分段会封存";
+      : "已停止录制；正在完成场次收尾";
     await refresh();
   });
 }
@@ -256,7 +256,7 @@ async function remove(monitor: LiveMonitor) {
 async function importSegment(segmentId: string) {
   await session.act(async () => {
     const result = await liveMonitoringApi.importSegment(segmentId);
-    session.message = "分段已提交导入；完成后可从此处打开视频项目";
+    session.message = "录制文件已提交导入；完成后可从此处打开视频项目";
     await refresh();
     if ("asset_id" in result) await workspace.openProject(result.asset_id);
   });
@@ -278,7 +278,7 @@ async function openClipFile(clipId: string, reveal: boolean) {
 async function openSegmentFile(segmentId: string, reveal: boolean) {
   await session.act(async () => {
     await liveMonitoringApi.openSegment(segmentId, reveal);
-    if (reveal) session.message = "已在文件夹中显示录制分段";
+    if (reveal) session.message = "已在文件夹中显示录制文件";
   });
 }
 async function splitPeriod(periodId: string, confirmedMissingSegmentIds: string[], range?: {start:number; end:number}): Promise<LiveSplitResult> {
@@ -298,8 +298,8 @@ async function deleteSegment(segmentId: string) {
   await session.act(async () => {
     const result = await liveMonitoringApi.deleteSegment(segmentId);
     session.message = result.file_deleted
-      ? "分段及本地录制文件已删除"
-      : "分段已移除；本地文件原已不存在，商品讲解记录保留";
+      ? "录制文件及本地媒体已删除"
+      : "录制文件记录已移除；本地文件原已不存在，商品讲解记录保留";
     await refresh();
   });
 }
@@ -575,7 +575,7 @@ onUnmounted(() => {
         <span class="live-section-kicker">从一场直播开始</span>
         <h2>把直播素材，留给下一条好视频</h2>
         <p>
-          添加抖音直播间，自动监控开播并保存本地分段。
+          添加抖音直播间，自动监控开播并将录制内容保存在本机。
           <br />
           商品讲解与录制内容集中管理，随时导入剪辑。
         </p>

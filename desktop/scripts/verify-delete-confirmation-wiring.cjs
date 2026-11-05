@@ -114,14 +114,13 @@ async function verify() {
     { id: 'i', status: 'imported', product_name: '商品二', promotion_id: 'q' },
     { id: 'busy', status: 'processing', product_name: '生成中', promotion_id: 'r' },
   ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, splitting: true }] }
-  const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, monitorId: 'monitor', busy: false,
+  const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, monitorId: 'monitor', busy: false, selectedPeriodId: '',
     onDelete: async id => calls.push(`/segments/${id}`), onDeleteProductClip: async id => calls.push(`/clips/${id}`),
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
-  await checkConfirmation(panel.root, '删除分段 1', '/segments/seg', '本地录制文件')
+  assert.equal(all(panel.root, el => el.type === 'h3' && text(el) === '录制分段').length, 0, 'internal media chunks are not shown as a recording segment card')
   await checkConfirmation(panel.root, '删除商品片段 商品一', '/clips/c', '本地文件')
   await checkConfirmation(panel.root, '删除商品片段 商品二', '/clips/i', '已导入项目和文件会保留')
-  assert.equal(button(panel.root, '删除分段 2').props.disabled, true)
   assert.equal(button(panel.root, '删除商品片段 生成中'), undefined)
   panel.app.unmount()
 
@@ -129,7 +128,7 @@ async function verify() {
   const retryPanel = await mount('components/live/LiveSessionPanel.vue', {
     session: {...liveSession, status: 'recording', product_listener: {status: 'error', detail: '连接失败', updated: 1},
       product_catalog_error: {detail: {summary: '商品列表获取失败'}, updated: 1}},
-    monitorId: 'monitor', busy: false, onDelete: async () => {}, onDeleteProductClip: async () => {},
+    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDelete: async () => {}, onDeleteProductClip: async () => {},
     onSplit: async () => ({state: 'noop', message: ''}),
     onRetryProductListener: async (monitorId, sessionId) => retryCalls.push([monitorId, sessionId]),
   })
@@ -138,57 +137,11 @@ async function verify() {
   assert.deepEqual(retryCalls, [['monitor', liveSession.id]])
   const noRetry = await mount('components/live/LiveSessionPanel.vue', {
     session: {...liveSession, status: 'recording', product_listener: {status: 'listening', detail: '商品消息连接已建立', updated: 1}, product_catalog_error: null},
-    monitorId: 'monitor', busy: false, onDelete: async () => {}, onDeleteProductClip: async () => {},
+    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDelete: async () => {}, onDeleteProductClip: async () => {},
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   assert.equal(button(noRetry.root, '重试商品连接'), undefined, 'healthy product listener has no manual retry')
   retryPanel.app.unmount(); noRetry.app.unmount()
-
-  const source = (id, index, state = 'ready') => ({segment_id: id, segment_index: index, state, start: 1, end: 10, clip_start: 0, clip_end: 9, clip_status: null, clip_id: null})
-  const lecture = (id, started, ended, sources) => ({id, session_id: 's', promotion_id: 'p', product_name: '同一商品', started, ended, sources, mapping_error: '', clip_job: null})
-  const lectures = [lecture('first', 1, 11, [source('one', 1)]), lecture('current', 21, null, [source('two', 2, 'deleted'), source('three', 3), source('four', 4, 'recording')])]
-  const splitCalls = []
-  let changedMissing = false
-  const lecturePanel = await mount('components/live/LiveSessionPanel.vue', { session: {...liveSession, product_clips: [], product_periods: lectures}, monitorId: 'monitor', busy: false,
-    onDelete: async () => {}, onDeleteProductClip: async () => {},
-    onRetryProductListener: async () => {},
-    onSplit: async (id, confirmed) => {
-      splitCalls.push({id, confirmed})
-      if (id === 'first') return {id:'job-first',state:'queued'}
-      if (!confirmed.length || changedMissing) {
-        const missing = changedMissing ? [source('two', 2, 'deleted'), source('three', 3, 'missing')] : [source('two', 2, 'deleted')]
-        changedMissing = false
-        return {state:'confirmation_required',missing_segments:missing,available_count:1}
-      }
-      return {id:'job-current',state:'queued'}
-    },
-  })
-  const headings = all(lecturePanel.root, el => el.type === 'h3').map(text)
-  assert.deepEqual(headings, ['录制分段','商品讲解','商品视频片段'])
-  assert.ok(!text(lecturePanel.root).includes('场次结束时讲解'))
-  assert.ok(!text(lecturePanel.root).includes('讲解变更'))
-  const lectureRows = all(lecturePanel.root, el => el.type === 'article' && el.props.class?.includes('live-product-event'))
-  assert.equal(lectureRows.length, 2, 'repeated products retain separate lectures')
-  assert.ok(text(lectureRows[0]).includes('正在讲解'), 'current lecture is first')
-  assert.ok(text(lectureRows[0]).includes('分段 02（已删除）'))
-  assert.ok(text(lectureRows[0]).includes('部分待封存'))
-  const recordingCard = all(lecturePanel.root, el => el.type === 'section' && el.props.class?.includes('live-recordings-card'))[0]
-  assert.ok(!all(recordingCard, el => el.type === 'button').some(el => text(el).includes('切分商品')), 'recording rows have no split action')
-  await click(button(lectureRows[1], '切分商品 同一商品'))
-  assert.deepEqual(splitCalls.at(-1), {id:'first',confirmed:[]}, 'initial lecture can be split without a switch event')
-  await click(button(lectureRows[0], '切分商品 同一商品'))
-  assert.ok(text(dialog()).includes('分段 02（已删除）'))
-  await click(button(dialog(), '取消'))
-  assert.deepEqual(splitCalls.at(-1).confirmed, [], 'cancelling does not authorize partial output')
-  await click(button(lectureRows[0], '切分商品 同一商品'))
-  changedMissing = true
-  await click(button(dialog(), '只切可用部分'))
-  assert.ok(dialog(), 'changed missing sources require confirmation again')
-  assert.ok(text(dialog()).includes('分段 03（文件不存在）'))
-  await click(button(dialog(), '只切可用部分'))
-  assert.deepEqual(splitCalls.at(-1), {id:'current',confirmed:['two','three']})
-  assert.equal(dialog(), undefined)
-  lecturePanel.app.unmount()
 
   const timelineSessions = [
     { ...liveSession, id: 'finished', started: 1, ended: 11, status: 'stopped', end_time_source: 'observed',
@@ -205,7 +158,7 @@ async function verify() {
   const deleteSessionButton = all(timeline.root, el => el.type === 'button' && el.props['aria-label']?.startsWith('删除录制场次：'))[0]
   assert.ok(deleteSessionButton, 'selected finished session exposes delete action')
   await click(deleteSessionButton)
-  assert.ok(text(dialog()).includes('未导入录制分段'), 'session confirmation explains recording cleanup')
+  assert.ok(text(dialog()).includes('未导入录制视频文件'), 'session confirmation explains recording cleanup')
   await click(button(dialog(), '取消'))
   assert.equal(calls.at(-1), '/clips/i', 'cancelling session deletion performs no action')
   await click(deleteSessionButton); await click(button(dialog(), '确定删除场次'))
@@ -235,6 +188,6 @@ async function verify() {
   selectedId.value = 'm1'; recording.value = true; await settle()
   assert.equal(button(root, '移除直播间').props.disabled, true)
   app.unmount()
-  console.log('Mounted delete integrations passed: project, plan, clip, monitor, segment, product clips, protected states and error reporting.')
+console.log('Mounted delete integrations passed: project, plan, session, product clips, protected states and error reporting.')
 }
 verify().catch(error => { console.error(error); process.exitCode = 1 })

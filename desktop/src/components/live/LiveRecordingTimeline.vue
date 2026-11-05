@@ -86,7 +86,7 @@ function deleteSession(item: LiveSession | undefined) {
   return item ? props.onDeleteSession(item.id) : Promise.resolve()
 }
 function segmentsLabel(item: LiveSession) {
-  return `${item.segments.filter(segment => segment.status !== 'imported').length} 个未导入录制分段`
+  return `${item.segments.filter(segment => segment.status !== 'imported').length} 个未导入录制视频文件`
 }
 function clipsLabel(item: LiveSession) {
   return `${item.product_clips.filter(clip => clip.status !== 'imported').length} 个未导入商品片段`

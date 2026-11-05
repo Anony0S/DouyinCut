@@ -187,7 +187,7 @@ async function verify() {
     assert.ok(text(root).includes('讲解-当前'))
     await click(historical)
     assert.ok(text(root).includes('讲解-历史'), 'click switches product explanation')
-    assert.match(text(root), /分段\s+07/, 'click switches recording segments')
+    assert.equal(all(root, el => el.type === 'h3' && text(el) === '录制分段').length, 0, 'session selection does not expose an internal media chunk card')
     assert.ok(text(root).includes('片段-历史'), 'click switches product clips')
     assert.ok(!text(root).includes('片段-当前'), 'previous session content is replaced')
   } finally { app.unmount(); clockNow = fixedNow }
@@ -319,7 +319,7 @@ async function verify() {
     await settle()
     assert.ok(text(preserved.root).includes('窗口外已更新'), 'polling retains and updates the selected session from the previous day')
     assert.ok(text(preserved.root).includes('片段-移出窗口'), 'all three cards continue showing the retained session')
-    assert.match(text(preserved.root), /分段\s+17/)
+    assert.equal(all(preserved.root, el => el.type === 'h3' && text(el) === '录制分段').length, 0, 'retained session detail does not show an internal media chunk card')
     assert.ok(text(preserved.root).includes('所选场次已不在当前时间范围内'))
     assert.ok(text(timelineSummary(preserved.root)).includes('2 小时'), 'the retained selection keeps its summary even without a bar in the window')
     assert.equal(lastWindow.get('window_start'), '1792771200', 'today advances at midnight while the selection stays pinned')
@@ -438,7 +438,7 @@ async function verifyDenseSessions() {
       await click(choices()[i])
       assert.ok(text(root).includes(`讲解-短场-${i + 1}`), 'each adjacent short session selects its own explanation')
       assert.ok(text(root).includes(`片段-短场-${i + 1}`))
-      assert.match(text(root), new RegExp(`分段\\s+${String(i + 1).padStart(2, '0')}`))
+      assert.equal(all(root, el => el.type === 'h3' && text(el) === '录制分段').length, 0, 'short session selection never exposes internal media chunk details')
       assert.equal(choices()[i].props['aria-pressed'], true)
     }
   } finally { app.unmount() }

@@ -272,7 +272,7 @@ onUnmounted(closeSettings);
         </span>
         <span>
           <LiveIcon name="video" />
-          每 20 分钟封存，原文件保存在本机
+          录制内容保存在本机
         </span>
         <span>
           <LiveIcon name="settings" />

@@ -240,7 +240,7 @@ async function saveDouyinCookie() {
     secrets.value.douyin_cookie = true;
     secretPreviews.value.douyin_cookie = result.preview;
     session.message =
-      "抖音登录 Cookie 已保存到应用设置；停止并恢复监控后生效，当前录制分段会先封存";
+      "抖音登录 Cookie 已保存到应用设置；停止并恢复监控后生效，当前场次会先完成收尾";
   });
 }
 

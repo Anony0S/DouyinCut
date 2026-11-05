@@ -41,7 +41,7 @@ const cuttableSeconds = computed(() => {
 });
 const selectionLimit = computed(() => frozenCuttableSeconds.value ?? cuttableSeconds.value);
 const splitting = computed(() => Boolean(selected.value?.clip_job && activeClipJobStates.has(selected.value.clip_job.state)));
-const splitMessage = computed(() => missing.value.map(source => "媒体块 " + String(source.segment_index).padStart(2, "0") + "（" + (source.state === "deleted" ? "已删除" : source.state === "missing" ? "文件不存在" : "文件异常") + "）").join("、") + "不可用。本次只能处理其余 " + availableCount.value + " 个已封存来源，生成结果不完整。是否继续？");
+const splitMessage = computed(() => missing.value.map(source => "录制文件 " + String(source.segment_index).padStart(2, "0") + "（" + (source.state === "deleted" ? "已删除" : source.state === "missing" ? "文件不存在" : "文件异常") + "）").join("、") + "不可用。本次只能处理其余 " + availableCount.value + " 个已封存来源，生成结果不完整。是否继续？");
 let disposed = false;
 const clock = setInterval(() => { now.value = Date.now() / 1000; }, 1000);
 onUnmounted(() => { disposed = true; clearInterval(clock); });
@@ -160,7 +160,7 @@ async function confirmPartial() {
         </button>
         <template v-else>
           <span class="live-product-rail-range-label">{{ formatOffset(selected.started + rangeStart, session.started) }}–{{ formatOffset(selected.started + rangeEnd, session.started) }} · {{ Math.floor(selectedDuration / 60) }}分{{ Math.floor(selectedDuration % 60) }}秒</span>
-          <ConfirmPopover title="部分媒体块不可用" :message="splitMessage" confirm-label="只切可用部分" confirm-color="neutral" :confirm-action="confirmPartial" :disabled="busy || splitting" v-slot="{ open, expanded, popoverId }">
+          <ConfirmPopover title="部分录制文件不可用" :message="splitMessage" confirm-label="只切可用部分" confirm-color="neutral" :confirm-action="confirmPartial" :disabled="busy || splitting" v-slot="{ open, expanded, popoverId }">
             <button type="button" class="btn btn-primary btn-sm" :disabled="busy || pending || splitting" :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog" @click="submit([], open, $event)">
               <LiveIcon :name="pending ? 'refresh' : 'check'" :class="{ 'is-spinning': pending }" />{{ pending ? "检查来源…" : "确认切分" }}
             </button>

@@ -1,0 +1,235 @@
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from app.core.config import Settings
+from app.core.storage import Store
+from app.douyin_product_events.protocol import ProductChangeEvent
+from app.live_monitoring import LiveMonitorWorker, LiveStore
+from app.live_monitoring.catalog import ProductCatalogRefresher
+
+
+class LiveProductCatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.settings = Settings(Path(self.temp.name))
+        self.settings.prepare()
+        self.store = Store(self.settings.database)
+        self.live = LiveStore(self.store)
+        self.monitor = self.live.create_monitor("https://live.douyin.com/catalog-a", "A")
+        self.session_id = self.live.start_session(self.monitor["id"], Path(self.temp.name) / "a")
+        self.now = 1000
+
+    def refresher(self, *, monitor=None, session_id=None, resolver=None, force=False):
+        resolver = resolver or Mock(lookup_catalog=Mock(return_value=({}, None)))
+        refresher = ProductCatalogRefresher(
+            self.live, (monitor or self.monitor)["id"], session_id or self.session_id,
+            resolver, threading.Event(), force=force, clock=lambda: self.now,
+        )
+        self.addCleanup(refresher.close)
+        return refresher
+
+    def wait_for_refresh(self, refresher):
+        self.assertIsNotNone(refresher.future)
+        refresher.future.result(timeout=5)
+
+    def test_first_fetch_then_reuse_across_sessions_and_restart_including_empty_catalog(self):
+        first = self.refresher()
+        first.tick()
+        self.wait_for_refresh(first)
+        first.resolver.lookup_catalog.assert_called_once()
+        self.assertIsNotNone(self.live.product_catalog_state(self.monitor["id"])["fetched"])
+        self.now += 10000
+        first.tick()
+        first.resolver.lookup_catalog.assert_called_once()
+
+        self.live.stop_session(self.monitor["id"], self.session_id)
+        session_id = self.live.start_session(self.monitor["id"], Path(self.temp.name) / "a2")
+        reopened_store = LiveStore(Store(self.settings.database))
+        self.assertIsNotNone(reopened_store.product_catalog_state(self.monitor["id"])["fetched"])
+        second = self.refresher(session_id=session_id)
+        second.tick()
+        second.resolver.lookup_catalog.assert_not_called()
+        self.assertIsNone(self.live.recording_session(self.monitor["id"], session_id)["current_product"])
+
+    def test_rooms_are_isolated_and_deleting_session_retains_room_catalog(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"shared": "A 的商品"})
+        other = self.live.create_monitor("https://live.douyin.com/catalog-b", "B")
+        other_session = self.live.start_session(other["id"], Path(self.temp.name) / "b")
+        self.assertEqual(self.live.product_name(other["id"], "shared"), "")
+        resolver = Mock(lookup_catalog=Mock(return_value=({"shared": "B 的商品"}, None)))
+        other_refresh = self.refresher(monitor=other, session_id=other_session, resolver=resolver)
+        other_refresh.tick()
+        self.wait_for_refresh(other_refresh)
+        self.assertEqual(self.live.product_name(self.monitor["id"], "shared"), "A 的商品")
+        self.assertEqual(self.live.product_name(other["id"], "shared"), "B 的商品")
+        self.live.stop_session(self.monitor["id"], self.session_id)
+        self.live.delete_session(self.monitor["id"], self.session_id, self.settings.data_dir / "recordings" / "live")
+        self.assertEqual(self.live.product_name(self.monitor["id"], "shared"), "A 的商品")
+        self.live.delete_monitor(self.monitor["id"])
+        self.assertIsNone(self.live.product_catalog_state(self.monitor["id"])["fetched"])
+        self.assertEqual(self.live.product_name(other["id"], "shared"), "B 的商品")
+
+    def test_unknown_ids_during_refresh_share_one_request_and_backfill_names(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def fetch():
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return {"new": "新商品"}, None
+
+        resolver = Mock(lookup_catalog=Mock(side_effect=fetch))
+        refresher = self.refresher(resolver=resolver)
+        # Always release the fake HTTP call before executor cleanup on failure.
+        self.addCleanup(release.set)
+        refresher.tick()
+        self.assertTrue(entered.wait(5))
+        self.live.record_product_event(self.session_id, event_key="unknown:new", promotion_id="new")
+        for product_id in ("new", "missing", "new", "missing"):
+            refresher.request_missing(product_id)
+        self.live.set_product_listener_state(self.session_id, "listening")
+        self.live.set_product_catalog_error(self.session_id, {"summary": "上一轮失败"})
+        self.live.request_product_listener_retry(self.monitor["id"], self.session_id)
+        self.live.take_product_listener_retries()
+        refresher.request_refresh()
+        refresher.on_listening()
+        with self.assertRaisesRegex(ValueError, "正在重试"):
+            self.live.request_product_listener_retry(self.monitor["id"], self.session_id)
+        release.set()
+        self.wait_for_refresh(refresher)
+        resolver.lookup_catalog.assert_called_once()
+        events = self.live.recording_session(self.monitor["id"], self.session_id)["product_events"]
+        self.assertEqual(events[0]["product_name"], "新商品")
+        self.assertEqual(self.live.product_catalog_state(self.monitor["id"])["misses"], {"missing": 1300})
+        self.assertEqual(self.live.recording_session(self.monitor["id"], self.session_id)["product_listener"]["status"],
+                         "listening")
+        # A delayed worker dispatch of a request made during that refresh also reuses its result.
+        refresher.request_refresh(requested_at=1000)
+        resolver.lookup_catalog.assert_called_once()
+
+    def test_automatic_requests_wait_sixty_seconds_and_merge_pending_ids(self):
+        resolver = Mock(lookup_catalog=Mock(side_effect=[({}, None), ({"p1": "一", "p2": "二"}, None)]))
+        refresher = self.refresher(resolver=resolver)
+        refresher.tick()
+        self.wait_for_refresh(refresher)
+        self.now = 1010
+        refresher.request_missing("p1")
+        refresher.request_missing("p2")
+        refresher.tick()
+        resolver.lookup_catalog.assert_called_once()
+        self.now = 1059
+        refresher.tick()
+        resolver.lookup_catalog.assert_called_once()
+        self.now = 1060
+        refresher.tick()
+        self.wait_for_refresh(refresher)
+        self.assertEqual(resolver.lookup_catalog.call_count, 2)
+        self.assertEqual(self.live.product_name(self.monitor["id"], "p2"), "二")
+        self.now = 10000
+        refresher.tick()
+        self.assertEqual(resolver.lookup_catalog.call_count, 2, "idle time must never poll the catalog")
+
+    def test_missing_id_cooldown_survives_reconnect_and_needs_new_message_after_five_minutes(self):
+        self.live.replace_monitor_products(self.monitor["id"], {})
+        first = self.refresher()
+        first.request_missing("missing")
+        self.wait_for_refresh(first)
+        second = self.refresher()
+        self.now = 1100
+        second.request_missing("missing")
+        second.resolver.lookup_catalog.assert_not_called()
+        self.now = 1300
+        second.tick()
+        second.resolver.lookup_catalog.assert_not_called()
+        second.request_missing("missing")
+        self.wait_for_refresh(second)
+        second.resolver.lookup_catalog.assert_called_once()
+
+    def test_failure_keeps_previous_catalog_and_manual_retry_bypasses_cooldown(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"old": "旧目录"})
+        resolver = Mock(lookup_catalog=Mock(side_effect=[RuntimeError("网络失败"), ({"new": "新目录"}, None)]))
+        refresher = self.refresher(resolver=resolver)
+        refresher.request_missing("new")
+        self.wait_for_refresh(refresher)
+        self.assertEqual(self.live.product_name(self.monitor["id"], "old"), "旧目录")
+        self.assertIsNotNone(self.live.recording_session(self.monitor["id"], self.session_id)["product_catalog_error"])
+        self.now = 1001
+        refresher.request_missing("new")
+        resolver.lookup_catalog.assert_called_once()
+        self.live.set_product_listener_state(self.session_id, "listening")
+        self.live.request_product_listener_retry(self.monitor["id"], self.session_id)
+        request = self.live.take_product_listener_retries()[0]
+        self.assertEqual((request["reconnect"], request["refresh_catalog"]), (0, 1))
+        with patch.object(LiveMonitorWorker, "_recover_interrupted_sessions"):
+            worker = LiveMonitorWorker(self.settings, resolver=object())
+        worker.product_catalogs[self.monitor["id"]] = refresher
+        with patch.object(worker, "_start_python_product_listener") as reconnect:
+            # Submit the same request through the real worker path.
+            self.live.set_product_listener_state(self.session_id, "listening")
+            self.live.request_product_listener_retry(self.monitor["id"], self.session_id)
+            worker._process_product_listener_retries()
+        self.wait_for_refresh(refresher)
+        reconnect.assert_not_called()
+        self.assertEqual(resolver.lookup_catalog.call_count, 2)
+        result = self.live.recording_session(self.monitor["id"], self.session_id)
+        self.assertIsNone(result["product_catalog_error"])
+        self.assertEqual(result["product_listener"]["status"], "listening")
+
+    def run_listener(self, resolver, events=(), *, force=False):
+        stop = threading.Event()
+        prepared = SimpleNamespace(room=SimpleNamespace(room_id="room"), user_agent="test", cookie="")
+        with patch.object(LiveMonitorWorker, "_recover_interrupted_sessions"):
+            worker = LiveMonitorWorker(self.settings, resolver=object())
+        test = self
+
+        class Client:
+            def __init__(self, on_event, on_current_product, on_state, **_kwargs):
+                self.current, self.state = on_current_product, on_state
+
+            def start_prepared(self, _session):
+                self.state("listening", "")
+                for event in events:
+                    self.current(event)
+                catalog = worker.product_catalogs[test.monitor["id"]]
+                if catalog.future is not None:
+                    catalog.future.result(timeout=5)
+                stop.set()
+
+            def stop(self):
+                pass
+
+        with patch("app.douyin_product_events.DouyinWebcastSessionPreparer") as preparer, \
+             patch("app.douyin_product_events.DouyinProductEventClient", Client), \
+             patch("app.douyin_product_events.promotions.DouyinPromotionNameResolver", return_value=resolver):
+            preparer.return_value.prepare.return_value = prepared
+            worker._run_python_product_listener(
+                self.monitor["id"], self.session_id, self.monitor["url"], stop, refresh_catalog=force,
+            )
+
+    def test_cached_catalog_and_known_message_connect_without_http_or_reusing_old_current_product(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"known": "已知商品"})
+        self.live.set_current_product(self.session_id, promotion_id="old", event_time=1, received_at=1)
+        self.live.stop_session(self.monitor["id"], self.session_id)
+        self.session_id = self.live.start_session(self.monitor["id"], Path(self.temp.name) / "next")
+        resolver = Mock()
+        self.run_listener(resolver)
+        resolver.lookup_catalog.assert_not_called()
+        self.assertIsNone(self.live.recording_session(self.monitor["id"], self.session_id)["current_product"])
+        event = ProductChangeEvent(1, 2000, 2000, "known", None, None, "live_shopping")
+        self.run_listener(resolver, [event])
+        resolver.lookup_catalog.assert_not_called()
+        current = self.live.recording_session(self.monitor["id"], self.session_id)["current_product"]
+        self.assertEqual((current["promotion_id"], current["product_name"]), ("known", "已知商品"))
+
+    def test_explicit_catalog_retry_fetches_even_with_cached_directory(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"old": "旧目录"})
+        resolver = Mock(lookup_catalog=Mock(return_value=({"new": "新目录"}, ("new", "新目录"))))
+        self.run_listener(resolver, force=True)
+        resolver.lookup_catalog.assert_called_once()
+        self.assertEqual(self.live.product_name(self.monitor["id"], "new"), "新目录")
+        self.assertIsNone(self.live.recording_session(self.monitor["id"], self.session_id)["current_product"],
+                          "refreshing a reused directory cannot invent a current product")

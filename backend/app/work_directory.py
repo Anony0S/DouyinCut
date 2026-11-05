@@ -34,9 +34,12 @@ REQUIRED_COLUMNS = {
                                   'size_bytes', 'duration_us', 'asset_id', 'import_job_id', 'error'},
     'live_monitor_liveness': {'monitor_id', 'is_live', 'checked'},
     'live_session_current_product': {'session_id', 'promotion_id', 'product_name', 'event_time', 'received_at'},
-    'live_session_products': {'session_id', 'promotion_id', 'product_name', 'updated_at'},
+    'live_monitor_products': {'monitor_id', 'promotion_id', 'product_name', 'updated_at'},
+    'live_monitor_product_catalog': {'monitor_id', 'fetched', 'attempted'},
+    'live_monitor_product_misses': {'monitor_id', 'promotion_id', 'retry_at'},
     'live_session_product_catalog_state': {'session_id', 'error_detail', 'updated'},
     'live_product_listener_state': {'session_id', 'status', 'detail', 'updated'},
+    'live_product_listener_retries': {'session_id', 'monitor_id', 'requested', 'refresh_catalog', 'reconnect'},
 }
 
 

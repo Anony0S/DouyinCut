@@ -1,9 +1,9 @@
 import type { LiveMonitor } from '../../services/liveMonitoring'
 
 export const segmentNames: Record<string, string> = { recording: '正在写入', completed: '待导入', failed: '文件异常', importing: '正在导入', imported: '已导入' }
-export const listenerNames: Record<string, string> = { preparing: '准备连接', connecting: '正在连接', listening: '商品连接正常', error: '商品连接中断', stopped: '已停止' }
+export const listenerNames: Record<string, string> = { preparing: '准备连接', connecting: '正在连接', listening: '商品消息连接已建立', retrying: '正在重试', error: '商品连接中断', stopped: '已停止' }
 export const segmentBadgeClasses: Record<string, string> = { completed: 'badge-soft badge-info', recording: 'badge-soft badge-error', failed: 'badge-soft badge-error', importing: 'badge-soft badge-warning', imported: 'badge-soft badge-success' }
-export const listenerBadgeClasses: Record<string, string> = { preparing: 'badge-soft badge-warning', connecting: 'badge-soft badge-info', listening: 'badge-soft badge-success', error: 'badge-soft badge-error', stopped: 'badge-soft badge-neutral' }
+export const listenerBadgeClasses: Record<string, string> = { preparing: 'badge-soft badge-warning', connecting: 'badge-soft badge-info', listening: 'badge-soft badge-success', retrying: 'badge-soft badge-warning', error: 'badge-soft badge-error', stopped: 'badge-soft badge-neutral' }
 export const clipNames: Record<string, string> = { processing: '生成中', completed: '待导入', failed: '生成失败', importing: '导入中', imported: '已导入' }
 export const clipBadgeClasses: Record<string, string> = { processing: 'badge-soft badge-neutral', completed: 'badge-soft badge-info', failed: 'badge-soft badge-error', importing: 'badge-soft badge-warning', imported: 'badge-soft badge-success' }
 

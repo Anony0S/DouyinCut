@@ -114,9 +114,9 @@ async function verify() {
     { id: 'i', status: 'imported', product_name: '商品二', promotion_id: 'q' },
     { id: 'busy', status: 'processing', product_name: '生成中', promotion_id: 'r' },
   ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, splitting: true }] }
-  const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, busy: false,
+  const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, monitorId: 'monitor', busy: false,
     onDelete: async id => calls.push(`/segments/${id}`), onDeleteProductClip: async id => calls.push(`/clips/${id}`),
-    onSplit: async () => ({state: 'noop', message: ''}),
+    onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   await checkConfirmation(panel.root, '删除分段 1', '/segments/seg', '本地录制文件')
   await checkConfirmation(panel.root, '删除商品片段 商品一', '/clips/c', '本地文件')
@@ -125,13 +125,33 @@ async function verify() {
   assert.equal(button(panel.root, '删除商品片段 生成中'), undefined)
   panel.app.unmount()
 
+  const retryCalls = []
+  const retryPanel = await mount('components/live/LiveSessionPanel.vue', {
+    session: {...liveSession, status: 'recording', product_listener: {status: 'error', detail: '连接失败', updated: 1},
+      product_catalog_error: {detail: {summary: '商品列表获取失败'}, updated: 1}},
+    monitorId: 'monitor', busy: false, onDelete: async () => {}, onDeleteProductClip: async () => {},
+    onSplit: async () => ({state: 'noop', message: ''}),
+    onRetryProductListener: async (monitorId, sessionId) => retryCalls.push([monitorId, sessionId]),
+  })
+  assert.ok(text(retryPanel.root).includes('商品消息连接已建立') === false, 'error state does not show the connected label')
+  await click(button(retryPanel.root, '重试商品连接'))
+  assert.deepEqual(retryCalls, [['monitor', liveSession.id]])
+  const noRetry = await mount('components/live/LiveSessionPanel.vue', {
+    session: {...liveSession, status: 'recording', product_listener: {status: 'listening', detail: '商品消息连接已建立', updated: 1}, product_catalog_error: null},
+    monitorId: 'monitor', busy: false, onDelete: async () => {}, onDeleteProductClip: async () => {},
+    onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
+  })
+  assert.equal(button(noRetry.root, '重试商品连接'), undefined, 'healthy product listener has no manual retry')
+  retryPanel.app.unmount(); noRetry.app.unmount()
+
   const source = (id, index, state = 'ready') => ({segment_id: id, segment_index: index, state, start: 1, end: 10, clip_start: 0, clip_end: 9, clip_status: null, clip_id: null})
   const lecture = (id, started, ended, sources) => ({id, session_id: 's', promotion_id: 'p', product_name: '同一商品', started, ended, sources, mapping_error: '', clip_job: null})
   const lectures = [lecture('first', 1, 11, [source('one', 1)]), lecture('current', 21, null, [source('two', 2, 'deleted'), source('three', 3), source('four', 4, 'recording')])]
   const splitCalls = []
   let changedMissing = false
-  const lecturePanel = await mount('components/live/LiveSessionPanel.vue', { session: {...liveSession, product_clips: [], product_periods: lectures}, busy: false,
+  const lecturePanel = await mount('components/live/LiveSessionPanel.vue', { session: {...liveSession, product_clips: [], product_periods: lectures}, monitorId: 'monitor', busy: false,
     onDelete: async () => {}, onDeleteProductClip: async () => {},
+    onRetryProductListener: async () => {},
     onSplit: async (id, confirmed) => {
       splitCalls.push({id, confirmed})
       if (id === 'first') return {id:'job-first',state:'queued'}
@@ -169,6 +189,37 @@ async function verify() {
   assert.deepEqual(splitCalls.at(-1), {id:'current',confirmed:['two','three']})
   assert.equal(dialog(), undefined)
   lecturePanel.app.unmount()
+
+  const timelineSessions = [
+    { ...liveSession, id: 'finished', started: 1, ended: 11, status: 'stopped', end_time_source: 'observed',
+      segments: [{ id: 'timeline-segment', status: 'completed', segment_index: 1, size_bytes: 2048 }],
+      product_clips: [{ id: 'timeline-clip', status: 'completed', product_name: '商品一', size_bytes: 1024 }] },
+    { ...liveSession, id: 'recording', started: 21, ended: null, status: 'recording', end_time_source: null },
+  ]
+  const timeline = await mount('components/live/LiveRecordingTimeline.vue', {
+    sessions: timelineSessions, selectedId: 'finished', selectedSession: timelineSessions[0],
+    start: 0, end: 86400, now: 30, date: '', maxDate: '2026-11-05', loading: false, busy: false,
+    label: '今天 · 2026-11-05 · 00:00–24:00', emptyMessage: '今天无录制',
+    onDeleteSession: async id => calls.push(`/sessions/${id}`),
+  })
+  const deleteSessionButton = all(timeline.root, el => el.type === 'button' && el.props['aria-label']?.startsWith('删除录制场次：'))[0]
+  assert.ok(deleteSessionButton, 'selected finished session exposes delete action')
+  await click(deleteSessionButton)
+  assert.ok(text(dialog()).includes('未导入录制分段'), 'session confirmation explains recording cleanup')
+  await click(button(dialog(), '取消'))
+  assert.equal(calls.at(-1), '/clips/i', 'cancelling session deletion performs no action')
+  await click(deleteSessionButton); await click(button(dialog(), '确定删除场次'))
+  assert.equal(calls.at(-1), '/sessions/finished')
+  timeline.app.unmount()
+  const activeTimeline = await mount('components/live/LiveRecordingTimeline.vue', {
+    sessions: [timelineSessions[1]], selectedId: 'recording', selectedSession: timelineSessions[1],
+    start: 0, end: 86400, now: 30, date: '', maxDate: '2026-11-05', loading: false, busy: false,
+    label: '今天 · 2026-11-05 · 00:00–24:00', emptyMessage: '今天无录制',
+    onDeleteSession: async id => calls.push(`/sessions/${id}`),
+  })
+  const activeDelete = all(activeTimeline.root, el => el.type === 'button' && el.props['aria-label']?.startsWith('删除录制场次：'))[0]
+  assert.equal(activeDelete.props.disabled, true, 'recording session delete action is disabled')
+  activeTimeline.app.unmount()
 
   const monitors = ['m1', 'm2'].map(id => ({ id, name: id, url: 'https://live.douyin.com/1', sessions: [], live_state: 'idle' }))
   const selectedId = vue.ref('m1'), recording = vue.ref(false)

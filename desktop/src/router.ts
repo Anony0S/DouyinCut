@@ -14,7 +14,7 @@ import LiveMonitoringView from './views/LiveMonitoringView.vue'
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHashHistory()) {
   const session=useSessionStore(pinia),project=useProjectStore(pinia)
   const router=createRouter({history,routes:[
-    {path:'/',redirect:'/projects'},
+    {path:'/',redirect:'/live-monitoring'},
     {path:'/projects',name:'projects',component:ProjectsView},
     {path:'/projects/:id/edit',name:'workspace',component:WorkspaceView},
     {path:'/live-monitoring',name:'live-monitoring',component:LiveMonitoringView},
@@ -22,7 +22,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
     {path:'/appearance',name:'appearance',component:AppearanceView},
     {path:'/settings',name:'settings',component:SettingsView},
     {path:'/local-settings',name:'local-settings',component:LocalSettingsView},
-    {path:'/:pathMatch(.*)*',redirect:'/projects'},
+    {path:'/:pathMatch(.*)*',redirect:'/live-monitoring'},
   ],scrollBehavior:(_to,_from,saved)=>saved || {left:0,top:0}})
   let navigation=0
   router.beforeEach(async(to,from)=>{

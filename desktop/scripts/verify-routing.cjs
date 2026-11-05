@@ -52,6 +52,8 @@ async function travel(router,delta) {
 }
 async function verify() {
   const env=environment(),{router,project,list,session,workspace,loaded}=env
+  await router.push('/');await router.isReady()
+  assert.equal(router.currentRoute.value.name,'live-monitoring','Startup opens live monitoring')
   await router.push('/projects?page=2&search=奶黄&status=completed');await router.isReady()
   assert.equal(session.connected,true)
   await workspace.refresh()
@@ -127,7 +129,7 @@ async function verify() {
   await reopened.workspace.refresh()
   assert.equal(reopened.router.currentRoute.value.query.page,'3','Server page clamping updates the URL')
   await reopened.router.push('/unknown-url')
-  assert.equal(reopened.router.currentRoute.value.name,'projects')
+  assert.equal(reopened.router.currentRoute.value.name,'live-monitoring')
   assert.ok(!requests.some(r=>['/assets','/plans','/candidates','/exports'].includes(r.url)))
   console.log('Router/Pinia checks passed: deep links, query/history restore, draft/save guards, cancellation, isolation and no cloud submission.')
 }

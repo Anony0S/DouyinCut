@@ -8,7 +8,6 @@ import re
 import subprocess
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -20,6 +19,7 @@ from pydantic import Field
 from ..core.config import Settings
 from ..core.domain import Model, new_id
 from ..core.storage import Store
+from .catalog import ProductCatalogRefresher
 
 SEGMENT_SECONDS = 1200
 POLL_SECONDS = 20
@@ -130,11 +130,20 @@ class LiveStore:
                     received_at REAL NOT NULL,
                     FOREIGN KEY(session_id) REFERENCES live_sessions(id)
                 );
-                CREATE TABLE IF NOT EXISTS live_session_products (
-                    session_id TEXT NOT NULL, promotion_id TEXT NOT NULL,
+                CREATE TABLE IF NOT EXISTS live_monitor_products (
+                    monitor_id TEXT NOT NULL, promotion_id TEXT NOT NULL,
                     product_name TEXT NOT NULL, updated_at REAL NOT NULL,
-                    PRIMARY KEY(session_id,promotion_id),
-                    FOREIGN KEY(session_id) REFERENCES live_sessions(id)
+                    PRIMARY KEY(monitor_id,promotion_id),
+                    FOREIGN KEY(monitor_id) REFERENCES live_monitors(id)
+                );
+                CREATE TABLE IF NOT EXISTS live_monitor_product_catalog (
+                    monitor_id TEXT PRIMARY KEY, fetched REAL, attempted REAL,
+                    FOREIGN KEY(monitor_id) REFERENCES live_monitors(id)
+                );
+                CREATE TABLE IF NOT EXISTS live_monitor_product_misses (
+                    monitor_id TEXT NOT NULL, promotion_id TEXT NOT NULL, retry_at REAL NOT NULL,
+                    PRIMARY KEY(monitor_id,promotion_id),
+                    FOREIGN KEY(monitor_id) REFERENCES live_monitors(id)
                 );
                 CREATE TABLE IF NOT EXISTS live_session_product_catalog_state (
                     session_id TEXT PRIMARY KEY, error_detail TEXT NOT NULL DEFAULT '',
@@ -144,6 +153,11 @@ class LiveStore:
                 CREATE TABLE IF NOT EXISTS live_product_listener_state (
                     session_id TEXT PRIMARY KEY, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
                     updated REAL NOT NULL,
+                    FOREIGN KEY(session_id) REFERENCES live_sessions(id)
+                );
+                CREATE TABLE IF NOT EXISTS live_product_listener_retries (
+                    session_id TEXT PRIMARY KEY, monitor_id TEXT NOT NULL, requested REAL NOT NULL,
+                    refresh_catalog INTEGER NOT NULL, reconnect INTEGER NOT NULL,
                     FOREIGN KEY(session_id) REFERENCES live_sessions(id)
                 );
                 CREATE INDEX IF NOT EXISTS live_sessions_monitor ON live_sessions(monitor_id,started DESC);
@@ -231,6 +245,149 @@ class LiveStore:
             row = conn.execute("SELECT * FROM live_sessions WHERE monitor_id=? AND id=?",
                                (monitor_id, session_id)).fetchone()
             return self._session_detail(conn, row) if row is not None else None
+
+    def delete_session(self, monitor_id: str, session_id: str, recordings_root: Path):
+        recordings_root = recordings_root.resolve()
+        with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            session = conn.execute(
+                "SELECT * FROM live_sessions WHERE monitor_id=? AND id=?", (monitor_id, session_id)
+            ).fetchone()
+            if session is None:
+                raise KeyError(session_id)
+            if session["status"] == "recording":
+                raise ValueError("录制中的场次不能删除，请先停止录制并等待文件封存")
+
+            segments = conn.execute(
+                "SELECT * FROM live_segments WHERE session_id=?", (session_id,)
+            ).fetchall()
+            clips = conn.execute(
+                "SELECT * FROM live_segment_product_clips WHERE session_id=?", (session_id,)
+            ).fetchall()
+            active = conn.execute(
+                "SELECT 1 FROM jobs WHERE state IN (" + ",".join("?" for _ in ACTIVE_JOB_STATES) + ") AND ("
+                "(kind=? AND json_extract(payload,'$.session_id')=?) OR "
+                "(kind='import' AND (json_extract(payload,'$.live_segment_id') IN "
+                "(SELECT id FROM live_segments WHERE session_id=?) OR "
+                "json_extract(payload,'$.live_product_clip_id') IN "
+                "(SELECT id FROM live_segment_product_clips WHERE session_id=?)))) LIMIT 1",
+                (*ACTIVE_JOB_STATES, PRODUCT_CLIP_JOB, session_id, session_id, session_id),
+            ).fetchone()
+            if active or any(row["status"] in {"recording", "importing"} for row in segments) \
+                    or any(row["status"] in {"processing", "importing"} for row in clips):
+                raise ValueError("该场次仍有录制、导入或商品片段任务，请完成或取消后再删除")
+
+            session_dir = (recordings_root / monitor_id / session_id).resolve()
+            if not session_dir.is_relative_to(recordings_root):
+                raise ValueError("场次目录不在直播录制目录中，拒绝删除")
+            normalize_path = lambda value: os.path.normcase(str(Path(value).resolve()))
+            referenced = {
+                normalize_path(row[0]) for row in conn.execute(
+                    "SELECT json_extract(body,'$.path') FROM objects WHERE kind='asset'"
+                ).fetchall() if row[0]
+            }
+            retained = set(referenced)
+            retained.update(normalize_path(row["path"]) for row in segments if row["status"] == "imported")
+            retained.update(normalize_path(row["path"]) for row in clips if row["status"] == "imported")
+            files = []
+            if session_dir.exists():
+                if not session_dir.is_dir():
+                    raise ValueError("场次路径不是目录，拒绝删除")
+                for path in session_dir.rglob("*"):
+                    if path.is_symlink():
+                        continue
+                    if path.is_file():
+                        resolved = normalize_path(path)
+                        if resolved in retained:
+                            continue
+                        files.append(path)
+
+            deleted_bytes = 0
+            for path in files:
+                deleted_bytes += path.stat().st_size
+                path.unlink()
+            for directory in sorted(
+                (path for path in session_dir.rglob("*") if path.is_dir() and not path.is_symlink()),
+                key=lambda path: len(path.parts), reverse=True,
+            ) if session_dir.exists() else ():
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            if session_dir.exists():
+                try:
+                    session_dir.rmdir()
+                except OSError:
+                    pass
+
+            conn.execute("DELETE FROM live_segments WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_segment_product_clips WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_product_periods WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_product_events WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_session_current_product WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_session_product_catalog_state WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_product_listener_state WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_product_listener_retries WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_sessions WHERE id=?", (session_id,))
+            conn.execute("UPDATE live_monitors SET current_session_id=NULL WHERE id=? AND current_session_id=?",
+                         (monitor_id, session_id))
+
+        return {
+            "deleted_session_id": session_id,
+            "deleted_segments": len(segments),
+            "deleted_product_clips": len(clips),
+            "deleted_files": len(files),
+            "bytes_reclaimed": deleted_bytes,
+            "retained_files": len(retained.intersection(
+                normalize_path(path) for path in session_dir.rglob("*") if path.is_file()
+            )) if session_dir.exists() else 0,
+        }
+
+    def request_product_listener_retry(self, monitor_id: str, session_id: str):
+        with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            session = conn.execute(
+                "SELECT status FROM live_sessions WHERE id=? AND monitor_id=?", (session_id, monitor_id)
+            ).fetchone()
+            if session is None:
+                raise KeyError(session_id)
+            if session["status"] != "recording":
+                raise ValueError("只有录制中的场次可以重试商品连接")
+            listener = conn.execute(
+                "SELECT status FROM live_product_listener_state WHERE session_id=?", (session_id,)
+            ).fetchone()
+            catalog_error = conn.execute(
+                "SELECT 1 FROM live_session_product_catalog_state WHERE session_id=?", (session_id,)
+            ).fetchone()
+            queued = conn.execute("SELECT 1 FROM live_product_listener_retries WHERE session_id=?",
+                                  (session_id,)).fetchone()
+            if queued or (listener and listener["status"] == "retrying"):
+                raise ValueError("商品连接正在重试，请稍候")
+            if not catalog_error and (not listener or listener["status"] != "error"):
+                raise ValueError("当前商品连接没有可重试的错误")
+            now = time.time()
+            conn.execute(
+                "INSERT INTO live_product_listener_retries "
+                "(session_id,monitor_id,requested,refresh_catalog,reconnect) VALUES(?,?,?,?,?)",
+                (session_id, monitor_id, now, int(bool(catalog_error)),
+                 int(not listener or listener["status"] != "listening")),
+            )
+            conn.execute(
+                "INSERT INTO live_product_listener_state(session_id,status,detail,updated) VALUES(?,?,?,?) "
+                "ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,detail=excluded.detail,updated=excluded.updated",
+                (session_id, "retrying", "正在重试商品连接或刷新商品列表", now),
+            )
+        return {"session_id": session_id, "state": "retrying"}
+
+    def take_product_listener_retries(self):
+        with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            requests = [dict(row) for row in conn.execute(
+                "SELECT session_id,monitor_id,requested,refresh_catalog,reconnect "
+                "FROM live_product_listener_retries ORDER BY requested"
+            ).fetchall()]
+            conn.execute("DELETE FROM live_product_listener_retries")
+        return requests
 
     @staticmethod
     def _session_detail(conn, session):
@@ -322,29 +479,60 @@ class LiveStore:
                 (product_name, session_id, str(promotion_id)),
             )
 
-    def product_name(self, session_id: str, promotion_id: str) -> str:
+    def product_name(self, monitor_id: str, promotion_id: str) -> str:
         with self.store.connection() as conn:
             row = conn.execute(
-                "SELECT product_name FROM live_session_products WHERE session_id=? AND promotion_id=?",
-                (session_id, str(promotion_id)),
+                "SELECT product_name FROM live_monitor_products WHERE monitor_id=? AND promotion_id=?",
+                (monitor_id, str(promotion_id)),
             ).fetchone()
         return row["product_name"] if row else ""
 
-    def replace_session_products(self, session_id: str, products: dict[str, str]):
+    def product_catalog_state(self, monitor_id: str):
+        with self.store.connection() as conn:
+            row = conn.execute("SELECT fetched,attempted FROM live_monitor_product_catalog WHERE monitor_id=?",
+                               (monitor_id,)).fetchone()
+            misses = {row["promotion_id"]: row["retry_at"] for row in conn.execute(
+                "SELECT promotion_id,retry_at FROM live_monitor_product_misses WHERE monitor_id=?", (monitor_id,)
+            )}
+        return {"fetched": row["fetched"] if row else None,
+                "attempted": row["attempted"] if row else None, "misses": misses}
+
+    def mark_product_catalog_attempt(self, monitor_id: str, now: float):
+        with self.store.connection() as conn:
+            conn.execute("INSERT INTO live_monitor_product_catalog(monitor_id,attempted) VALUES(?,?) "
+                         "ON CONFLICT(monitor_id) DO UPDATE SET attempted=excluded.attempted", (monitor_id, now))
+
+    def defer_missing_products(self, monitor_id: str, products: set[str], retry_at: float):
+        with self.store.connection() as conn:
+            conn.executemany("INSERT INTO live_monitor_product_misses(monitor_id,promotion_id,retry_at) VALUES(?,?,?) "
+                             "ON CONFLICT(monitor_id,promotion_id) DO UPDATE SET retry_at=excluded.retry_at",
+                             [(monitor_id, product_id, retry_at) for product_id in products])
+
+    def finish_product_listener_retry(self, session_id: str):
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_product_listener_state SET status='listening',detail=?,updated=? "
+                         "WHERE session_id=? AND status='retrying'",
+                         ("商品消息连接已建立", time.time(), session_id))
+
+    def replace_monitor_products(self, monitor_id: str, products: dict[str, str]):
         rows = [
-            (session_id, str(promotion_id).strip(), str(name).strip()[:500])
+            (monitor_id, str(promotion_id).strip(), str(name).strip()[:500])
             for promotion_id, name in products.items()
             if str(promotion_id).strip() and str(name).strip()
         ]
         now = time.time()
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute("DELETE FROM live_session_products WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_monitor_products WHERE monitor_id=?", (monitor_id,))
             conn.executemany(
-                "INSERT INTO live_session_products(session_id,promotion_id,product_name,updated_at) "
+                "INSERT INTO live_monitor_products(monitor_id,promotion_id,product_name,updated_at) "
                 "VALUES(?,?,?,?)",
-                [(sid, promotion_id, name, now) for sid, promotion_id, name in rows],
+                [(mid, promotion_id, name, now) for mid, promotion_id, name in rows],
             )
+            conn.execute("INSERT INTO live_monitor_product_catalog(monitor_id,fetched) VALUES(?,?) "
+                         "ON CONFLICT(monitor_id) DO UPDATE SET fetched=excluded.fetched", (monitor_id, now))
+            conn.executemany("DELETE FROM live_monitor_product_misses WHERE monitor_id=? AND promotion_id=?",
+                             [(monitor_id, product_id) for _, product_id, _ in rows])
         return len(rows)
 
     def set_product_catalog_error(self, session_id: str, detail: dict | None):
@@ -484,12 +672,14 @@ class LiveStore:
                          (monitor_id,))
             conn.execute("DELETE FROM live_session_current_product WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
                          (monitor_id,))
-            conn.execute("DELETE FROM live_session_products WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
-                         (monitor_id,))
+            conn.execute("DELETE FROM live_monitor_products WHERE monitor_id=?", (monitor_id,))
+            conn.execute("DELETE FROM live_monitor_product_catalog WHERE monitor_id=?", (monitor_id,))
+            conn.execute("DELETE FROM live_monitor_product_misses WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_session_product_catalog_state WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
                          (monitor_id,))
             conn.execute("DELETE FROM live_product_listener_state WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
                          (monitor_id,))
+            conn.execute("DELETE FROM live_product_listener_retries WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_sessions WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_monitor_liveness WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_monitor_controls WHERE monitor_id=?", (monitor_id,))
@@ -985,6 +1175,7 @@ class LiveMonitorWorker:
         self.processes: dict[str, tuple[subprocess.Popen, str]] = {}
         self.product_threads: dict[str, tuple[threading.Thread, threading.Event, str]] = {}
         self.product_clients: dict[str, object] = {}
+        self.product_catalogs: dict[str, ProductCatalogRefresher] = {}
         self.last_check: dict[str, float] = {}
         self.seen_controls: dict[str, float] = {}
         # Rooms already announced for the current broadcast; cleared when a room is seen offline.
@@ -1054,9 +1245,9 @@ class LiveMonitorWorker:
         self._start_python_product_listener(monitor, session_id)
 
     def _stop_product_listener(self, monitor_id: str):
-        managed = self.product_threads.pop(monitor_id, None)
+        managed = self.product_threads.get(monitor_id)
         if managed is None:
-            return
+            return True
         thread, stop_event, session_id = managed
         stop_event.set()
         client = self.product_clients.get(monitor_id)
@@ -1064,23 +1255,57 @@ class LiveMonitorWorker:
             client.stop()
         if thread.is_alive():
             thread.join(timeout=10)
+        if thread.is_alive():
+            return False
+        self.product_threads.pop(monitor_id, None)
         self.live.set_product_listener_state(session_id, "stopped")
+        return True
 
-    def _start_python_product_listener(self, monitor: dict, session_id: str):
-        self._stop_product_listener(monitor["id"])
+    def _start_python_product_listener(self, monitor: dict, session_id: str, *, refresh_catalog: bool = False):
+        if not self._stop_product_listener(monitor["id"]):
+            raise RuntimeError("旧商品连接尚未结束，请稍后重试")
         stop_event = threading.Event()
         self.live.set_product_listener_state(session_id, "preparing", "正在准备 Python 商品消息连接")
         thread = threading.Thread(
             target=self._run_python_product_listener,
             args=(monitor["id"], session_id, monitor["url"], stop_event),
+            kwargs={"refresh_catalog": refresh_catalog},
             name=f"douyin-products-{monitor['id']}",
             daemon=True,
         )
         self.product_threads[monitor["id"]] = (thread, stop_event, session_id)
         thread.start()
 
+    def _process_product_listener_retries(self):
+        for request in self.live.take_product_listener_retries():
+            try:
+                monitor = self.live.monitor(request["monitor_id"])
+            except KeyError:
+                continue
+            session_id = request["session_id"]
+            if monitor["current_session_id"] != session_id:
+                continue
+            with self.store.connection() as conn:
+                active = conn.execute(
+                    "SELECT 1 FROM live_sessions WHERE id=? AND monitor_id=? AND status='recording'",
+                    (session_id, monitor["id"]),
+                ).fetchone()
+            if not active:
+                continue
+            try:
+                catalog = self.product_catalogs.get(monitor["id"])
+                if not request["reconnect"] and catalog is not None:
+                    catalog.request_refresh(requested_at=request["requested"])
+                else:
+                    self._start_python_product_listener(
+                        monitor, session_id, refresh_catalog=bool(request["refresh_catalog"])
+                    )
+            except Exception as exc:
+                detail = f"商品监听重试失败：{type(exc).__name__}"
+                self.live.set_product_listener_state(session_id, "error", detail)
+
     def _run_python_product_listener(self, monitor_id: str, session_id: str,
-                                     room_url: str, stop_event: threading.Event):
+                                     room_url: str, stop_event: threading.Event, *, refresh_catalog: bool = False):
         from ..douyin_product_events import DouyinProductEventClient, DouyinWebcastSessionPreparer
         from ..douyin_product_events.promotions import DouyinPromotionNameResolver
 
@@ -1108,109 +1333,43 @@ class LiveMonitorWorker:
             return
 
         self.live.set_product_listener_state(session_id, "connecting", "正在连接 Python 商品消息流")
-        name_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="douyin-product-name")
         resolver = DouyinPromotionNameResolver(
             session.room, session.user_agent, session.cookie, timeout=8
         )
-        catalog_lock = threading.Lock()
-        pending_product_ids: set[str] = set()
-        checked_product_ids: set[str] = set()
-        refresh_running = True
-
-        def refresh_catalog(include_current: bool = False):
-            requested_at = time.time()
-            names, current = resolver.lookup_catalog()
-            self.live.replace_session_products(session_id, names)
-            self.live.set_product_catalog_error(session_id, None)
-            if include_current and current is not None:
-                promotion_id, title = current
-                self.live.set_current_product(
-                    session_id, promotion_id=promotion_id,
-                    event_time=requested_at, received_at=requested_at,
-                    product_name=title or names.get(promotion_id, ""),
-                )
-            return names
-
-        def run_catalog_refresh(include_current: bool = False):
-            nonlocal refresh_running
-            names = {}
-            try:
-                names = refresh_catalog(include_current)
-            except Exception as exc:
-                detail = getattr(exc, "detail", None) or {
-                    "summary": "抖音商品列表获取失败",
-                    "stage": "catalog_refresh",
-                    "reason": f"{type(exc).__name__}: {str(exc)[:1000]}",
-                }
-                self.live.set_product_catalog_error(session_id, detail)
-                logging.getLogger(__name__).debug(
-                    "直播间商品列表刷新失败 (%s)", type(exc).__name__
-                )
-            while True:
-                with catalog_lock:
-                    pending = set(pending_product_ids)
-                    pending_product_ids.clear()
-                    if not pending:
-                        refresh_running = False
-                        return
-                unresolved = pending.difference(names)
-                for promotion_id in pending.difference(unresolved):
-                    self.live.update_product_name(
-                        session_id, promotion_id, names[promotion_id]
-                    )
-                if unresolved:
-                    try:
-                        names = refresh_catalog()
-                    except Exception as exc:
-                        detail = getattr(exc, "detail", None) or {
-                            "summary": "抖音商品列表获取失败",
-                            "stage": "catalog_refresh",
-                            "reason": f"{type(exc).__name__}: {str(exc)[:1000]}",
-                        }
-                        self.live.set_product_catalog_error(session_id, detail)
-                        logging.getLogger(__name__).debug(
-                            "直播间商品列表刷新失败 (%s)", type(exc).__name__
-                        )
-                    for promotion_id in unresolved:
-                        product_name = names.get(promotion_id, "")
-                        if product_name:
-                            self.live.update_product_name(
-                                session_id, promotion_id, product_name
-                            )
-
-        def schedule_catalog_refresh(promotion_id: str):
-            nonlocal refresh_running
-            with catalog_lock:
-                if promotion_id in checked_product_ids:
-                    return
-                checked_product_ids.add(promotion_id)
-                pending_product_ids.add(promotion_id)
-                if refresh_running:
-                    return
-                refresh_running = True
-            name_executor.submit(run_catalog_refresh)
+        catalog = ProductCatalogRefresher(
+            self.live, monitor_id, session_id, resolver, stop_event, force=refresh_catalog
+        )
+        self.product_catalogs[monitor_id] = catalog
 
         def on_state(state: str, detail: str):
+            if stop_event.is_set():
+                return
             if state == "listening":
-                self.live.set_product_listener_state(session_id, "listening", "Python 商品消息连接已建立")
+                catalog.on_listening()
             elif state in {"error", "disconnected"}:
                 safe_detail = detail if state == "disconnected" else "WebSocket 客户端连接异常"
                 message = f"Python 商品 WebSocket 连接异常：{safe_detail[:200]}"
                 self.live.set_product_listener_state(session_id, "error", message)
 
+        def on_product_observed(promotion_id: str):
+            if not stop_event.is_set() and not self.live.product_name(monitor_id, promotion_id):
+                catalog.request_missing(promotion_id)
+
         def on_current_product(event):
-            product_name = self.live.product_name(session_id, event.promotion_id)
+            if stop_event.is_set():
+                return ""
+            product_name = self.live.product_name(monitor_id, event.promotion_id)
             self.live.set_current_product(
                 session_id, promotion_id=event.promotion_id,
                 event_time=event.event_time, received_at=event.received_at,
                 product_name=product_name,
             )
             if not product_name:
-                schedule_catalog_refresh(event.promotion_id)
+                catalog.request_missing(event.promotion_id)
             return product_name
 
         def on_event(event):
-            if event.source != "live_shopping":
+            if stop_event.is_set() or event.source != "live_shopping":
                 return
             product_name = on_current_product(event)
             key = f"live-shopping:{event.message_id}:{event.promotion_id}"
@@ -1220,17 +1379,23 @@ class LiveMonitorWorker:
                 explain_type=event.explain_type, event_time=event.event_time,
                 received_at=event.received_at, source="python_live_shopping",
             )
+            if not product_name:
+                # A fast catalog response may have finished before this event was inserted.
+                self.live.update_product_name(
+                    session_id, event.promotion_id, self.live.product_name(monitor_id, event.promotion_id)
+                )
 
         try:
-            # Load the complete room catalog and active product before relying on a change event.
-            name_executor.submit(run_catalog_refresh, True)
+            catalog.tick()
             client = DouyinProductEventClient(
                 on_event, on_current_product=on_current_product,
+                on_product_observed=on_product_observed,
                 on_state=on_state, include_samples=False,
             )
             self.product_clients[monitor_id] = client
             client.start_prepared(session)
             while not stop_event.wait(0.5):
+                catalog.tick()
                 websocket_thread = getattr(client, "_thread", None)
                 if websocket_thread is not None and not websocket_thread.is_alive():
                     failed = True
@@ -1242,9 +1407,13 @@ class LiveMonitorWorker:
             detail = f"Python 商品监听启动失败：{type(exc).__name__}"
             self.live.set_product_listener_state(session_id, "error", detail)
         finally:
-            name_executor.shutdown(wait=True, cancel_futures=True)
+            stop_event.set()
+            catalog.close()
             resolver.close()
-            self.product_clients.pop(monitor_id, None)
+            if self.product_catalogs.get(monitor_id) is catalog:
+                self.product_catalogs.pop(monitor_id, None)
+            if self.product_clients.get(monitor_id) is client:
+                self.product_clients.pop(monitor_id, None)
             if client is not None:
                 client.stop()
             if stop_event.is_set() and not failed:
@@ -1344,6 +1513,7 @@ class LiveMonitorWorker:
 
     def run_once(self, now: float | None = None, stop: threading.Event | None = None):
         now = now or time.time()
+        self._process_product_listener_retries()
         for monitor in self.live.all_monitors():
             if stop and stop.is_set():
                 break

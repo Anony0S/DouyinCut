@@ -23,11 +23,13 @@ class DouyinProductEventClient:
 
     def __init__(self, on_event: Callable[[ProductChangeEvent], None], *,
                  on_current_product: Callable[[ProductChangeEvent], None] | None = None,
+                 on_product_observed: Callable[[str], None] | None = None,
                  on_state: Callable[[str, str], None] | None = None,
                  cookie: str = "", user_agent: str | None = None,
                  include_samples: bool = True):
         self.on_event = on_event
         self.on_current_product = on_current_product or (lambda _event: None)
+        self.on_product_observed = on_product_observed or (lambda _product_id: None)
         self.on_state = on_state or (lambda _state, _detail: None)
         self.cookie = cookie
         self.user_agent = user_agent or (
@@ -154,6 +156,8 @@ class DouyinProductEventClient:
         self._thread.start()
 
     def _observe_live_shopping_product(self, event: ProductChangeEvent, live_pop_product_ids: set[str]):
+        # Repeated IDs can retry a missing name after its cooldown, without recording a switch.
+        self.on_product_observed(event.promotion_id)
         if event.received_at > self._pending_live_shopping_deadline:
             self._pending_live_shopping_event = None
 

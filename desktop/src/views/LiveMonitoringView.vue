@@ -306,6 +306,24 @@ async function deleteProductClip(clipId: string) {
     await refresh();
   });
 }
+async function deleteSession(sessionId: string) {
+  const monitorId = selectedMonitor.value?.id;
+  if (!monitorId) return;
+  await session.act(async () => {
+    const result = await liveMonitoringApi.deleteSession(monitorId, sessionId);
+    session.message = result.deleted_files
+      ? `场次已删除，清理 ${result.deleted_files} 个未导入文件`
+      : "场次已删除；已导入项目及其素材保留";
+    await refresh();
+  });
+}
+async function retryProductListener(monitorId: string, sessionId: string) {
+  await session.act(async () => {
+    await liveMonitoringApi.retryProductListener(monitorId, sessionId);
+    session.message = "已提交商品连接重试；录制不会中断";
+    await refresh();
+  });
+}
 onMounted(() => {
   void refresh();
   timer = setInterval(() => {
@@ -488,11 +506,13 @@ onUnmounted(() => {
           :start="recordingWindow.start"
           :end="recordingWindow.end"
           :now="currentTime"
+          :busy="busy"
           :date="selectedDate"
           :max-date="latestSelectableDate"
           :loading="dateLoading"
           :label="windowLabel"
           :empty-message="emptyMessage"
+          :on-delete-session="deleteSession"
           @date-change="changeDate"
           @select="selectSession" />
         <div v-if="selectionOutsideWindow" role="status"
@@ -505,12 +525,14 @@ onUnmounted(() => {
           v-if="selectedSession"
           :key="selectedSession.id"
           :session="selectedSession"
+          :monitor-id="selectedMonitor.id"
           :busy="busy"
           @import="importSegment"
           @import-product-clip="importProductClip"
           @open="workspace.openProject"
           :on-delete="deleteSegment"
           :on-delete-product-clip="deleteProductClip"
+          :on-retry-product-listener="retryProductListener"
           :on-split="splitPeriod"
           @open-file="openClipFile"
           @open-segment-file="openSegmentFile" />

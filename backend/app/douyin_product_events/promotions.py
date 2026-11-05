@@ -137,7 +137,6 @@ class DouyinPromotionNameResolver:
     def _fetch_page(self, offset: int, limit: int):
         failures = []
         for attempt in range(1, PROMOTIONS_REQUEST_ATTEMPTS + 1):
-            self._wait_for_request_slot()
             try:
                 result = self._fetch_page_once(offset, limit)
                 result[-1]["attempts"] = attempt
@@ -193,6 +192,7 @@ class DouyinPromotionNameResolver:
                 headers["x-secsdk-csrf-token"] = csrf_token
         request_url = f"{PROMOTIONS_PAGE_ENDPOINT}?{query}&a_bogus={signature}"
         try:
+            self._wait_for_request_slot()
             response = self._client.post(request_url, content=b"", headers=headers)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:

@@ -106,8 +106,8 @@ async function verifyLectureButton() {
   const session = { id: 'session', status: 'ended', started: 1000, ended: 1040, end_time_source: 'observed', segments: [],
     product_clips: [], product_periods: [period, { ...period, id: 'lecture-b', product_name: '   ' }],
     current_product: null, product_events: [], product_listener: null, product_catalog_error: null }
-  const mounted = await mount('components/live/LiveSessionPanel.vue', { session, busy: false,
-    onDelete: async () => {}, onDeleteProductClip: async () => {}, onSplit: async () => {}, })
+  const mounted = await mount('components/live/LiveSessionPanel.vue', { session, monitorId: 'monitor', busy: false,
+    onDelete: async () => {}, onDeleteProductClip: async () => {}, onSplit: async () => {}, onRetryProductListener: async () => {}, })
   try {
     const actions = all(mounted.root, el => el.type === 'button' && text(el).trim() === '查询商品')
     assert.equal(actions.length, 2)

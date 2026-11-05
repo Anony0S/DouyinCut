@@ -151,6 +151,71 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(missing.status_code, 200)
         self.assertIsNone(missing.json(), "only a successful absence response confirms removal")
 
+    def test_delete_session_rejects_recording_and_active_jobs(self):
+        monitor, session_id, segment_ids = self._two_segment_session("delete-session-guards")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_sessions SET status='recording',ended=NULL WHERE id=?", (session_id,))
+        url = f"/api/v1/live/monitors/{monitor['id']}/sessions/{session_id}"
+        recording = self.client.delete(url, headers=self.headers)
+        self.assertEqual(recording.status_code, 409, recording.text)
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_sessions SET status='stopped',ended=? WHERE id=?", (100, session_id))
+            conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
+                         ("active-session-import", "import", json.dumps({"live_segment_id": segment_ids[0]}), 1, 1))
+        active = self.client.delete(url, headers=self.headers)
+        self.assertEqual(active.status_code, 409, active.text)
+        listed_segment = next(segment for segment in self.live.recording_session(monitor["id"], session_id)["segments"]
+                              if segment["id"] == segment_ids[0])
+        self.assertTrue(Path(listed_segment["path"]).exists())
+
+    def test_delete_session_cleans_unimported_files_and_retains_project_assets(self):
+        monitor, session_id, (first_segment, second_segment) = self._two_segment_session("delete-session-files")
+        with (
+            patch("app.media.processing.run_process", side_effect=fake_media_process),
+            patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
+        ):
+            self._generate_test_period(session_id)
+        session = self.live.recording_session(monitor["id"], session_id)
+        segment_paths = {segment["id"]: Path(segment["path"]) for segment in session["segments"]}
+        segment_path = segment_paths[first_segment]
+        second_path = segment_paths[second_segment]
+        clip = session["product_clips"][0]
+        clip_path = Path(clip["path"])
+        segment_asset = {"id": "asset-session-segment", "path": str(segment_path)}
+        clip_asset = {"id": "asset-session-clip", "path": str(clip_path)}
+        self.store.put("asset", segment_asset)
+        self.store.put("asset", clip_asset)
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET status='imported',asset_id=? WHERE id=?",
+                         (segment_asset["id"], first_segment))
+            conn.execute("UPDATE live_segment_product_clips SET status='imported',asset_id=? WHERE id=?",
+                         (clip_asset["id"], clip["id"]))
+        log = segment_path.parent / "ffmpeg.log"
+        log.write_bytes(b"session log")
+
+        url = f"/api/v1/live/monitors/{monitor['id']}/sessions/{session_id}"
+        deleted = self.client.delete(url, headers=self.headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        result = deleted.json()
+        self.assertEqual(result["deleted_session_id"], session_id)
+        self.assertEqual(result["deleted_segments"], 2)
+        self.assertGreaterEqual(result["deleted_product_clips"], 1)
+        self.assertGreaterEqual(result["deleted_files"], 2)
+        self.assertGreater(result["bytes_reclaimed"], 0)
+        self.assertTrue(segment_path.exists(), "an imported segment source remains available to its project")
+        self.assertTrue(clip_path.exists(), "an imported product clip remains available to its project")
+        self.assertFalse(second_path.exists(), "unimported recording segments are deleted")
+        self.assertFalse(log.exists(), "session-owned logs are cleaned up")
+        self.assertIsNone(self.live.recording_session(monitor["id"], session_id))
+        with self.store.connection() as conn:
+            for table in ("live_segments", "live_segment_product_clips", "live_product_periods",
+                          "live_product_events", "live_session_current_product",
+                          "live_session_product_catalog_state", "live_product_listener_state"):
+                self.assertEqual(conn.execute(f"SELECT count(*) FROM {table} WHERE session_id=?",
+                                              (session_id,)).fetchone()[0], 0, table)
+        self.assertEqual(self.store.get("asset", segment_asset["id"])["path"], str(segment_path))
+        self.assertEqual(self.store.get("asset", clip_asset["id"])["path"], str(clip_path))
+
     def test_recording_end_time_source_distinguishes_recovery_from_observed_failures(self):
         monitor = self.live.create_monitor("https://live.douyin.com/recovery-source", "结束时间来源")
         with patch("app.live_monitoring.service.time.time", return_value=1000):
@@ -435,20 +500,20 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(sorted(event["product_name"] for event in events),
                          ["", "接口商品标题", "用户确认名称"])
 
-    def test_session_product_catalog_replaces_atomically_and_resolves_names(self):
+    def test_monitor_product_catalog_replaces_atomically_and_resolves_names(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-catalog", "room")
         session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "catalog")
-        self.live.replace_session_products(session_id, {
+        self.live.replace_monitor_products(monitor["id"], {
             "p1": "第一件商品", "p2": "第二件商品",
         })
-        self.assertEqual(self.live.product_name(session_id, "p2"), "第二件商品")
+        self.assertEqual(self.live.product_name(monitor["id"], "p2"), "第二件商品")
 
-        self.live.replace_session_products(session_id, {"p3": "更新后的完整目录"})
-        self.assertEqual(self.live.product_name(session_id, "p1"), "")
-        self.assertEqual(self.live.product_name(session_id, "p3"), "更新后的完整目录")
+        self.live.replace_monitor_products(monitor["id"], {"p3": "更新后的完整目录"})
+        self.assertEqual(self.live.product_name(monitor["id"], "p1"), "")
+        self.assertEqual(self.live.product_name(monitor["id"], "p3"), "更新后的完整目录")
 
-        self.live.replace_session_products(session_id, {})
-        self.assertEqual(self.live.product_name(session_id, "p3"), "")
+        self.live.replace_monitor_products(monitor["id"], {})
+        self.assertEqual(self.live.product_name(monitor["id"], "p3"), "")
 
     def test_product_catalog_request_error_is_exposed_and_cleared_after_success(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-catalog-error", "room")
@@ -459,6 +524,38 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(listed["detail"], detail)
         self.live.set_product_catalog_error(session_id, None)
         self.assertIsNone(self.live.list_monitors()[0]["sessions"][0]["product_catalog_error"])
+
+    def test_product_listener_retry_is_persisted_for_live_session_and_rejects_other_states(self):
+        monitor = self.live.create_monitor("https://live.douyin.com/retry-product", "room")
+        session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "retry-product")
+        self.live.set_product_listener_state(session_id, "error", "商品消息连接中断")
+        url = f"/api/v1/live/monitors/{monitor['id']}/sessions/{session_id}/product-listener/retry"
+        requested = self.client.post(url, headers=self.headers)
+        self.assertEqual(requested.status_code, 202, requested.text)
+        self.assertEqual(requested.json()["state"], "retrying")
+        self.assertEqual(self.live.list_monitors()[0]["sessions"][0]["product_listener"]["status"], "retrying")
+        duplicate = self.client.post(url, headers=self.headers)
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+        requests = self.live.take_product_listener_retries()
+        self.assertGreater(requests[0].pop("requested"), 0)
+        self.assertEqual(requests, [{"session_id": session_id, "monitor_id": monitor["id"], "refresh_catalog": 0, "reconnect": 1}])
+        self.live.stop_session(monitor["id"], session_id)
+        stopped = self.client.post(url, headers=self.headers)
+        self.assertEqual(stopped.status_code, 409, stopped.text)
+
+    def test_live_worker_restarts_only_the_product_listener_for_retry_request(self):
+        monitor = self.live.create_monitor("https://live.douyin.com/retry-product-worker", "room")
+        session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "retry-product-worker")
+        self.live.set_product_catalog_error(session_id, {"summary": "请求失败"})
+        self.live.request_product_listener_retry(monitor["id"], session_id)
+        with patch.object(LiveMonitorWorker, "_recover_interrupted_sessions"):
+            worker = LiveMonitorWorker(self.settings, resolver=object())
+        worker.processes[monitor["id"]] = (object(), session_id)
+        with patch.object(worker, "_start_python_product_listener") as restart:
+            worker._process_product_listener_retries()
+        restart.assert_called_once_with(self.live.monitor(monitor["id"]), session_id, refresh_catalog=True)
+        self.assertIn(monitor["id"], worker.processes, "retrying product events must not stop recording")
+        self.assertEqual(self.live.take_product_listener_retries(), [])
 
     def test_current_product_snapshot_is_listed_and_name_lookup_updates_it(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-current-product", "room")
@@ -930,7 +1027,7 @@ class LiveMonitoringTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT count(*) FROM live_product_events WHERE session_id=?", (session_id,)).fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT count(*) FROM live_session_current_product WHERE session_id=?", (session_id,)).fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT count(*) FROM live_product_listener_state WHERE session_id=?", (session_id,)).fetchone()[0], 0)
-            self.assertEqual(conn.execute("SELECT count(*) FROM live_session_products WHERE session_id=?", (session_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT count(*) FROM live_monitor_products WHERE monitor_id=?", (monitor["id"],)).fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT count(*) FROM live_session_product_catalog_state WHERE session_id=?", (session_id,)).fetchone()[0], 0)
 
     def test_blank_monitor_name_uses_resolved_anchor_name_but_custom_name_is_preserved(self):

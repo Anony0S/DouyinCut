@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { LiveSession } from '../../services/liveMonitoring'
-import { formatLiveTime } from './presentation'
+import ConfirmPopover from '../ConfirmPopover.vue'
+import LiveIcon from './LiveIcon.vue'
+import { formatBytes, formatLiveTime } from './presentation'
 import RecordingDatePicker from './RecordingDatePicker.vue'
 
 const props = defineProps<{
@@ -14,8 +16,10 @@ const props = defineProps<{
   date: string
   maxDate: string
   loading: boolean
+  busy: boolean
   label: string
   emptyMessage: string
+  onDeleteSession: (id: string) => Promise<void>
 }>()
 const emit = defineEmits<{ select: [id: string]; 'date-change': [date: string] }>()
 const hoveredId = ref('')
@@ -55,6 +59,34 @@ function state(item: LiveSession) {
 function summary(item: LiveSession) {
   return `${formatLiveTime(item.started)} — ${item.status === 'recording' ? '至今' : formatLiveTime(item.ended)} · ${duration(item)} · ${state(item)}`
 }
+function deleteCounts(item: LiveSession) {
+  const segments = item.segments.filter(segment => segment.status !== 'imported')
+  const clips = item.product_clips.filter(clip => clip.status !== 'imported')
+  return {
+    items: segments.length + clips.length,
+    bytes: [...segments, ...clips].reduce((total, file) => total + file.size_bytes, 0),
+  }
+}
+function deleteMessage(item: LiveSession) {
+  const counts = deleteCounts(item)
+  const labels = [segmentsLabel(item), clipsLabel(item)].filter((_, index) => {
+    const source = index === 0 ? item.segments : item.product_clips
+    return source.some(file => file.status !== 'imported')
+  })
+  const files = counts.items
+    ? `将删除 ${labels.join('、')}（共 ${counts.items} 项，约 ${formatBytes(counts.bytes)}）`
+    : '将删除本场的讲解记录；没有待清理的未导入视频文件'
+  return `${files}。已导入的视频项目及其素材会保留。此操作无法撤销。`
+}
+function deleteSession(item: LiveSession | undefined) {
+  return item ? props.onDeleteSession(item.id) : Promise.resolve()
+}
+function segmentsLabel(item: LiveSession) {
+  return `${item.segments.filter(segment => segment.status !== 'imported').length} 个未导入录制分段`
+}
+function clipsLabel(item: LiveSession) {
+  return `${item.product_clips.filter(clip => clip.status !== 'imported').length} 个未导入商品片段`
+}
 </script>
 
 <template>
@@ -91,9 +123,30 @@ function summary(item: LiveSession) {
       </div>
     </div>
     <div v-if="preview" class="live-recording-timeline-summary">
-      <span>{{ formatLiveTime(preview.started) }} — {{ preview.status === 'recording' ? '至今' : formatLiveTime(preview.ended) }}</span>
-      <span class="live-recording-timeline-duration">{{ duration(preview) }}</span>
-      <span class="text-base-content/60">· {{ state(preview) }}</span>
+      <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span>{{ formatLiveTime(preview.started) }} — {{ preview.status === 'recording' ? '至今' : formatLiveTime(preview.ended) }}</span>
+        <span class="live-recording-timeline-duration">{{ duration(preview) }}</span>
+        <span class="text-base-content/60">· {{ state(preview) }}</span>
+      </div>
+      <ConfirmPopover
+        v-if="preview.id === selectedId"
+        :key="preview.id"
+        :title="`删除录制场次「${formatLiveTime(preview.started)}」？`"
+        :message="deleteMessage(preview)"
+        confirm-label="确定删除场次"
+        :confirm-action="() => deleteSession(preview)"
+        :disabled="busy || loading || preview.status === 'recording'"
+        v-slot="{ open, expanded, popoverId }">
+        <button type="button" class="btn btn-ghost btn-sm text-error"
+          :disabled="busy || loading || preview.status === 'recording'"
+          :title="preview.status === 'recording' ? '录制中的场次不能删除' : '删除当前录制场次'"
+          :aria-label="`删除录制场次：${summary(preview)}`"
+          :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog"
+          @click="open">
+          <LiveIcon name="trash" />
+          删除场次
+        </button>
+      </ConfirmPopover>
     </div>
     <p v-else class="live-recording-timeline-empty text-base-content/60">{{ emptyMessage }}</p>
   </section>

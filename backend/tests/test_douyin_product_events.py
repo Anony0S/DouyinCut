@@ -396,9 +396,15 @@ class DouyinSessionPreparationTests(unittest.TestCase):
 
     def test_catalog_requests_are_rate_limited(self):
         starts = []
+        now = [100.0]
+
+        def sleep(seconds):
+            now[0] += seconds
+
+        clock = types.SimpleNamespace(monotonic=lambda: now[0], sleep=sleep)
 
         def respond(request):
-            starts.append(time.monotonic())
+            starts.append(now[0])
             offset = int(parse_qs(urlsplit(str(request.url)).query)["offset"][0])
             return httpx.Response(200, json={
                 "status_code": 0, "next_offset": 1 if offset == 0 else 0, "total": 2,
@@ -409,14 +415,20 @@ class DouyinSessionPreparationTests(unittest.TestCase):
         from app.douyin_product_events.promotions import DouyinPromotionNameResolver
         resolver = DouyinPromotionNameResolver(
             RoomInfo("live-id", "9001", "8002"), "Mozilla/5.0 Chrome/133.0.0.0",
-            client=client, min_request_interval=0.02, retry_delay=0,
+            client=client, min_request_interval=1, retry_delay=0,
         )
         try:
-            resolver.lookup_catalog(page_size=1)
+            with patch("app.douyin_product_events.promotions.time", clock), \
+                 patch("app.douyin_product_events.promotions._promotions_last_request_at", 0):
+                resolver.lookup_catalog(page_size=1)
+                other_room = DouyinPromotionNameResolver(
+                    RoomInfo("other-live-id", "9002", "8003"), "Mozilla/5.0 Chrome/133.0.0.0",
+                    client=client, min_request_interval=1, retry_delay=0,
+                )
+                other_room.lookup_catalog(page_size=1)
         finally:
             client.close()
-        self.assertEqual(len(starts), 2)
-        self.assertGreaterEqual(starts[1] - starts[0], 0.015)
+        self.assertEqual(starts, [100, 101, 102, 103], "pages and rooms share the one-second request limit")
 
     def test_sm3_and_a_bogus_output_shape(self):
         self.assertEqual(
@@ -786,6 +798,7 @@ class DouyinProductClientTests(unittest.TestCase):
         ]
         events = []
         current_products = []
+        observed_products = []
 
         class FakeWebSocketApp:
             def __init__(self, _url, *, on_open, on_message, **_callbacks):
@@ -803,7 +816,8 @@ class DouyinProductClientTests(unittest.TestCase):
         fake_websocket = types.ModuleType("websocket")
         fake_websocket.WebSocketApp = FakeWebSocketApp
         fake_websocket.ABNF = types.SimpleNamespace(OPCODE_BINARY=2)
-        client = DouyinProductEventClient(events.append, on_current_product=current_products.append)
+        client = DouyinProductEventClient(events.append, on_current_product=current_products.append,
+                                         on_product_observed=observed_products.append)
 
         with patch.dict(sys.modules, {"websocket": fake_websocket}):
             client.start("wss://push.example.com/path")
@@ -812,6 +826,7 @@ class DouyinProductClientTests(unittest.TestCase):
 
         self.assertEqual(len(events), 1)
         self.assertEqual([event.promotion_id for event in current_products], ["101"])
+        self.assertEqual(observed_products, ["101", "202", "202"], "repeated IDs still reach catalog lookup")
         self.assertEqual(events[0].promotion_id, "202")
         self.assertEqual(events[0].message_id, 2)
         self.assertAlmostEqual(events[0].event_time, changed_at, places=2)

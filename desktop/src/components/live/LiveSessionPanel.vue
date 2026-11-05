@@ -19,10 +19,12 @@ import {
 
 const props = defineProps<{
   session: LiveSession;
+  monitorId: string;
   busy: boolean;
   onDelete: (id: string) => Promise<void>;
   onDeleteProductClip: (id: string) => Promise<void>;
   onSplit: (id: string, confirmedMissingSegmentIds: string[]) => Promise<LiveSplitResult>;
+  onRetryProductListener: (monitorId: string, sessionId: string) => Promise<void>;
 }>();
 const visiblePathKey = ref<string | null>(null);
 const queryProductName = ref("");
@@ -96,6 +98,12 @@ const segments = computed(() =>
 );
 const listenerStatus = computed(
   () => props.session.product_listener?.status || "",
+);
+const canRetryProductListener = computed(
+  () => props.session.status === "recording"
+    && !props.busy
+    && listenerStatus.value !== "retrying"
+    && (listenerStatus.value === "error" || Boolean(props.session.product_catalog_error)),
 );
 const filters = computed(() => [
   { id: "all", name: "全部", count: props.session.segments.length },
@@ -318,6 +326,15 @@ const filters = computed(() => [
             JSON.stringify(session.product_catalog_error.detail, null, 2)
           }}</pre>
         </details>
+        <button
+          v-if="canRetryProductListener"
+          type="button"
+          class="btn btn-outline btn-sm mx-4 mt-3"
+          :disabled="busy"
+          @click="onRetryProductListener(monitorId, session.id)">
+          <LiveIcon name="refresh" />
+          重试商品连接
+        </button>
         <p
           v-if="session.product_listener?.detail"
           class="live-listener-note pl-4 pt-2"

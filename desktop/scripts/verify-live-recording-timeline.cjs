@@ -32,10 +32,14 @@ const monitor = (id, sessions) => ({ id, sessions, name: `直播间-${id}`, url:
 let response = [monitor('一', [session('历史', now - 18000, now - 10800, 7), session('当前', now - 3600, null, 8)])]
 let lastWindow
 let detailResponse = null
+let recordingResponse = null
 const openedUrls = []
 const openedSegments = []
 const api = async (url, method, body) => {
   if (url === '/auth') return {}
+  if (/^\/live\/monitors\/[^/]+\/recording$/.test(url) && method === 'POST') {
+    return structuredClone(await recordingResponse(url, body))
+  }
   if (/^\/live\/segments\/[^/]+\/open$/.test(url)) {
     openedSegments.push({ url, method, body })
     return { opened: true, revealed: Boolean(body?.reveal), path: 'segment.ts' }
@@ -411,6 +415,54 @@ async function verify() {
     assert.ok(text(racing.root).includes('讲解-新房正在录制'))
   } finally { racing.app.unmount(); detailResponse = null }
 }
+async function verifyRecordingStartSelection() {
+  for (const mode of ['immediate', 'delayed', 'cancelled']) {
+    const delayed = mode !== 'immediate'
+    const old = session('上次录制', now - 3600, now - 1800, 1)
+    const current = session('本次录制', now, null, 2)
+    const room = items => ({ ...monitor('开播', items), is_live: true })
+    let started = false
+    response = params => [room(params.get('window_start') === '1792598400'
+      ? [session('昨天录制', now - 86400, now - 85000, 3)]
+      : started && !delayed ? [old, current] : [old])]
+    recordingResponse = (_url, body) => {
+      assert.equal(body.action, 'start')
+      started = true
+      return room([old]) // The start endpoint acknowledges before the worker creates the session.
+    }
+    const { root, app } = await mount()
+    try {
+      if (delayed) {
+        await click(selectButton(root, '前一天'))
+        assert.ok(text(root).includes('讲解-昨天录制'))
+      }
+      const start = all(root, el => el.type === 'button' && text(el).includes('开始录制'))[0]
+      await click(start)
+      assert.equal(lastWindow.get('window_start'), '1792684800', 'manual recording returns to today even from a historical date')
+      if (mode === 'cancelled') {
+        await click(selectButton(root, '选择录制场次：'))
+      }
+      if (delayed) {
+        response = [room([old, current])]
+        for (const poll of polls) poll()
+        await settle()
+      }
+      if (mode === 'cancelled') {
+        assert.ok(text(root).includes('讲解-上次录制'), 'explicit session selection cancels the pending jump before the recording worker responds')
+        assert.ok(!text(root).includes('讲解-本次录制'))
+        continue
+      }
+      assert.ok(text(root).includes('讲解-本次录制'), 'starting recording selects the current session instead of retaining the previous session')
+      assert.ok(text(root).includes('片段-本次录制'), 'product clips follow the newly started session')
+      assert.ok(!text(root).includes('讲解-上次录制'))
+      const previous = selectButton(root, '选择录制场次：')
+      await click(previous)
+      for (const poll of polls) poll()
+      await settle()
+      assert.ok(text(root).includes('讲解-上次录制'), 'after the one-time jump, polling preserves a new manual selection')
+    } finally { app.unmount(); recordingResponse = null }
+  }
+}
 async function verifyDenseSessions() {
   const dense = Array.from({ length: 30 }, (_, index) => session(`短场-${index + 1}`, now - 1800 + index, now - 1799 + index, index + 1))
   dense[0] = { ...dense[0], status: 'failed', end_time_source: 'recovery_check' }
@@ -473,7 +525,7 @@ async function verifyLocalCalendarDay() {
     assert.ok(text(root).includes('当天无录制'))
   } finally { app.unmount() }
 }
-(checkDst || checkMidnightDst ? verifyLocalCalendarDay() : verify().then(verifyDenseSessions)).then(() => {
+(checkDst || checkMidnightDst ? verifyLocalCalendarDay() : verify().then(verifyRecordingStartSelection).then(verifyDenseSessions)).then(() => {
   console.log(checkDst || checkMidnightDst ? `historical calendar checks passed (${process.env.TZ})` : 'live recording timeline page checks passed')
   if (!checkDst && !checkMidnightDst) {
     for (const option of ['--dst', '--midnight-dst']) require('node:child_process').execFileSync(process.execPath, [__filename, option], { stdio: 'inherit' })

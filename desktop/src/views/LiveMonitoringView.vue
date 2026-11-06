@@ -38,6 +38,7 @@ const refreshError = ref("");
 let refreshVersion = 0;
 let disposed = false;
 let chooseRoomDefault = false;
+let pendingRecordingMonitorId = "";
 const urlInput = ref<HTMLInputElement>(),
   createDialog = ref<HTMLDialogElement>();
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -66,6 +67,7 @@ async function changeDate(date: string) {
   if (dateLoading.value || date === selectedDate.value) return;
   if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > latestSelectableDate.value
     || localDate(new Date(`${date}T00:00:00`)) !== date)) return;
+  pendingRecordingMonitorId = "";
   selectedDate.value = date;
   await refresh();
 }
@@ -92,6 +94,7 @@ function latestSession(items: LiveSession[]) {
 }
 function selectMonitor(id: string) {
   if (id === selectedMonitor.value?.id) return;
+  pendingRecordingMonitorId = "";
   selectedId.value = id;
   selectedSession.value = defaultSession(sessions.value);
   chooseRoomDefault = loading.value;
@@ -100,6 +103,7 @@ function selectMonitor(id: string) {
 function selectSession(id: string) {
   const item = sessions.value.find(item => item.id === id);
   if (!item) return;
+  pendingRecordingMonitorId = "";
   chooseRoomDefault = false;
   selectedSession.value = item;
   selectedPeriodId.value = "";
@@ -151,7 +155,11 @@ async function refresh() {
       ?? result.find(item => item.live_state === "recording") ?? result[0];
     const items = nextMonitor?.sessions ?? [];
     const current = !chooseRoomDefault && previousMonitor === nextMonitor?.id ? selectedSession.value : undefined;
-    let nextSession = items.find(item => item.id === current?.id);
+    // A start request is acknowledged before the recording worker creates its
+    // session. Keep the one-time jump pending across refreshes until it appears.
+    const startedSession = pendingRecordingMonitorId === nextMonitor?.id
+      ? defaultSession(items.filter(item => item.status === "recording")) : undefined;
+    let nextSession = startedSession ?? items.find(item => item.id === current?.id);
     if (!nextSession && current && nextMonitor) {
       if (dateChanged) {
         nextSession = latestSession(items);
@@ -161,7 +169,7 @@ async function refresh() {
         if (disposed || version !== refreshVersion) return;
         nextSession = retained ?? latestSession(items);
       }
-    } else if (!current) {
+    } else if (!nextSession && !current) {
       nextSession = !chooseRoomDefault && dateChanged && previousMonitor === nextMonitor?.id
         ? latestSession(items) : defaultSession(items);
     }
@@ -170,13 +178,17 @@ async function refresh() {
     monitors.value = result;
     selectedId.value = nextMonitor?.id ?? "";
     selectedSession.value = nextSession;
+    if (startedSession) {
+      pendingRecordingMonitorId = "";
+      selectedPeriodId.value = "";
+    }
     chooseRoomDefault = false;
     if (session.error === refreshError.value) session.error = "";
     refreshError.value = "";
     updatedAt.value = Date.now() / 1000;
   } catch (cause) {
     if (disposed || version !== refreshVersion) return;
-    selectedDate.value = recordingWindow.value.date;
+    selectedDate.value = pendingRecordingMonitorId ? "" : recordingWindow.value.date;
     refreshError.value = cause instanceof Error ? cause.message : "操作失败";
     session.report(cause);
   } finally {
@@ -239,6 +251,14 @@ async function updateSettings(
 async function record(monitor: LiveMonitor, action: "start" | "stop") {
   await session.act(async () => {
     await liveMonitoringApi.setRecording(monitor.id, action);
+    if (disposed) return;
+    if (action === "start") {
+      selectedId.value = monitor.id;
+      selectedDate.value = "";
+      pendingRecordingMonitorId = monitor.id;
+    } else if (pendingRecordingMonitorId === monitor.id) {
+      pendingRecordingMonitorId = "";
+    }
     session.message =
       action === "start"
         ? "已开始录制"

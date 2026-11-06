@@ -72,8 +72,9 @@ function rangeStyle() {
   };
 }
 function choose(period: LiveProductPeriod) {
-  emit("update:selectedPeriodId", period.id);
-  emit("select", period.id);
+  const id = props.selectedPeriodId === period.id ? "" : period.id;
+  emit("update:selectedPeriodId", id);
+  if (id) emit("select", id);
 }
 function beginSplit() {
   if (!selected.value || cuttableSeconds.value < 1 || splitting.value || props.busy) return;

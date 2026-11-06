@@ -6,16 +6,56 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from app.core.config import Settings
 from app.core.storage import Store
 from app.live_monitoring import LiveStore
-from app.media.processing import probe
+from app.media.encoding import CPU_ENCODER, H264Encoder, select_h264_encoder
+from app.media.live_clips import cut_product_clip
+from app.media.processing import probe, run_process
 from app.worker import Worker
 
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
 class ProductPeriodMediaTests(unittest.TestCase):
+    def test_failed_hardware_encode_falls_back_to_playable_cpu_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = Settings(Path(temporary))
+            source, output = Path(temporary) / "source.mp4", Path(temporary) / "selected.mp4"
+            subprocess.run([
+                settings.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                "testsrc2=s=320x240:r=30:d=2", "-c:v", "libx264", "-preset", "ultrafast", str(source),
+            ], check=True, capture_output=True)
+            unavailable = H264Encoder("unavailable_hardware_encoder", ())
+            with (patch("app.media.encoding.select_h264_encoder", return_value=unavailable),
+                  patch("app.media.processing.run_process", wraps=run_process) as process):
+                cut_product_clip([(source, {"clip_start": .5, "clip_end": 1.5})], output, settings)
+            encodes = [call.args[0] for call in process.call_args_list if "-c:v" in call.args[0]]
+            self.assertEqual([args[args.index("-c:v") + 1] for args in encodes],
+                             [unavailable.name, "libx264"])
+            self.assertAlmostEqual(probe(output, settings)["duration_us"] / 1_000_000, 1, delta=.1)
+            self.assertEqual(list(Path(temporary).glob("selected*.mp4")), [output])
+
+    def test_detected_encoder_cuts_single_source_without_audio(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = Settings(Path(temporary))
+            source, output = Path(temporary) / "source.mp4", Path(temporary) / "selected.mp4"
+            subprocess.run([
+                settings.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                "testsrc2=s=1280x720:r=30:d=3", "-c:v", "libx264", "-preset", "ultrafast", str(source),
+            ], check=True, capture_output=True)
+            selected = select_h264_encoder(settings)
+            with patch("app.media.processing.run_process", wraps=run_process) as process:
+                cut_product_clip([(source, {"clip_start": .7, "clip_end": 2.2})], output, settings)
+            encodes = [call.args[0] for call in process.call_args_list if "-c:v" in call.args[0]]
+            self.assertEqual(len(encodes), 1)
+            self.assertEqual(encodes[0][encodes[0].index("-c:v") + 1], selected.name)
+            info = probe(output, settings)
+            self.assertFalse(info["has_audio"])
+            self.assertAlmostEqual(info["duration_us"] / 1_000_000, 1.5, delta=.1)
+            self.assertEqual((info["width"], info["height"]), (1280, 720))
+
     def test_worker_cuts_only_one_lecture_from_two_ts_sources_to_playable_mp4(self):
         with tempfile.TemporaryDirectory() as temporary:
             settings = Settings(Path(temporary))
@@ -50,10 +90,17 @@ class ProductPeriodMediaTests(unittest.TestCase):
             period = next(item for item in detail["product_periods"] if item["promotion_id"] == "chosen")
             selected_start, selected_end = started + 1.2, started + 4.3
             job = live.request_period_product_clips(period["id"], [], selected_start, selected_end)
-            Worker(settings).run_once()
+            with (patch("app.media.processing.run_process", wraps=run_process) as process,
+                  patch("app.media.encoding.select_h264_encoder", return_value=CPU_ENCODER)):
+                Worker(settings).run_once()
             completed = store.job(job["id"])
             self.assertEqual(completed["state"], "succeeded", completed["error"])
             self.assertEqual(completed["result"]["created"], 1)
+            encodes = [call.args[0] for call in process.call_args_list
+                       if "-c:v" in call.args[0] and call.args[0][-1].endswith(".mp4")
+                       and call.args[0][call.args[0].index("-c:v") + 1] != "copy"]
+            self.assertEqual(len(encodes), 1, "一次选区只能编码一次，不能按文件编码后再次重编码")
+            self.assertFalse(list(directory.glob("*_剪辑源.mp4")))
             clips = live.recording_session(monitor["id"], session_id)["product_clips"]
             self.assertEqual(len(clips), 1)
             self.assertEqual({clip["promotion_id"] for clip in clips}, {"chosen"})

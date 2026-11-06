@@ -10,6 +10,7 @@ from app.api import create_app
 from app.core.config import Settings
 from app.live_monitoring import LiveMonitorSettings, LiveMonitorWorker, LiveStore, normalize_douyin_url
 from app.core.storage import Store
+from app.media.encoding import CPU_ENCODER
 
 
 def fake_media_process(args, **_kwargs):
@@ -27,6 +28,9 @@ def fake_video_info(duration_us=5_000_000):
 
 class LiveMonitoringTests(unittest.TestCase):
     def setUp(self):
+        encoder = patch("app.media.encoding.select_h264_encoder", return_value=CPU_ENCODER)
+        encoder.start()
+        self.addCleanup(encoder.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.settings = Settings(Path(self.temp.name))
@@ -684,8 +688,10 @@ class LiveMonitoringTests(unittest.TestCase):
               patch("app.media.processing.probe", return_value=fake_video_info())):
             result = generate_period_product_clips(self.store, self.settings, queued.json()["payload"])
         self.assertEqual(result, {"period_id": period_id, "created": 1, "skipped": 0, "failed": 0})
-        self.assertEqual([(float(a[a.index("-ss")+1]), float(a[a.index("-t")+1])) for a in calls],
-                         [(5.0, 15.0), (0.0, 5.0)])
+        self.assertEqual(len(calls), 1)
+        args = calls[0]
+        self.assertEqual([float(args[i+1]) for i, arg in enumerate(args) if arg == "-ss"], [5.0, 0.0])
+        self.assertEqual([float(args[i+1]) for i, arg in enumerate(args) if arg == "-t"], [15.0, 5.0, 20.0])
         session = self.live.recording_session(monitor["id"], session_id)
         self.assertEqual({clip["promotion_id"] for clip in session["product_clips"]}, {"p2"})
         self.assertEqual(len(session["product_clips"]), 1)
@@ -817,19 +823,19 @@ class LiveMonitoringTests(unittest.TestCase):
         period_id = self._period_id(session_id, "p2")
         job = self.live.request_period_product_clips(period_id, [])
         def fail_second_piece(args, **kwargs):
-            if "-ss" in args and float(args[args.index("-ss") + 1]) == 0:
-                raise RuntimeError("模拟第二个片段失败")
+            if args.count("-ss") == 2:
+                raise RuntimeError("模拟第二个来源解码失败")
             return fake_media_process(args, **kwargs)
         with (patch("app.media.processing.run_process", side_effect=fail_second_piece),
               patch("app.media.processing.probe", return_value=fake_video_info())):
-            with self.assertRaisesRegex(RuntimeError, "模拟第二个片段失败"):
+            with self.assertRaisesRegex(RuntimeError, "模拟第二个来源解码失败"):
                 generate_period_product_clips(self.store, self.settings, job["payload"])
         before = self.live.recording_session(monitor["id"], session_id)["product_clips"]
         self.assertEqual(len(before), 1)
         self.assertFalse(Path(before[0]["path"]).exists())
         self.assertFalse(list(Path(before[0]["path"]).parent.glob(".product-clip-*")))
         failed_clip = next(clip for clip in before if clip["status"] == "failed")
-        self.assertIn("模拟第二个片段失败", failed_clip["error"])
+        self.assertIn("模拟第二个来源解码失败", failed_clip["error"])
         with self.store.connection() as conn:
             conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (job["id"],))
         with (patch("app.media.processing.run_process", side_effect=fake_media_process),

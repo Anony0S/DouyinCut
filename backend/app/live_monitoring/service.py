@@ -1105,7 +1105,8 @@ class LiveStore:
 def generate_period_product_clips(store, settings: Settings, payload: dict,
                                  checkpoint=None, progress=None) -> dict:
     """Render one output for the frozen selection, joining internal source files."""
-    from ..media.processing import convert_to_mp4, probe, run_process
+    from ..media.processing import probe
+    from ..media.live_clips import cut_product_clip
 
     live = LiveStore(store)
     with store.connection() as conn:
@@ -1132,62 +1133,24 @@ def generate_period_product_clips(store, settings: Settings, payload: dict,
             raise ValueError("录制分段不在直播录制目录中，拒绝切分")
         if not original.is_file():
             raise ValueError("对应录制分段文件已不存在")
-        source = original.with_name(f"{original.stem}_剪辑源.mp4") if original.suffix.lower() == ".ts" else original
-        sources.append((segment, original, source, piece))
+        sources.append((segment, original, piece))
     # The first source anchors the database record; start/end describe the whole
-    # output. Internal pieces are temporary files, never independent clip records.
+    # output. Source parts are never independent clip records.
     anchor = sources[0][0]
     window = {**period, "abs_start": windows[0]["start"], "abs_end": windows[-1]["end"]}
     safe_product = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", period["product_name"]).strip(" ._")[:48]
     label = safe_product or period["promotion_id"]
-    target = sources[0][2].parent / f"商品片段_{anchor['segment_index']:02d}_{label}_{period['id'][-8:]}.mp4"
+    target = sources[0][1].parent / f"商品片段_{anchor['segment_index']:02d}_{label}_{period['id'][-8:]}.mp4"
     clip_id = live.begin_segment_product_clip(anchor, window, target)
     if clip_id is None:
         return {"period_id": period["id"], "created": 0, "skipped": 1, "failed": 0}
     try:
         with tempfile.TemporaryDirectory(prefix=".product-clip-", dir=target.parent) as directory:
             stage = Path(directory)
-            canvas = None
-            for index, (_segment, original, source, piece) in enumerate(sources):
-                if checkpoint:
-                    checkpoint()
-                if original.suffix.lower() == ".ts":
-                    convert_to_mp4(original, source, settings, checkpoint)
-                length = piece["clip_end"] - piece["clip_start"]
-                args = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                        "-ss", f"{piece['clip_start']:.6f}", "-i", str(source)]
-                if len(sources) > 1:
-                    info = probe(source, settings)
-                    if canvas is None:
-                        canvas = (info["width"] // 2 * 2, info["height"] // 2 * 2)
-                    width, height = canvas
-                    if not info["has_audio"]:
-                        args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
-                    args += ["-map", "0:v:0", "-map", "0:a:0" if info["has_audio"] else "1:a:0",
-                             "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30",
-                             "-af", "aresample=48000,apad", "-ar", "48000", "-ac", "2"]
-                else:
-                    args += ["-map", "0:v:0", "-map", "0:a?"]
-                args += ["-t", f"{length:.6f}", "-c:v", "libx264", "-preset", "veryfast",
-                         "-crf", "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
-                         "-movflags", "+faststart", "-f", "mp4", str(stage / f"{index:04d}.mp4")]
-                run_process(args, checkpoint=checkpoint, timeout=max(300, int(length) + 120))
-                if progress:
-                    progress((index + 1) / (len(sources) + 1))
-            output = stage / "0000.mp4"
-            if len(sources) > 1:
-                concat = stage / "concat.txt"
-                concat.write_text("".join(f"file '{index:04d}.mp4'\n" for index in range(len(sources))), encoding="utf-8")
-                output = stage / "joined.mp4"
-                length = sum(piece["clip_end"] - piece["clip_start"] for piece in windows)
-                run_process([
-                    settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts",
-                    "-f", "concat", "-safe", "1", "-i", str(concat), "-t", f"{length:.6f}",
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-                    "-c:a", "aac", "-ar", "48000", "-ac", "2", "-fps_mode", "cfr",
-                    "-movflags", "+faststart", str(output),
-                ], checkpoint=checkpoint, timeout=max(300, int(length) + 120))
+            output = stage / "selected.mp4"
+            cut_product_clip([(original, piece) for _segment, original, piece in sources],
+                             output, settings, checkpoint=checkpoint, progress=progress,
+                             log_prefix=settings.data_dir / "logs" / f"product-clip-{clip_id}")
             duration_us = probe(output, settings)["duration_us"]
             if checkpoint:
                 checkpoint()

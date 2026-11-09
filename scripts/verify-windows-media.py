@@ -203,7 +203,8 @@ def main():
         # Invalid hosts and dummy process credentials prevent accidental paid calls.
         store = Store(tools.database)
         store.start_session()
-        config = CloudConfig(base_url='https://offline-fixture.invalid/v1', asr_base_url='https://offline-fixture.invalid')
+        config = CloudConfig(base_url='https://offline-fixture.invalid/v1', planner_model='offline-planner',
+                             asr_base_url='https://offline-fixture.invalid', asr_model='offline-asr')
         endpoint = hashlib.sha256(config.asr_url.encode()).hexdigest()
         response = {'output': {'sentence': {'begin_time': 0, 'end_time': 6000,
             'text': '上身显瘦。只要九十九。面料柔软。', 'words': [

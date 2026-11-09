@@ -2,6 +2,7 @@
 
 mod instance;
 mod session;
+mod appearance_preferences;
 mod window_preferences;
 mod workspace;
 mod updates;
@@ -37,6 +38,8 @@ fn main() {
             updates::cancel_update_download,
             updates::install_update,
             session::complete_exit,
+            appearance_preferences::get_appearance_preference,
+            appearance_preferences::set_appearance_preference,
             window_preferences::get_window_preferences,
             window_preferences::set_window_preferences
         ])

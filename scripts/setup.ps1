@@ -17,21 +17,4 @@ try {
     & pnpm install
     if ($LASTEXITCODE -ne 0) { throw '前端依赖安装失败。' }
 } finally { Pop-Location }
-$go = Get-Command go -ErrorAction SilentlyContinue
-if ($go) {
-    Push-Location -LiteralPath (Join-Path $taskRoot 'tools/live_product_bridge')
-    $previousGoToolchain = $env:GOTOOLCHAIN
-    try {
-        $env:GOTOOLCHAIN = 'auto'
-        & go build -o live-product-bridge.exe .
-        if ($LASTEXITCODE -ne 0) { throw '抖音商品事件桥编译失败；请确认 Go 1.26.8+ 可用并能下载 Go modules。' }
-    } finally {
-        if ($null -eq $previousGoToolchain) { Remove-Item Env:GOTOOLCHAIN -ErrorAction SilentlyContinue }
-        else { $env:GOTOOLCHAIN = $previousGoToolchain }
-        Pop-Location
-    }
-    Write-Host '抖音商品事件桥已编译。'
-} else {
-    Write-Warning '未找到 Go。视频录制仍可用；商品讲解事件采集需安装 Go 1.21+ 并联网重新运行 scripts/setup.ps1。'
-}
 Write-Host '依赖安装完成。运行 uv run python scripts/dev.py 启动。'

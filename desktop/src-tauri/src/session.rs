@@ -293,6 +293,8 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(std::io::Error::other)?;
     let preferences_path = app.path().app_config_dir()?.join("window-preferences.json");
     app.manage(crate::window_preferences::WindowPreferencesHost::load(preferences_path)?);
+    let appearance_path = app.path().app_config_dir()?.join("appearance-preferences.json");
+    app.manage(crate::appearance_preferences::AppearanceHost::load(appearance_path)?);
     if cfg!(debug_assertions) {
         let mut config = app.config().app.windows[0].clone();
         let (width, height) = app.state::<crate::window_preferences::WindowPreferencesHost>().startup_size().dimensions();

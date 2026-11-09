@@ -16,6 +16,11 @@ description = "允许工作台读取和保存窗口位置、启动大小"
 commands.allow = ["get_window_preferences", "set_window_preferences"]
 
 [[permission]]
+identifier = "allow-appearance-preferences"
+description = "允许窗口读取和保存外观主题"
+commands.allow = ["get_appearance_preference", "set_appearance_preference"]
+
+[[permission]]
 identifier = "allow-local-maintenance"
 description = "允许工作台执行本地目录、日志和版本维护操作"
 commands.allow = ["delete_workspace_config", "relaunch", "open_log_directory", "clear_logs", "check_for_update", "get_update_status", "download_update", "cancel_update_download", "install_update"]

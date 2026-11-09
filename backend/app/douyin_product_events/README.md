@@ -6,8 +6,8 @@ and, in the live monitor, treats a changed `WebcastLiveShoppingMessage`
 product ID as a product event only when a matching `LivePopMessage` confirms
 it within five seconds. The first observed product ID in each session is only
 a baseline. The live monitor uses this single Python WebSocket connection as
-the production event source; it does not start the Go bridge or a second
-shadow connection. `WebcastProductChangeMessage` remains diagnostic-only until
+the production event source; it does not start a second shadow connection.
+`WebcastProductChangeMessage` remains diagnostic-only until
 its event semantics are independently verified.
 
 The module includes:

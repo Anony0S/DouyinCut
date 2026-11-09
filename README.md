@@ -35,8 +35,6 @@ DouyinCut 是一款面向 Windows 的商品视频剪辑工具。它根据视频�
 - FFmpeg 和 ffprobe，并确保开发环境可以找到它们。
 - 使用 Tauri 桌面外壳时，需要 Rust、Windows MSVC 构建工具和 WebView2。
 
-`scripts/setup.ps1` 会在检测到 Go 时尝试构建可选的商品事件桥；该模块声明 Go 1.26 和 `go1.26.8` 工具链。当前直播商品连接使用 Python，缺少 Go 不影响安装 Python 和前端依赖。
-
 ## 本地开发
 
 在仓库根目录执行：

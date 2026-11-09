@@ -60,4 +60,35 @@ assert.equal(appearance.value, 'system')
 setAppearance('dark')
 assert.equal(theme(), 'dark')
 stop()
-console.log('Appearance: system changes, explicit overrides, persistence, storage sync, unavailable storage and cleanup passed.')
+
+// The packaged workbench is served from a random localhost port on every launch.
+// Its theme must therefore use the native app configuration store rather than
+// port-scoped WebView localStorage.
+;(async () => {
+  let nativeValue = 'dark'
+  const nativeCalls = []
+  global.window.__TAURI_INTERNALS__ = {
+    invoke: async (command, args) => {
+      nativeCalls.push({ command, args })
+      if (command === 'get_appearance_preference') return nativeValue
+      if (command === 'set_appearance_preference') {
+        nativeValue = args.appearance
+        return nativeValue
+      }
+      throw new Error(`Unexpected native command: ${command}`)
+    },
+  }
+  stop = startAppearance()
+  await Promise.resolve()
+  assert.equal(appearance.value, 'dark')
+  setAppearance('light')
+  await Promise.resolve()
+  assert.equal(nativeValue, 'light')
+  assert.ok(nativeCalls.some(call => call.command === 'get_appearance_preference'))
+  assert.ok(nativeCalls.some(call => call.command === 'set_appearance_preference'))
+  stop()
+  console.log('Appearance: system changes, explicit overrides, persistence, native packaged persistence, storage sync, unavailable storage and cleanup passed.')
+})().catch(error => {
+  console.error(error)
+  process.exitCode = 1
+})

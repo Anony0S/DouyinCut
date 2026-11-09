@@ -190,7 +190,7 @@ fn position_has_visible_area(
     right - left >= 120 && bottom - top >= 80
 }
 
-fn ensure_settings_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+pub(crate) fn ensure_settings_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|error| error.to_string())?;
     let local = (url.scheme() == "http"
         && matches!(url.host_str(), Some("127.0.0.1") | Some("localhost")))

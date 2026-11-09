@@ -10,6 +10,7 @@
   "permissions": [
     "allow-complete-exit",
     "allow-window-preferences",
+    "allow-appearance-preferences",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

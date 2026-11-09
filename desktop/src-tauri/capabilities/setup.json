@@ -7,6 +7,7 @@
   "permissions": [
     "allow-workspace-action",
     "allow-window-preferences",
+    "allow-appearance-preferences",
     "core:default"
   ]
 }

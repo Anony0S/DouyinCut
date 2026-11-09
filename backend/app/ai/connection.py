@@ -1,6 +1,6 @@
 import time
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ..core.domain import Model
 from .providers import (CloudConfig, ExitInterrupted, ProviderError, ProviderHTTPError,
@@ -10,6 +10,15 @@ from .providers import (CloudConfig, ExitInterrupted, ProviderError, ProviderHTT
 class ModelConnectionTestRequest(Model):
     config: CloudConfig
     api_key: str = Field(default="", max_length=20000, repr=False)
+
+    @field_validator("config")
+    @classmethod
+    def require_text_connection(cls, config):
+        try:
+            config.require_text_connection()
+        except ProviderError as exc:
+            raise ValueError(str(exc)) from None
+        return config
 
 
 def check_model_connection(request: ModelConnectionTestRequest) -> dict:

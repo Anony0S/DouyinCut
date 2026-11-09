@@ -124,13 +124,13 @@ class ApiTests(unittest.TestCase):
         from unittest.mock import patch
         with patch('app.api.read_secret', return_value=None):
             config = self.client.get('/api/v1/settings/cloud', headers=self.headers).json()['config']
-            self.assertEqual(config['asr_model'], 'qwen-audio-3.1-asr-flash')
+            self.assertEqual(config['asr_model'], '')
             config['asr_model'] = ' custom-file-asr-v1 '
             response = self.client.patch('/api/v1/settings/cloud', headers=self.headers, json=config)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()['asr_model'], 'custom-file-asr-v1')
             self.assertEqual(self.client.get('/api/v1/settings/cloud', headers=self.headers).json()['config']['asr_model'], 'custom-file-asr-v1')
-            for invalid in ('', '   ', 'invalid model', 'https://model.example', 'x' * 101):
+            for invalid in ('invalid model', 'https://model.example', 'x' * 101):
                 config['asr_model'] = invalid
                 self.assertEqual(self.client.patch('/api/v1/settings/cloud', headers=self.headers, json=config).status_code, 422)
 
@@ -138,7 +138,7 @@ class ApiTests(unittest.TestCase):
         from unittest.mock import patch
         with patch('app.api.read_secret', return_value=None):
             config = self.client.get('/api/v1/settings/cloud', headers=self.headers).json()['config']
-            self.assertEqual(config['asr_base_url'], 'https://dashscope.aliyuncs.com')
+            self.assertEqual(config['asr_base_url'], '')
             self.assertEqual(config['asr_timeout_seconds'], 300)
             text_url = config['base_url']
             config.update(asr_base_url='https://speech.example/gateway/', asr_timeout_seconds=420)
@@ -160,6 +160,28 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(self.client.patch('/api/v1/settings/cloud', headers=self.headers,
                     json={**config, 'asr_timeout_seconds': timeout}).status_code, 422)
 
+    def test_cloud_cards_can_save_before_other_cards_are_changed(self):
+        from unittest.mock import patch
+        with patch('app.api.read_secret', return_value=None):
+            config = self.client.get('/api/v1/settings/cloud', headers=self.headers).json()['config']
+            for name in ('base_url', 'planner_model', 'asr_base_url', 'asr_model'):
+                self.assertEqual(config[name], '')
+            cards = {
+                'text': {'base_url': 'https://text.example/v1', 'planner_model': 'custom-text'},
+                'asr': {'asr_base_url': 'https://speech.example', 'asr_model': 'custom-asr'},
+                'oss': {'oss_endpoint': 'https://oss-cn-beijing.aliyuncs.com', 'oss_bucket': 'clips'},
+            }
+            for card, changes in cards.items():
+                with self.subTest(card=card):
+                    # Each payload starts with untouched defaults for the other cards.
+                    response = self.client.patch('/api/v1/settings/cloud', headers=self.headers,
+                                                 json={**config, **changes})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    for name, value in changes.items():
+                        self.assertEqual(response.json()[name], value)
+                    reloaded = self.client.get('/api/v1/settings/cloud', headers=self.headers).json()['config']
+                    self.assertEqual(reloaded, response.json())
+
     def test_analysis_requires_each_key_and_snapshots_separate_connections(self):
         from unittest.mock import patch
         from app.ai.providers import CloudConfig
@@ -168,6 +190,7 @@ class ApiTests(unittest.TestCase):
         store.put('asset', Asset(id='split-key-asset', sha256='digest', path='source.mp4', name='source',
             duration_us=10_000_000, width=320, height=240, has_audio=True).model_dump())
         config = CloudConfig(base_url='https://text.example/v1', asr_base_url='https://speech.example',
+                             planner_model='text-model', asr_model='speech-model',
                              oss_endpoint='https://oss.example', oss_bucket='audio')
         store.put('config', {'id': 'cloud', 'config': config.model_dump()})
         url = '/api/v1/assets/split-key-asset/analyze'
@@ -184,6 +207,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.json()['payload']['config'], config.model_dump())
         self.assertNotIn('text-key', response.text)
         self.assertNotIn('speech-key', response.text)
+
+    def test_analysis_requires_model_fields_before_creating_job(self):
+        from unittest.mock import patch
+        from app.ai.providers import CloudConfig
+        from app.core.domain import Asset
+        store = self.app.state.store
+        store.put('asset', Asset(id='unconfigured', sha256='digest', path='source.mp4', name='source',
+            duration_us=10_000_000, width=320, height=240, has_audio=True).model_dump())
+        valid = CloudConfig(base_url='https://text.example/v1', planner_model='text-model',
+                            asr_base_url='https://speech.example', asr_model='speech-model',
+                            oss_endpoint='https://oss-cn-beijing.aliyuncs.com', oss_bucket='clips').model_dump()
+        with patch('app.ai.providers.read_secret', return_value='saved-test-key'):
+            for name in ('base_url', 'planner_model', 'asr_base_url', 'asr_model'):
+                with self.subTest(field=name):
+                    saved = self.client.patch('/api/v1/settings/cloud', headers=self.headers,
+                                              json={**valid, name: ''})
+                    self.assertEqual(saved.status_code, 200, saved.text)
+                    response = self.client.post('/api/v1/assets/unconfigured/analyze', headers=self.headers,
+                                                json={'product_name': '测试商品'})
+                    self.assertEqual(response.status_code, 422, response.text)
+                    self.assertIn('Base URL 和模型 ID', response.text)
+                    self.assertEqual(store.jobs(), [])
 
     def test_chat_timeout_settings_default_persist_and_validate(self):
         from unittest.mock import patch

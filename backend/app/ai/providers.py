@@ -24,19 +24,20 @@ TRANSCRIPT_COMMA_SPLIT_MIN_US = 3_500_000
 
 class CloudConfig(Model):
     region: Literal["cn"] = "cn"
+    # Empty fields mean unconfigured; saving one card must not require the others.
     base_url: str = Field(default="", max_length=500)
     planner_model: str = Field(default="", max_length=100)
     asr_base_url: str = Field(default="", max_length=500)
     asr_model: str = Field(default="", max_length=100,
-                           pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+                           pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9._-]*)?$")
     oss_endpoint: str = Field(default="", max_length=300)
     oss_bucket: str = Field(default="", max_length=100)
     chat_timeout_seconds: int = Field(default=300, ge=30, le=900)
     asr_timeout_seconds: int = Field(default=300, ge=30, le=900)
 
-    @field_validator("asr_model", mode="before")
+    @field_validator("planner_model", "asr_model", mode="before")
     @classmethod
-    def normalize_asr_model(cls, value):
+    def normalize_model_id(cls, value):
         if not isinstance(value, str):
             return value
         value = value.strip()
@@ -45,7 +46,10 @@ class CloudConfig(Model):
     @field_validator("base_url", "asr_base_url")
     @classmethod
     def valid_base_url(cls, value):
-        value = value.strip().rstrip("/")
+        value = value.strip()
+        if not value:
+            return value
+        value = value.rstrip("/")
         parsed = urlparse(value)
         if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
                 or parsed.query or parsed.fragment or any(c.isspace() for c in value)):
@@ -55,6 +59,14 @@ class CloudConfig(Model):
         if parsed.path.endswith("/api/v1/services/aigc/multimodal-generation/generation"):
             raise ValueError("Base URL 不要包含语音识别接口路径")
         return value
+
+    def require_text_connection(self):
+        if not self.base_url or not self.planner_model:
+            raise ProviderError("请在文本剪辑模型卡片填写 Base URL 和模型 ID")
+
+    def require_asr_connection(self):
+        if not self.asr_base_url or not self.asr_model:
+            raise ProviderError("请在语音识别模型卡片填写 Base URL 和模型 ID")
 
     @property
     def asr_url(self):
@@ -68,6 +80,7 @@ class CloudConfig(Model):
 def model_api_key(config):
     key = read_secret("llm_api_key")
     if key:
+        config.require_text_connection()
         return key
     raise ProviderError("请在文本剪辑模型卡片配置 API Key")
 
@@ -75,6 +88,7 @@ def model_api_key(config):
 def asr_api_key(config):
     key = read_secret("asr_api_key")
     if key:
+        config.require_asr_connection()
         return key
     raise ProviderError("请在语音识别模型卡片配置 API Key")
 

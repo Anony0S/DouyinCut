@@ -60,6 +60,7 @@ class QwenAudioTests(unittest.TestCase):
         self.asset = Asset(id="asset-test", sha256="digest", path="source.mp4", name="source",
                            duration_us=10_000_000, width=320, height=240, has_audio=True)
         self.config = CloudConfig(base_url="https://text.example/v1",
+                                  planner_model="test-text-model", asr_model="qwen-audio-3.1-asr-flash",
                                   asr_base_url="https://llm-4xet6gf32m32iuj1.cn-beijing.maas.aliyuncs.com",
                                   asr_timeout_seconds=420)
         self.stack = ExitStack()
@@ -339,8 +340,8 @@ class QwenAudioTests(unittest.TestCase):
         self.assertEqual((plan.subtitles[0].start_us, plan.subtitles[0].end_us), (100_000, 3_334_000))
         self.assertFalse(any("粗略定位" in warning for warning in plan.warnings))
 
-    def test_default_and_custom_model_ids_are_preserved(self):
-        self.assertEqual(CloudConfig().asr_model, "qwen-audio-3.1-asr-flash")
+    def test_unconfigured_and_custom_model_ids_are_preserved(self):
+        self.assertEqual(CloudConfig().asr_model, "")
         self.assertEqual(CloudConfig(asr_model=" custom-qwen-audio-v1 ").asr_model, "custom-qwen-audio-v1")
 
 

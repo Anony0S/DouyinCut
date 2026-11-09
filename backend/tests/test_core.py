@@ -296,7 +296,7 @@ class ProviderTests(unittest.TestCase):
     def test_custom_endpoint_routes_planner_and_requires_model_key(self):
         from app.ai.providers import CloudConfig, ProviderError, model_api_key
         from app.ai.roughcut import RoughcutRequest, select_intervals
-        config = CloudConfig(base_url="https://gateway.example/v1/")
+        config = CloudConfig(base_url="https://gateway.example/v1/", planner_model="test-text-model")
         self.assertEqual(config.chat_url, "https://gateway.example/v1/chat/completions")
         with patch('app.ai.providers.read_secret', return_value=None):
             with self.assertRaises(ProviderError):

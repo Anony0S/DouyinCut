@@ -27,7 +27,9 @@ class RoughcutTests(unittest.TestCase):
         self.store = Store(self.settings.database)
         self.asset = Asset(id='one-garment', path=str(self.root / 'source.mp4'), name='奶黄千层.mp4',
                            sha256='mock-hash', duration_us=250_000_000, width=160, height=120, has_audio=True)
-        self.config = CloudConfig(oss_endpoint='https://oss-cn-beijing.aliyuncs.com', oss_bucket='test-bucket')
+        self.config = CloudConfig(base_url='https://text.example/v1', planner_model='test-text-model',
+                                  asr_base_url='https://speech.example', asr_model='qwen-audio-3.1-asr-flash',
+                                  oss_endpoint='https://oss-cn-beijing.aliyuncs.com', oss_bucket='test-bucket')
         self.sentences = [Transcript(source_asset_id=self.asset.id, start_us=i * 10_000_000,
                                      end_us=i * 10_000_000 + 5_000_000, text=text)
                           for i, text in enumerate(['上身很显瘦。', '今天只要九十九。', '面料柔软透气。'])]

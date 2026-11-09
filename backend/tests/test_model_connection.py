@@ -97,6 +97,13 @@ class ModelConnectionTests(unittest.TestCase):
                 self.assertFalse(result.json()["ok"])
                 self.assertIn("有效文本", result.json()["message"])
 
+    def test_missing_text_fields_rejected_without_cloud_request(self):
+        for name in ('base_url', 'planner_model'):
+            with self.subTest(field=name):
+                body = {**self.request, 'config': {**self.request['config'], name: ''}}
+                self.assertEqual(self.post(body).status_code, 422)
+        self.cloud.assert_not_called()
+
     def test_http_failures_explain_status_without_exposing_response_or_secret(self):
         for status, hint in ((401, "API Key"), (403, "权限"), (404, "模型 ID"),
                              (429, "配额"), (503, "服务状态"), (302, "云端")):

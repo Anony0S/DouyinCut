@@ -115,7 +115,7 @@ function toggleSettings(monitor: LiveMonitor, event: MouseEvent) {
   }
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
   anchor.value = {
-    top: Math.min(rect.bottom + 6, window.innerHeight - 190),
+    top: Math.min(rect.bottom + 6, window.innerHeight - 300),
     left: Math.max(12, Math.min(rect.right - 232, window.innerWidth - 244)),
   };
   settingsFor.value = monitor.id;
@@ -278,7 +278,7 @@ onUnmounted(closeSettings);
           <LiveIcon name="settings" />
           {{
             selected.auto_record ? "开播自动录制已开启" : "开播不自动录制"
-          }} · {{ selected.notify_live ? "开播提醒已开启" : "开播不提醒" }}
+          }} · {{ selected.notify_live ? "开播提醒" : "不开播提醒" }} · {{ selected.notify_offline ? "下播提醒" : "不提醒下播" }} · {{ selected.notify_split_complete ? "切分完成提醒" : "不提醒切分" }}
         </span>
       </div>
       <div
@@ -380,6 +380,28 @@ onUnmounted(closeSettings);
           <span>
             开播提醒
             <small>开播时弹出 Windows 通知</small>
+          </span>
+        </label>
+        <label class="live-room-setting">
+          <input
+            class="toggle toggle-sm"
+            type="checkbox"
+            :checked="settingsMonitor.notify_offline"
+            @change="$emit('settings', settingsMonitor, { notify_offline: ($event.target as HTMLInputElement).checked })" />
+          <span>
+            下播提醒
+            <small>检测到直播结束时弹出 Windows 通知</small>
+          </span>
+        </label>
+        <label class="live-room-setting">
+          <input
+            class="toggle toggle-sm"
+            type="checkbox"
+            :checked="settingsMonitor.notify_split_complete"
+            @change="$emit('settings', settingsMonitor, { notify_split_complete: ($event.target as HTMLInputElement).checked })" />
+          <span>
+            切分完成提醒
+            <small>商品视频片段全部生成后弹出 Windows 通知</small>
           </span>
         </label>
       </div>

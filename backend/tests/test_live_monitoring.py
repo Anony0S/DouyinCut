@@ -282,6 +282,7 @@ class LiveMonitoringTests(unittest.TestCase):
                                    json={"url": "https://live.douyin.com/room-1", "name": "测试直播间"})
         self.assertEqual(created.status_code, 201, created.text)
         self.assertTrue(created.json()["auto_record"] and created.json()["notify_live"])
+        self.assertTrue(created.json()["notify_offline"] and created.json()["notify_split_complete"])
         monitor_id = created.json()["id"]
         duplicate = self.client.post("/api/v1/live/monitors", headers=self.headers,
                                      json={"url": "https://live.douyin.com/room-1"})
@@ -289,9 +290,13 @@ class LiveMonitoringTests(unittest.TestCase):
         changed = self.client.patch(f"/api/v1/live/monitors/{monitor_id}", headers=self.headers,
                                     json={"auto_record": False}).json()
         self.assertEqual((changed["auto_record"], changed["notify_live"]), (False, True))
+        self.assertTrue(changed["notify_offline"] and changed["notify_split_complete"])
         changed = self.client.patch(f"/api/v1/live/monitors/{monitor_id}", headers=self.headers,
                                     json={"notify_live": False}).json()
         self.assertEqual((changed["auto_record"], changed["notify_live"]), (False, False))
+        changed = self.client.patch(f"/api/v1/live/monitors/{monitor_id}", headers=self.headers,
+                                    json={"notify_offline": False, "notify_split_complete": False}).json()
+        self.assertFalse(changed["notify_offline"] or changed["notify_split_complete"])
         offline_start = self.client.post(f"/api/v1/live/monitors/{monitor_id}/recording", headers=self.headers,
                                          json={"action": "start"})
         self.assertEqual(offline_start.status_code, 409, offline_start.text)
@@ -651,6 +656,21 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertFalse(hasattr(LiveMonitorWorker(self.settings, resolver=object()), "clip_executor"))
         self.assertEqual(self.live.list_monitors()[0]["id"], monitor["id"])
 
+    def test_split_completion_notification_follows_the_monitor_setting(self):
+        from app.worker import Worker
+
+        monitor, session_id, _segments = self._two_segment_session("split-notification")
+        period_id = self._period_id(session_id, "p2")
+        worker = Worker(self.settings)
+        with patch("app.live_monitoring.notifications.show_toast") as toast:
+            worker._notify_live_product_split({"period_id": period_id})
+            toast.assert_called_once_with("room 商品切分完成", "商品视频片段已生成，可在直播监控中查看")
+
+            toast.reset_mock()
+            self.live.update_settings(monitor["id"], LiveMonitorSettings(notify_split_complete=False))
+            worker._notify_live_product_split({"period_id": period_id})
+            toast.assert_not_called()
+
     def _period_id(self, session_id, promotion_id="p1"):
         with self.store.connection() as conn:
             return conn.execute("SELECT id FROM live_product_periods WHERE session_id=? AND promotion_id=? ORDER BY started LIMIT 1",
@@ -896,6 +916,7 @@ class LiveMonitoringTests(unittest.TestCase):
 
         patches = [patch.object(worker, "_start_recorder", side_effect=start),
                    patch.object(worker, "_stop_process"), patch.object(worker, "_notify_live"),
+                   patch.object(worker, "_notify_offline"),
                    patch.object(worker, "_scan_segments")]
         for item in patches:
             item.start()
@@ -929,10 +950,33 @@ class LiveMonitoringTests(unittest.TestCase):
         state["live"] = False
         worker.run_once(now=1061)
         self.assertFalse(self.live.monitor(monitor["id"])["record_held"])
+        worker._notify_offline.assert_called_once()
         state["live"] = True
         worker.run_once(now=1081)
         self.assertEqual(started, [monitor["id"], monitor["id"]])
         self.assertEqual(worker._notify_live.call_count, 2)
+
+    def test_offline_notification_requires_live_transition_and_enabled_setting(self):
+        monitor = self.live.create_monitor("https://live.douyin.com/room-offline-notice", "room")
+        state = {"live": False}
+        worker, _started = self._recording_worker(state)
+        worker.run_once(now=1000)
+        worker.run_once(now=1020)
+        worker._notify_offline.assert_not_called()
+
+        state["live"] = True
+        worker.run_once(now=1040)
+        state["live"] = False
+        worker.run_once(now=1060)
+        worker.run_once(now=1080)
+        worker._notify_offline.assert_called_once()
+
+        self.live.update_settings(monitor["id"], LiveMonitorSettings(notify_offline=False))
+        state["live"] = True
+        worker.run_once(now=1100)
+        state["live"] = False
+        worker.run_once(now=1120)
+        worker._notify_offline.assert_called_once()
 
     def test_manual_recording_starts_only_on_request_when_auto_record_is_off(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-manual", "room")

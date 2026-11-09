@@ -5,6 +5,8 @@ import ConfirmPopover from "../ConfirmPopover.vue";
 import LiveIcon from "./LiveIcon.vue";
 import { formatOffset, productPeriodColor } from "./presentation";
 import { activeClipJobStates } from "./presentation";
+import { useTimelineThumbnail, type HoverFrame } from "./useTimelineThumbnail";
+import { timelineThumbnailLayout } from "./timelineThumbnailLayout";
 
 const props = defineProps<{
   session: LiveSession;
@@ -12,7 +14,7 @@ const props = defineProps<{
   busy: boolean;
   onSplit: (id: string, confirmedMissingSegmentIds: string[], range?: { start: number; end: number }) => Promise<LiveSplitResult>;
 }>();
-const emit = defineEmits<{ "update:selectedPeriodId": [id: string]; select: [id: string] }>();
+const emit = defineEmits<{ "update:selectedPeriodId": [id: string]; select: [id: string]; "view-source": [segmentId: string, offset: number] }>();
 const periods = computed(() => [...props.session.product_periods].sort((a, b) => a.started - b.started || a.id.localeCompare(b.id)));
 const selected = computed(() => periods.value.find(item => item.id === props.selectedPeriodId));
 const now = ref(Date.now() / 1000);
@@ -20,6 +22,94 @@ const timelineEnd = computed(() => Math.max(props.session.ended ?? now.value, ..
 const frozenTimelineEnd = ref<number | null>(null);
 const displayEnd = computed(() => frozenTimelineEnd.value ?? timelineEnd.value);
 const timelineDuration = computed(() => Math.max(1, displayEnd.value - props.session.started));
+const scaleTicks = computed(() => {
+  const ticks = [];
+  for (let offset = 0; offset <= timelineDuration.value; offset += 20 * 60) {
+    ticks.push({ offset, left: `${offset / timelineDuration.value * 100}%`, label: formatOffset(offset, 0) });
+  }
+  return ticks;
+});
+const hasPartialScaleInterval = computed(() => timelineDuration.value % (20 * 60) !== 0);
+const hover = ref<HoverFrame | null>(null);
+const context = ref<{ periodId: string; at: number; x: number; y: number } | null>(null);
+const contextButton = ref<HTMLButtonElement | null>(null);
+const contextMenu = ref<HTMLElement | null>(null);
+const contextSource = computed(() => {
+  const target = context.value;
+  return target ? periods.value.find(period => period.id === target.periodId)?.sources.find(source => source.start <= target.at && target.at < source.end) : undefined;
+});
+const contextUnavailable = computed(() => contextSource.value?.state === "ready" ? "" : contextSource.value?.state === "recording" ? "等待录制封存后查看" : "该位置没有可用录制文件");
+function closeContext() { context.value = null; }
+function dismissContext(event: PointerEvent) {
+  if (!contextMenu.value?.contains(event.target as Node)) closeContext();
+}
+function contextKey(event: KeyboardEvent) {
+  if (event.key === "Escape" && context.value) { event.preventDefault(); closeContext(); }
+}
+window.addEventListener("pointerdown", dismissContext, true);
+window.addEventListener("keydown", contextKey);
+window.addEventListener("resize", closeContext);
+window.addEventListener("scroll", closeContext, true);
+onUnmounted(() => {
+  window.removeEventListener("pointerdown", dismissContext, true);
+  window.removeEventListener("keydown", contextKey);
+  window.removeEventListener("resize", closeContext);
+  window.removeEventListener("scroll", closeContext, true);
+});
+async function openContext(event: MouseEvent) {
+  const position = positionAtPointer(event);
+  if (!position?.period) { closeContext(); return; }
+  event.preventDefault();
+  hover.value = null;
+  context.value = { periodId: position.period.id, at: position.at, x: event.clientX, y: event.clientY };
+  await nextTick();
+  const rect = contextMenu.value?.getBoundingClientRect();
+  if (!context.value || !rect) return;
+  context.value.x = Math.max(8, Math.min(event.clientX, window.innerWidth - rect.width - 8));
+  context.value.y = Math.max(8, Math.min(event.clientY, window.innerHeight - rect.height - 8));
+  contextButton.value?.focus();
+}
+function viewContextSource() {
+  if (props.busy || !context.value || !contextSource.value || contextUnavailable.value) return;
+  emit("view-source", contextSource.value.segment_id, contextSource.value.clip_start + context.value.at - contextSource.value.start);
+  closeContext();
+}
+const { image: hoverImage, message: hoverMessage } = useTimelineThumbnail(() => props.session.id, hover);
+const imageSize = ref({ url: "", width: 240, height: 135 });
+const previewLayout = computed(() => {
+  if (!hover.value) return {};
+  const size = imageSize.value.url === hoverImage.value ? imageSize.value : { width: 240, height: 135 };
+  const layout = timelineThumbnailLayout(hover.value.anchor, size.width, size.height);
+  return { left: layout.left + "px", top: layout.top + "px", width: layout.width + "px", "--preview-image-height": layout.imageHeight + "px" };
+});
+function frameLoaded(event: Event) {
+  const image = event.currentTarget as HTMLImageElement;
+  if (image.src === hoverImage.value && image.naturalWidth > 0 && image.naturalHeight > 0) {
+    imageSize.value = { url: hoverImage.value, width: image.naturalWidth, height: image.naturalHeight };
+  }
+}
+function hidePreview() { hover.value = null; }
+window.addEventListener("resize", hidePreview);
+window.addEventListener("scroll", hidePreview, true);
+onUnmounted(() => { window.removeEventListener("resize", hidePreview); window.removeEventListener("scroll", hidePreview, true); });
+function positionAtPointer(event: MouseEvent) {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  if (rect.width <= 0) return;
+  const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+  const at = props.session.started + ratio * timelineDuration.value;
+  const period = periods.value.find(item => item.started <= at && at < (item.ended ?? now.value));
+  return { at, period, rect };
+}
+function previewAtPointer(event: PointerEvent) {
+  if (event.pointerType === "touch" || context.value) return;
+  const position = positionAtPointer(event);
+  if (!position?.period) { hover.value = null; return; }
+  const { at, period, rect } = position;
+  const source = period.sources.find(item => item.start <= at && at < item.end);
+  const frameAt = source ? source.start + Math.floor(at - source.start) : at;
+  const message = source?.state === "ready" ? "" : source?.state === "recording" ? "等待录制封存后预览" : "该位置没有可用录制画面";
+  hover.value = { periodId: period.id, at: frameAt, key: `${period.id}:${source?.segment_id}:${frameAt}:${source?.state}`, message, anchor: { x: event.clientX, top: rect.top, bottom: rect.bottom, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight } };
+}
 const selectedColor = computed(() => selected.value ? colorFor(selected.value) : "var(--color-primary)");
 const editing = ref(false);
 const rangeStart = ref(0);
@@ -51,7 +141,7 @@ const splitMessage = computed(() => missing.value.map(source => "录制文件 " 
 let disposed = false;
 const clock = setInterval(() => { now.value = Date.now() / 1000; }, 1000);
 onUnmounted(() => { disposed = true; clearInterval(clock); });
-watch(() => props.session.id, () => { editing.value = false; frozenTimelineEnd.value = null; frozenCuttableSeconds.value = null; emit("update:selectedPeriodId", ""); });
+watch(() => props.session.id, () => { closeContext(); hover.value = null; editing.value = false; frozenTimelineEnd.value = null; frozenCuttableSeconds.value = null; emit("update:selectedPeriodId", ""); });
 watch(() => props.selectedPeriodId, () => { editing.value = false; frozenTimelineEnd.value = null; frozenCuttableSeconds.value = null; });
 
 function colorFor(period: LiveProductPeriod) {
@@ -122,6 +212,7 @@ function updateRangeFromPointer(event: PointerEvent) {
   rangeEnd.value = Math.round((start + duration) * 10) / 10;
 }
 function startDrag(event: PointerEvent, edge: "start" | "end") {
+  if (event.button !== 0) return;
   activeDrag.value = {
     edge,
     pointerId: event.pointerId,
@@ -130,6 +221,7 @@ function startDrag(event: PointerEvent, edge: "start" | "end") {
   updateFromPointer(event, edge);
 }
 function startRangeDrag(event: PointerEvent) {
+  if (event.button !== 0) return;
   activeDrag.value = {
     edge: "range",
     pointerId: event.pointerId,
@@ -210,7 +302,22 @@ async function confirmPartial() {
       </div>
       <span v-else class="live-product-rail-hint">选择区间后可切分商品</span>
     </div>
-    <div class="live-product-rail-track" role="group" aria-label="选择商品讲解区间">
+    <div class="live-product-rail-track" role="group" aria-label="选择商品讲解区间" @contextmenu="openContext" @pointermove="previewAtPointer" @pointerleave="hover = null" @pointercancel="hover = null">
+      <Teleport to="body">
+      <ul v-if="context" ref="contextMenu" class="menu menu-sm fixed z-[90] w-64 max-w-[calc(100vw-1rem)] rounded-box border border-base-300 bg-base-100 text-base-content shadow-lg" :style="{ left: context.x + 'px', top: context.y + 'px' }" aria-label="片段操作" @contextmenu.prevent>
+        <li class="menu-title">{{ formatOffset(context.at, session.started) }}</li>
+        <li><button ref="contextButton" type="button" :disabled="busy || !!contextUnavailable" @click="viewContextSource"><LiveIcon name="play" />查看所在录制片段</button></li>
+        <li v-if="!contextUnavailable" class="menu-title text-xs font-normal">系统播放器打开，从文件开头播放</li>
+        <li v-if="contextUnavailable" class="menu-title text-xs font-normal">{{ contextUnavailable }}</li>
+      </ul>
+      <div v-if="hover" class="card border border-base-300 bg-base-100 text-base-content shadow-lg live-product-hover-preview" :style="previewLayout" role="tooltip">
+        <div class="live-product-hover-image bg-neutral">
+          <img v-if="hoverImage" :src="hoverImage" alt="鼠标所在时间的录制画面" @load="frameLoaded" />
+          <span v-else class="text-neutral-content">{{ hoverMessage }}</span>
+        </div>
+        <time class="px-2 py-1 text-xs tabular-nums">{{ formatOffset(hover.at, session.started) }}</time>
+      </div>
+      </Teleport>
       <button v-for="period in periods" :key="period.id" type="button" class="live-product-rail-period" :class="{ 'is-selected': period.id === selectedPeriodId }" :style="periodStyle(period)" :title="(period.product_name || ('商品 ' + period.promotion_id)) + ' · ' + formatOffset(period.started, session.started) + '–' + (period.ended === null ? '至今' : formatOffset(period.ended, session.started))" :aria-label="'选择商品讲解 ' + (period.product_name || period.promotion_id) + '，' + formatOffset(period.started, session.started) + ' 至 ' + (period.ended === null ? '至今' : formatOffset(period.ended, session.started))" :aria-pressed="period.id === selectedPeriodId" @click="choose(period)" />
       <div v-if="editing && selected && cuttableSeconds > 0" ref="rangeOverlay" class="live-product-range-overlay" :style="rangeStyle()">
         <div class="live-product-range-fill" :style="{ left: (rangeStart / selectionLimit * 100) + '%', width: ((rangeEnd - rangeStart) / selectionLimit * 100) + '%' }" @pointerdown.prevent="startRangeDrag" @pointermove="updateRangeFromPointer" @pointerup="endDrag($event, 'range')" @pointercancel="endDrag($event, 'range')" @lostpointercapture="endDrag($event, 'range')" />
@@ -218,7 +325,10 @@ async function confirmPartial() {
         <button type="button" class="live-product-range-handle" :class="{ 'is-snapped': activeDrag?.edge === 'end' && activeDrag.snapped }" :style="handleStyle('end')" role="slider" tabindex="0" aria-label="切分终点" :aria-valuemin="rangeStart + 1" :aria-valuemax="selectionLimit" :aria-valuenow="rangeEnd" :aria-valuetext="formatOffset(selected.started + rangeEnd, session.started)" @pointerdown.prevent="startDrag($event, 'end')" @pointermove="updateFromPointer($event, 'end')" @pointerup="endDrag($event, 'end')" @pointercancel="endDrag($event, 'end')" @lostpointercapture="endDrag($event, 'end')" @keydown="keyHandle($event, 'end')" />
       </div>
     </div>
-    <div class="live-product-rail-scale"><span>00:00</span><span>{{ formatOffset(displayEnd, session.started) }}</span></div>
+    <div class="live-product-rail-scale" :class="{ 'has-partial-interval': hasPartialScaleInterval }" aria-label="场次累计时间，每二十分钟一格">
+      <span v-for="tick in scaleTicks" :key="tick.offset" class="live-product-rail-tick" :class="{ 'is-end': tick.offset === timelineDuration }" :style="{ left: tick.left }"><span>{{ tick.label }}</span></span>
+      <span v-if="hasPartialScaleInterval" class="live-product-rail-scale-end">{{ formatOffset(displayEnd, session.started) }}</span>
+    </div>
     <p v-if="editing && selected" class="live-product-rail-note">拖动两端选择范围；范围限制在已封存内容内，最短 1 秒。</p>
   </section>
 </template>

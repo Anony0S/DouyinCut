@@ -22,5 +22,16 @@ class SearchRequest(Model):
         return value.strip()
 
 
+class AddToShowcaseRequest(Model):
+    platform_product_id: str = Field(min_length=1, max_length=100)
+
+    @field_validator("platform_product_id")
+    @classmethod
+    def non_blank_product_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("商品 ID 不能为空")
+        return value.strip()
+
+
 class ScopeRequest(Model):
     main_ip_id: str = Field(min_length=1, max_length=100)

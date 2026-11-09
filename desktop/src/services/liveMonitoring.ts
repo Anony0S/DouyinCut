@@ -12,8 +12,8 @@ export type LiveProductListener = { status:string; detail:string; updated:number
 export type LiveProductCatalogError = { detail:Record<string,unknown>; updated:number }
 export type LiveSession = { id:string; status:string; started:number; ended:number|null; end_time_source:'observed'|'recovery_check'|null; segments:LiveSegment[]; product_clips:LiveProductClip[]; product_periods:LiveProductPeriod[]; current_product:LiveCurrentProduct|null; product_events:LiveProductEvent[]; product_listener:LiveProductListener|null; product_catalog_error:LiveProductCatalogError|null }
 export type LiveSessionDeleteResult = { deleted_session_id:string; deleted_segments:number; deleted_product_clips:number; deleted_files:number; bytes_reclaimed:number; retained_files:number }
-export type LiveMonitorSettings = { auto_record?:boolean; notify_live?:boolean }
-export type LiveMonitor = { id:string; url:string; name:string; auto_record:boolean; notify_live:boolean; record_requested:boolean; record_held:boolean; retry_blocked:boolean; live_state:string; is_live:boolean|null; live_checked:number|null; last_checked:number|null; error:string|null; sessions:LiveSession[] }
+export type LiveMonitorSettings = { auto_record?:boolean; notify_live?:boolean; notify_offline?:boolean; notify_split_complete?:boolean }
+export type LiveMonitor = { id:string; url:string; name:string; auto_record:boolean; notify_live:boolean; notify_offline:boolean; notify_split_complete:boolean; record_requested:boolean; record_held:boolean; retry_blocked:boolean; live_state:string; is_live:boolean|null; live_checked:number|null; last_checked:number|null; error:string|null; sessions:LiveSession[] }
 
 export const liveMonitoringApi = {
   session: (monitorId: string, sessionId: string) => api<LiveSession | null>(`/live/monitors/${encodeURIComponent(monitorId)}/sessions/${encodeURIComponent(sessionId)}`),

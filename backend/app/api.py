@@ -18,6 +18,7 @@ from .core.credentials import read_secret, secret_preview, storage_status, write
 from .core.domain import Asset, Candidate, Model, Plan, Product, Transcript
 from .media.editing import make_batches, remap_subtitles, validate_plan
 from .media.processing import diagnostics, probe_stream_timing
+from .media.thumbnails import PreviewBusy, ThumbnailCache
 from .ai.providers import CloudConfig, ProviderError, asr_api_key, model_api_key
 from .ai.connection import ModelConnectionTestRequest, check_model_connection
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
@@ -27,7 +28,7 @@ from .projects.service import (EditingDefaults, editing_defaults, save_editing_d
 from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
 from .product_platform import ProductPlatformService
 from .product_platform.client import ProductPlatformError
-from .product_platform.schemas import LoginRequest, MobileRequest, ScopeRequest, SearchRequest
+from .product_platform.schemas import AddToShowcaseRequest, LoginRequest, MobileRequest, ScopeRequest, SearchRequest
 
 
 class ExportRequest(Model):
@@ -48,6 +49,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     settings.prepare()
     store = Store(settings.database)
     live_store = LiveStore(store)
+    thumbnails = ThumbnailCache(settings)
     token = token or os.environ.get("DOUYINCUT_SESSION_TOKEN") or secrets.token_urlsafe(32)
     app = FastAPI(title="DouyinCut", version="0.1.0")
     app.state.store, app.state.settings, app.state.live_store = store, settings, live_store
@@ -157,6 +159,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     def product_platform_search(body: SearchRequest):
         return app.state.product_platform.search(body.keyword)
 
+    @app.post("/api/v1/product-platform/products/add-to-showcase")
+    def product_platform_add_to_showcase(body: AddToShowcaseRequest):
+        return app.state.product_platform.add_to_showcase(body.platform_product_id)
+
     @app.get("/api/v1/live/monitors")
     def live_monitors(window_start: float | None = Query(None, ge=0, allow_inf_nan=False),
                       window_end: float | None = Query(None, gt=0, allow_inf_nan=False),
@@ -252,6 +258,29 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.get("/api/v1/live/product-periods/{period_id}/split-plan")
     def live_period_split_plan(period_id: str):
         return live_store.period_split_plan(period_id)
+
+    @app.get("/api/v1/live/product-periods/{period_id}/thumbnail")
+    def live_period_thumbnail(period_id: str, at: float = Query(ge=0, allow_inf_nan=False)):
+        period = live_store.period_split_plan(period_id)
+        source = next((item for item in period["sources"] if item["start"] <= at < item["end"]), None)
+        if source is None or source["state"] != "ready":
+            raise HTTPException(409, "该位置尚未封存或录制文件不可用")
+        with store.connection() as conn:
+            row = conn.execute("SELECT path FROM live_segments WHERE id=?", (source["segment_id"],)).fetchone()
+        if row is None:
+            raise HTTPException(404, "录制文件已不存在")
+        path = Path(row["path"]).resolve()
+        if not path.is_relative_to((settings.data_dir / "recordings" / "live").resolve()):
+            raise HTTPException(409, "录制文件不在直播录制目录中")
+        # One-second buckets stay inside this source/lecture intersection.
+        second = source["clip_start"] + int(at - source["start"] + 0.000001)
+        try:
+            frame = thumbnails.frame(path, second)
+        except PreviewBusy:
+            raise HTTPException(429, "画面预览繁忙，请稍后重试", headers={"Retry-After": "1"}) from None
+        except (OSError, ValueError) as exc:
+            raise HTTPException(409, str(exc)) from None
+        return Response(frame, media_type="image/jpeg")
 
     @app.post("/api/v1/live/product-periods/{period_id}/product-clips", status_code=202)
     def split_live_period(period_id: str, body: LivePeriodSplit):

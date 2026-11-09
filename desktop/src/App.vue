@@ -9,6 +9,8 @@ import { provideVideoImport } from './composables/useVideoImport'
 import LiveIcon from './components/live/LiveIcon.vue'
 import { hasUnsavedChanges as hasRegisteredUnsavedChanges } from './exit-guards'
 import { jobsApi } from './services/jobs'
+declare const __APP_VERSION__: string
+const appVersion = __APP_VERSION__
 const route=useRoute(),router=useRouter(),session=useSessionStore(),project=useProjectStore()
 const {busy,connected,activeJobs,error,errorRevision,message}=storeToRefs(session)
 const {savedDraft,planDirty}=storeToRefs(project)
@@ -126,7 +128,7 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
           :aria-label="connected ? '本地服务已连接' : '本地服务未连接'">
           <LiveIcon name="server" :class="{online:connected}"/>
         </span>
-        <span class="app-version">v0.2.101</span>
+        <span class="app-version">v{{ appVersion }}</span>
       </div>
     </aside>
 

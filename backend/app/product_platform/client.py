@@ -132,3 +132,17 @@ class ProductPlatformClient:
         if not isinstance(products, list) or any(not isinstance(item, dict) for item in products):
             raise ProductPlatformError("星斗商品平台搜索结果格式无效，请重试", status=502)
         return products
+
+    def add_to_showcase(self, ip_id: str, platform_product_id: str, member_talent_id: str) -> None:
+        try:
+            member_talent_id_value = int(member_talent_id)
+        except (TypeError, ValueError):
+            raise ProductPlatformError("星斗商品平台达人关联信息无效，请重新登录后重试", status=502) from None
+        body = self._request("/xd/frontend/product/talentStoreProductAdd", "POST", {
+            "ipId": ip_id,
+            "platformProductIdList": [platform_product_id],
+            "memberTalentIdList": [member_talent_id_value],
+        }, authenticated=True)
+        data = body.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            raise ProductPlatformError("星斗商品平台添加结果格式无效，请重试", status=502)

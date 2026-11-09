@@ -25,7 +25,7 @@ REQUIRED_COLUMNS = {
     'live_sessions': {'id', 'monitor_id', 'status', 'started', 'ended', 'ffmpeg_pid', 'end_time_source'},
     'live_segments': {'id', 'session_id', 'path', 'segment_index', 'status', 'started', 'ended',
                       'size_bytes', 'duration_us', 'asset_id', 'import_job_id'},
-    'live_monitor_controls': {'monitor_id', 'auto_record', 'notify_live', 'record_requested', 'record_held', 'updated'},
+    'live_monitor_controls': {'monitor_id', 'auto_record', 'notify_live', 'notify_offline', 'notify_split_complete', 'record_requested', 'record_held', 'updated'},
     'live_product_events': {'id', 'session_id', 'event_key', 'promotion_id', 'product_name',
                            'explain_type', 'event_time', 'received_at', 'source'},
     'live_product_periods': {'id', 'session_id', 'promotion_id', 'product_name', 'started', 'ended'},

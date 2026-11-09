@@ -134,6 +134,11 @@ async function verifySearch() {
     assert.ok(text(body).includes('0%'))
     assert.equal(all(body, el => el.type === 'img').length, 0, 'Unsafe image scheme is rejected')
     assert.ok(text(body).includes('仅展示平台返回的第一条'))
+    assert.ok(button(body, '添加橱窗'))
+    await click(button(body, '添加橱窗'))
+    assert.ok(text(body).includes('已添加到当前合作范围的橱窗。'))
+    assert.ok(button(body, '已添加橱窗').props.disabled)
+    assert.ok(calls.some(call => call.url.endsWith('/products/add-to-showcase') && call.body.platform_product_id === 'p1'))
   } finally { mounted.app.unmount() }
 
   respond = () => ({ product: null, scope_name: '店铺 A' })

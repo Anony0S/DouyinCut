@@ -229,7 +229,7 @@ pub async fn clear_logs(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn check_for_update() -> Result<serde_json::Value, String> {
     // Placeholder implementation - you can integrate with GitHub releases or your update server
-    let current_version = "0.2.101";
+    let current_version = env!("DOUYINCUT_VERSION");
 
     // For now, just return that we're up to date
     // In a real implementation, you would fetch the latest version from GitHub/server

@@ -37,7 +37,7 @@
 .live-add-heading p { margin-top: 4px; color: var(--live-muted); font-size: 14px; }
 .live-add-dialog .modal-box { width: min(680px, calc(100vw - 32px)); max-width: 680px; }
 .live-add-close { margin-left: auto; }
-.live-add-fields { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: end; }
+.live-add-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .live-add-fields label { margin: 18px 0 0; font-size: 14px; }
 .live-add-fields label > span { margin-left: 4px; color: var(--text-muted); font-size: 12px; }
 .live-add-fields input { margin-top: 7px; }
@@ -103,6 +103,11 @@
 .live-product-rail-selected-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .live-product-rail-range-label { color: var(--live-ink); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .live-product-rail-track { position: relative; height: 28px; margin-top: 2px; border-radius: 4px; }
+.live-product-hover-preview { position: fixed; z-index: 80; width: 240px; overflow: hidden; pointer-events: none; }
+.live-product-hover-image { display: grid; grid-template-rows: minmax(0, 1fr); place-items: center; height: var(--preview-image-height, 135px); min-height: 0; }
+.live-product-hover-image img { display: block; min-width: 0; min-height: 0; width: 100%; height: 100%; object-fit: contain; }
+.live-product-hover-preview time { flex: none; height: 26px; line-height: 18px; white-space: nowrap; }
+.live-product-hover-image span { padding: 12px; font-size: 12px; text-align: center; }
 .live-product-rail-period { position: absolute; top: 0; height: 28px; min-width: 4px; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
 .live-product-rail-period::after { position: absolute; top: 12px; right: 0; left: 0; height: 4px; border-inline: 1px solid var(--period-color); background: var(--period-color); content: ""; }
 .live-product-rail-period:hover::after, .live-product-rail-period:focus-visible::after { top: 10px; height: 8px; box-shadow: 0 0 0 2px color-mix(in oklab, var(--period-color) 30%, transparent); }
@@ -116,7 +121,14 @@
 .live-product-range-handle.is-snapped { transform: translateX(-50%) scale(1.12); background: var(--period-color); box-shadow: 0 0 0 4px color-mix(in oklab, var(--period-color) 24%, transparent), 0 0 12px color-mix(in oklab, var(--period-color) 72%, transparent); animation: live-product-handle-snap 180ms ease-out; }
 @keyframes live-product-handle-snap { 50% { box-shadow: 0 0 0 7px color-mix(in oklab, var(--period-color) 20%, transparent), 0 0 16px color-mix(in oklab, var(--period-color) 85%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .live-product-range-handle { transition: none; } .live-product-range-handle.is-snapped { animation: none; } }
-.live-product-rail-scale { display: flex; justify-content: space-between; margin-top: 1px; color: var(--text-muted); font: 10px/1.2 Consolas, monospace; font-variant-numeric: tabular-nums; }
+.live-product-rail-scale { position: relative; height: 18px; margin-top: 1px; color: var(--text-muted); font: 10px/1.2 Consolas, monospace; font-variant-numeric: tabular-nums; }
+.live-product-rail-scale.has-partial-interval { height: 30px; }
+.live-product-rail-tick { position: absolute; top: 0; padding-top: 5px; white-space: nowrap; }
+.live-product-rail-tick::before { position: absolute; top: 0; left: 0; height: 3px; border-left: 1px solid currentColor; content: ""; }
+.live-product-rail-tick > span { display: block; transform: translateX(-50%); }
+.live-product-rail-tick:first-child > span { transform: none; }
+.live-product-rail-tick.is-end > span { transform: translateX(-100%); }
+.live-product-rail-scale-end { position: absolute; top: 18px; right: 0; white-space: nowrap; }
 .live-product-rail-note { margin-top: 4px; color: var(--text-muted); font-size: 11px; }
 .live-recording-timeline { flex: none; gap: 12px; padding: 16px 18px 12px; margin-bottom: 16px; min-width: 0; }
 .live-recording-timeline-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 12px; }
@@ -285,7 +297,6 @@
   .live-room-list-foot { display: none; }
   .live-room-list-empty { padding: 15px; width: 100%; }
   .live-room-list-empty > .live-icon { display: none; }
-  .live-add-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .live-welcome { min-height: 440px; height: auto; }
 }
 @media (max-width: 520px) {
@@ -293,7 +304,6 @@
   .live-toolbar { flex-wrap: wrap; }
   .live-toolbar-actions { width: 100%; justify-content: flex-end; }
   .live-toolbar > p { font-size: 12px; }
-  .live-add-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .live-content-card-heading { padding: 14px; }
   .live-segment-row { grid-template-columns: 38px minmax(0, 1fr); }
   .live-segment-cover { width: 38px; height: 48px; }

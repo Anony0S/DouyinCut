@@ -53,6 +53,7 @@ class ProductPlatformService:
     def status(self) -> dict[str, Any]:
         config = self._config()
         token = read_secret(TOKEN_KEY)
+        scopes = [{"id": item["id"], "name": item["name"]} for item in config.get("scopes", [])]
         return {
             "platform": "xingdou",
             "logged_in": bool(token and config.get("logged_in")),
@@ -61,7 +62,7 @@ class ProductPlatformService:
             "member_id": config.get("member_id"),
             "main_ip_id": config.get("main_ip_id"),
             "main_ip_name": config.get("main_ip_name", ""),
-            "scopes": config.get("scopes", []),
+            "scopes": scopes,
             "last_validated_at": config.get("last_validated_at"),
         }
 
@@ -162,6 +163,38 @@ class ProductPlatformService:
                 "product": self._product(items[0]) if items else None,
                 "scope_name": config.get("main_ip_name", ""),
             }
+
+    def add_to_showcase(self, platform_product_id: str):
+        with self._lock:
+            config = self._config()
+            token = read_secret(TOKEN_KEY)
+            if not token or not config.get("logged_in"):
+                raise ProductPlatformAuthRequired()
+            ip_id = str(config.get("main_ip_id") or "")
+            if not ip_id:
+                raise ProductPlatformError("当前账号没有关联的商品查询范围，请先在星斗平台确认合作权限", status=409)
+            try:
+                client = ProductPlatformClient(token)
+                try:
+                    relation = next((item for item in client.member_ips()
+                                     if str(item.get("cooperationIpId") or "") == ip_id), None)
+                    member_talent_id = str(relation.get("memberTalentId") or "") if relation else ""
+                    if not member_talent_id:
+                        raise ProductPlatformError("当前合作范围缺少添加橱窗所需的达人关联信息", status=409)
+                    client.add_to_showcase(ip_id, platform_product_id, member_talent_id)
+                finally:
+                    client.close()
+            except ProductPlatformError as exc:
+                if exc.code == "PRODUCT_PLATFORM_AUTH_REQUIRED":
+                    self._save_config({"id": CONFIG_ID, "logged_in": False})
+                    try:
+                        self._write_token("")
+                    except ProductPlatformError:
+                        pass
+                    raise ProductPlatformAuthRequired() from None
+                raise
+            self._save_config({**config, "last_validated_at": time.time()})
+            return {"added": True}
 
     @staticmethod
     def _product(item):

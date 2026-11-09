@@ -9,7 +9,8 @@ const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const id = useId(), router = useRouter(), session = useSessionStore()
 const query = ref(props.keyword.trim())
-const loading = ref(false), error = ref(''), scopeName = ref(''), imageFailed = ref(false)
+const loading = ref(false), adding = ref(false), added = ref(false)
+const error = ref(''), addError = ref(''), scopeName = ref(''), imageFailed = ref(false)
 const product = ref<XingdouProduct | null>(null)
 let disposed = false
 const cover = computed(() => {
@@ -30,11 +31,28 @@ const facts = computed(() => product.value ? [
   { label: 'AI 直播', value: product.value.has_ai_live == null ? '—' : product.value.has_ai_live ? '有' : '无' },
 ] : [])
 function close() { disposed = true; emit('close') }
+async function addToShowcase() {
+  const platformProductId = product.value?.platform_product_id
+  if (!platformProductId || adding.value || added.value) return
+  adding.value = true; addError.value = ''
+  try {
+    await productPlatformApi.addToShowcase(platformProductId)
+    if (!disposed) added.value = true
+  } catch (cause) {
+    if (disposed) return
+    if (isProductPlatformAuthError(cause)) {
+      close()
+      session.message = '星斗商品平台未登录或登录已失效，请手动登录后重新添加'
+      await router.push({ path: '/settings', query: { cloudTab: 'product-platform' } })
+    } else addError.value = cause instanceof Error ? cause.message : '添加橱窗失败，请重试'
+  } finally { if (!disposed) adding.value = false }
+}
 async function search() {
-  if (loading.value) return
+  if (loading.value || adding.value) return
   const keyword = query.value.trim()
   if (!keyword) { error.value = '请输入查询词'; return }
-  loading.value = true; error.value = ''; product.value = null; imageFailed.value = false
+  loading.value = true; error.value = ''; addError.value = ''; added.value = false
+  product.value = null; imageFailed.value = false
   try {
     const result = await productPlatformApi.search(keyword)
     if (disposed) return
@@ -66,8 +84,8 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
         <form class="mt-3 flex items-center gap-2" @submit.prevent="search">
           <span class="label-text shrink-0 whitespace-nowrap text-xs text-base-content/60">查询词</span>
           <input v-model="query" class="input input-bordered input-sm min-w-0 flex-1" maxlength="200"
-            :disabled="loading" aria-label="商品查询词" />
-          <button type="submit" class="btn btn-primary btn-sm shrink-0" :disabled="loading || !query.trim()">
+            :disabled="loading || adding" aria-label="商品查询词" />
+          <button type="submit" class="btn btn-primary btn-sm shrink-0" :disabled="loading || adding || !query.trim()">
             <span v-if="loading" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
             {{ loading ? '查询中…' : '搜索' }}
           </button>
@@ -107,7 +125,15 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
               </div>
             </div>
           </article>
-          <p class="mt-4 text-xs text-base-content/60">仅展示平台返回的第一条商品，请核对名称与规格。查询范围：{{ scopeName || '当前合作范围' }}。</p>
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p class="text-xs text-base-content/60">仅展示平台返回的第一条商品，请核对名称与规格。查询范围：{{ scopeName || '当前合作范围' }}。</p>
+            <button type="button" class="btn btn-primary btn-sm" :disabled="adding || added || !product.platform_product_id" @click="addToShowcase">
+              <span v-if="adding" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+              {{ added ? '已添加橱窗' : adding ? '添加中…' : '添加橱窗' }}
+            </button>
+          </div>
+          <p v-if="added" role="status" class="alert alert-soft alert-success mt-3 text-sm">已添加到当前合作范围的橱窗。</p>
+          <p v-if="addError" role="alert" class="alert alert-soft alert-error mt-3 text-sm">{{ addError }}</p>
         </template>
         <div v-else role="status" class="py-16 text-center">
           <p class="font-medium">未查询到商品</p>

@@ -18,6 +18,7 @@ import LiveRecordingTimeline from "../components/live/LiveRecordingTimeline.vue"
 import LiveProductTimeline from "../components/live/LiveProductTimeline.vue";
 import {
   formatLiveTime,
+  formatOffset,
   monitorNeedsAttention,
 } from "../components/live/presentation";
 import "../styles/live-monitoring.css";
@@ -301,6 +302,12 @@ async function openSegmentFile(segmentId: string, reveal: boolean) {
     if (reveal) session.message = "已在文件夹中显示录制文件";
   });
 }
+async function viewSource(segmentId: string, offset: number) {
+  await session.act(async () => {
+    await liveMonitoringApi.openSegment(segmentId);
+    session.message = `已用系统播放器打开录制片段；鼠标位置对应文件内 ${formatOffset(offset, 0)}，可手动跳转查看`;
+  });
+}
 async function splitPeriod(periodId: string, confirmedMissingSegmentIds: string[], range?: {start:number; end:number}): Promise<LiveSplitResult> {
   try {
     session.error = "";
@@ -548,6 +555,7 @@ onUnmounted(() => {
             :session="selectedSession"
             :busy="busy"
             :on-split="splitPeriod"
+            @view-source="viewSource"
             @select="focusPeriod" />
           <section v-else class="live-product-rail live-product-rail-empty" aria-label="商品讲解轨">
             <div class="live-product-rail-heading">

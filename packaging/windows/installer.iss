@@ -2,7 +2,9 @@
 ; Generates a current-user offline installer that preserves work data on uninstall
 
 #define AppName "DouyinCut"
-#define AppVersion "0.2.101"
+#ifndef AppVersion
+  #error AppVersion must be supplied by the build script from SPEC.md
+#endif
 #define AppPublisher "DouyinCut"
 #define AppURL "https://github.com/user/douyincut"
 #define AppExeName "douyincut.exe"

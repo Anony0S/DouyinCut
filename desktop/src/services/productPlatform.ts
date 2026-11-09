@@ -37,6 +37,7 @@ export const productPlatformApi = {
   logout: () => api<ProductPlatformStatus>('/product-platform/logout', 'POST'),
   selectScope: (mainIpId: string) => api<ProductPlatformStatus>('/product-platform/scope', 'POST', {main_ip_id: mainIpId}),
   search: (keyword: string) => api<{product: XingdouProduct | null; scope_name: string}>('/product-platform/products/search', 'POST', {keyword}),
+  addToShowcase: (platformProductId: string) => api<{added: boolean}>('/product-platform/products/add-to-showcase', 'POST', {platform_product_id: platformProductId}),
 }
 
 export function isProductPlatformAuthError(error: unknown): boolean {

@@ -31,6 +31,8 @@
     "test:delete-wiring": "node scripts/verify-delete-confirmation-wiring.cjs",
     "test:live-timeline": "node scripts/verify-live-recording-timeline.cjs",
     "test:live-product-rail": "node scripts/verify-live-product-rail.cjs",
+    "test:timeline-thumbnail-scheduling": "node scripts/verify-timeline-thumbnail-scheduling.cjs",
+    "test:live-thumbnail-layout": "pnpm build && node scripts/verify-live-thumbnail-layout.cjs",
     "test:live-badge-contrast": "pnpm build && node scripts/verify-live-badge-contrast.cjs",
     "test:roughcut": "node scripts/verify-roughcut.cjs",
     "test:routing": "node scripts/verify-routing.cjs",

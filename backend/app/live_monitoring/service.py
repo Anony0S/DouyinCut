@@ -38,6 +38,8 @@ class LiveMonitorRequest(Model):
 class LiveMonitorSettings(Model):
     auto_record: bool | None = None
     notify_live: bool | None = None
+    notify_offline: bool | None = None
+    notify_split_complete: bool | None = None
 
 
 class LiveRecordingAction(Model):
@@ -84,7 +86,8 @@ class LiveStore:
                 -- record_held: user stopped recording, suppress until the room goes offline.
                 CREATE TABLE IF NOT EXISTS live_monitor_controls (
                     monitor_id TEXT PRIMARY KEY, auto_record INTEGER NOT NULL DEFAULT 1,
-                    notify_live INTEGER NOT NULL DEFAULT 1, record_requested INTEGER NOT NULL DEFAULT 0,
+                    notify_live INTEGER NOT NULL DEFAULT 1, notify_offline INTEGER NOT NULL DEFAULT 1,
+                    notify_split_complete INTEGER NOT NULL DEFAULT 1, record_requested INTEGER NOT NULL DEFAULT 0,
                     record_held INTEGER NOT NULL DEFAULT 0, updated REAL NOT NULL,
                     FOREIGN KEY(monitor_id) REFERENCES live_monitors(id)
                 );
@@ -203,6 +206,7 @@ class LiveStore:
     _MONITOR_COLUMNS = (
         "m.id,m.url,m.name,m.live_state,m.last_checked,m.error,m.retry_blocked,m.current_session_id,"
         "m.created,m.updated,COALESCE(c.auto_record,1) AS auto_record,COALESCE(c.notify_live,1) AS notify_live,"
+        "COALESCE(c.notify_offline,1) AS notify_offline,COALESCE(c.notify_split_complete,1) AS notify_split_complete,"
         "COALESCE(c.record_requested,0) AS record_requested,COALESCE(c.record_held,0) AS record_held,"
         "COALESCE(c.updated,0) AS updated_controls,l.is_live,l.checked AS live_checked"
     )
@@ -212,7 +216,8 @@ class LiveStore:
     @staticmethod
     def _decode_monitor(row) -> dict:
         result = dict(row)
-        for field in ("auto_record", "notify_live", "record_requested", "record_held", "retry_blocked"):
+        for field in ("auto_record", "notify_live", "notify_offline", "notify_split_complete",
+                      "record_requested", "record_held", "retry_blocked"):
             result[field] = bool(result[field])
         result["is_live"] = None if result["is_live"] is None else bool(result["is_live"])
         return result
@@ -1546,6 +1551,10 @@ class LiveMonitorWorker:
                    "正在自动录制" if monitor["auto_record"] and not monitor["retry_blocked"]
                    else "打开 DouyinCut 直播监控可开始录制")
 
+    def _notify_offline(self, monitor: dict):
+        from .notifications import show_toast
+        show_toast(f"{monitor['name'] or '抖音直播间'} 已下播", "本场直播录制已结束并完成收尾")
+
     def run_once(self, now: float | None = None, stop: threading.Event | None = None):
         now = now or time.time()
         self._process_product_listener_retries()
@@ -1582,11 +1591,14 @@ class LiveMonitorWorker:
                     self.live.set_auto_name(monitor_id, resolved["anchor_name"])
                     monitor = self.live.monitor(monitor_id)
                 if not is_live:
+                    was_live = monitor["is_live"] is True
                     self.notified_live.discard(monitor_id)
                     if monitor_id in self.processes:
                         self._end_recorder(monitor, "offline")
                     self.live.clear_broadcast_requests(monitor_id)
                     self.live.set_monitor_state(monitor_id, "offline", retry_blocked=False)
+                    if was_live and monitor["notify_offline"]:
+                        self._notify_offline(monitor)
                     continue
                 if monitor_id not in self.notified_live:
                     self.notified_live.add(monitor_id)

@@ -186,6 +186,8 @@ class Worker:
             ctx.checkpoint()
             result = self.execute(job, ctx)
             self.store.finish(job["id"], self.owner, "succeeded", result=result)
+            if job["kind"] == "live_product_clips":
+                self._notify_live_product_split(job["payload"])
         except Paused:
             self.store.finish(job["id"], self.owner, "paused")
         except Cancelled:
@@ -223,6 +225,20 @@ class Worker:
             stop.set()
             thread.join(timeout=2)
         return True
+
+    def _notify_live_product_split(self, payload):
+        with self.store.connection() as conn:
+            row = conn.execute(
+                "SELECT m.name,c.notify_split_complete FROM live_product_periods p "
+                "JOIN live_sessions s ON s.id=p.session_id "
+                "JOIN live_monitors m ON m.id=s.monitor_id "
+                "JOIN live_monitor_controls c ON c.monitor_id=m.id WHERE p.id=?",
+                (payload["period_id"],),
+            ).fetchone()
+        if row is None or not row["notify_split_complete"]:
+            return
+        from .live_monitoring.notifications import show_toast
+        show_toast(f"{row['name'] or '抖音直播间'} 商品切分完成", "商品视频片段已生成，可在直播监控中查看")
 
     def run(self, stop=None):
         stop = stop if stop is not None else threading.Event()

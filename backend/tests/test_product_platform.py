@@ -40,6 +40,25 @@ class ClientTests(unittest.TestCase):
             return httpx.Response(200, json={"success": True, "data": {"data": [{"id": "first"}]}})
         self.assertEqual(self.client(handle).search("测试商品", "scope-a"), [{"id": "first"}])
 
+    def test_add_to_showcase_accepts_success_with_empty_results(self):
+        def handle(request):
+            self.assertEqual(request.url.path, "/prod/qiongqi/xd/frontend/product/talentStoreProductAdd")
+            self.assertEqual(request.url.params["access-token"], "fixture-token")
+            values = json.loads(request.content)
+            signature = values.pop("sign")
+            self.assertEqual(values["ipId"], "scope-a")
+            self.assertEqual(values["platformProductIdList"], ["product-a"])
+            self.assertEqual(values["memberTalentIdList"], [123])
+            self.assertEqual(signature, sign_params(values))
+            return httpx.Response(200, json={"success": True, "data": {"results": []}})
+        self.assertIsNone(self.client(handle).add_to_showcase("scope-a", "product-a", "123"))
+
+    def test_add_to_showcase_rejects_malformed_success_response(self):
+        client = self.client(lambda request: httpx.Response(200, json={"success": True, "data": {"results": None}}))
+        with self.assertRaises(ProductPlatformError) as error:
+            client.add_to_showcase("scope-a", "product-a", "123")
+        self.assertEqual(error.exception.status, 502)
+
     def test_login_uses_platform_get_contract(self):
         def handle(request):
             self.assertEqual(request.url.path, "/prod/qiongqi/openapi/member/mobile/login")
@@ -132,8 +151,8 @@ class IntegrationTests(unittest.TestCase):
             "id": 123, "name": "测试账号", "mobile": "13800000000", "password": "must-never-persist",
         }
         self.remote.return_value.member_ips.return_value = [
-            {"cooperationIpId": 11, "cooperationIpName": "店铺 A", "contactTel": "13800000000"},
-            {"cooperationIpId": 22, "cooperationIpName": "店铺 B"},
+            {"cooperationIpId": 11, "cooperationIpName": "店铺 A", "memberTalentId": 111, "contactTel": "13800000000"},
+            {"cooperationIpId": 22, "cooperationIpName": "店铺 B", "memberTalentId": 222},
         ]
 
     def post(self, path, payload=None):
@@ -194,6 +213,28 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self.post("products/search", {"keyword": "测试"}).status_code, 401)
         self.assertNotIn(TOKEN_KEY, self.secrets)
         self.assertFalse(self.app.state.product_platform.status()["logged_in"])
+
+    def test_add_to_showcase_uses_selected_scope_and_private_member_relation(self):
+        self.login()
+        self.assertEqual(self.post("scope", {"main_ip_id": "22"}).status_code, 200)
+        result = self.post("products/add-to-showcase", {"platform_product_id": "product-a"})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json(), {"added": True})
+        self.remote.return_value.member_ips.assert_called()
+        self.remote.return_value.add_to_showcase.assert_called_once_with("22", "product-a", "222")
+        self.assertNotIn("member_talent_id", result.text)
+        self.assertEqual(self.post("products/add-to-showcase", {"platform_product_id": " "}).status_code, 422)
+
+    def test_add_to_showcase_auth_failure_clears_local_login(self):
+        self.login()
+        self.remote.return_value.add_to_showcase.side_effect = ProductPlatformError(
+            "expired", code="PRODUCT_PLATFORM_AUTH_REQUIRED", status=401,
+        )
+        result = self.post("products/add-to-showcase", {"platform_product_id": "product-a"})
+        self.assertEqual(result.status_code, 401)
+        self.assertEqual(result.json()["detail"]["code"], "PRODUCT_PLATFORM_AUTH_REQUIRED")
+        self.assertFalse(self.app.state.product_platform.status()["logged_in"])
+        self.assertNotIn(TOKEN_KEY, self.secrets)
 
     def test_platform_null_rows_reach_api_as_no_product_and_keep_login(self):
         self.login()

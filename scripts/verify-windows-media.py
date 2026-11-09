@@ -161,6 +161,7 @@ def main():
             env['DOUYINCUT_' + key] = 'offline-fixture-never-submit'
         env['DOUYINCUT_FFMPEG'] = str(root / 'must-not-use-ffmpeg.exe')
         env['DOUYINCUT_FFPROBE'] = str(root / 'must-not-use-ffprobe.exe')
+        env['DOUYINCUT_JIANYING_DRAFTS_DIR'] = str(root / '剪映 草稿')
         source = root / '用户 原视频.mp4'
         run(tools.ffmpeg, '-y', '-f', 'lavfi', '-i',
             'color=c=red:s=160x120:r=30:d=3[a];color=c=blue:s=160x120:r=30:d=3[b];[a][b]concat=n=2:v=1:a=0',
@@ -264,18 +265,19 @@ def main():
             draft_path = Path(jianying['draft_path'])
             assert draft_path.exists(), f"JianYing draft not found at {draft_path}"
             assert (draft_path / "draft_meta_info.json").exists(), "draft_meta_info.json missing"
-            assert (draft_path / "draft_content.json").exists(), "draft_content.json missing"
-            assert (draft_path / "draft_materials").is_dir(), "draft_materials directory missing"
+            assert draft_path.parent == root / '剪映 草稿'
+            assert (draft_path / "draft_info.json").exists(), "draft_info.json missing"
+            assert (draft_path / "Resources").is_dir(), "Resources directory missing"
             
             # Verify draft contains video clips and subtitles
-            draft_content = json.loads((draft_path / "draft_content.json").read_text(encoding="utf-8"))
+            draft_content = json.loads((draft_path / "draft_info.json").read_text(encoding="utf-8"))
             materials = draft_content.get("materials", {})
             assert "videos" in materials, "No videos in draft materials"
             assert len(materials["videos"]) > 0, "Draft has no video materials"
             
             # Verify materials directory contains actual media files
-            material_files = list((draft_path / "draft_materials").glob("*"))
-            assert len(material_files) > 0, "draft_materials directory is empty"
+            material_files = list((draft_path / "Resources").glob("*.mp4"))
+            assert len(material_files) == len(plan['clips']), "Draft media count does not match plan"
             
             report = {'result': 'passed', 'bundled_version': '8.1-full_build-www.gyan.dev',
                       'jianying_draft_generated': True, 'jianying_templates_bundled': True,

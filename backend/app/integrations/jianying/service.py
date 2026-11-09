@@ -107,7 +107,8 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
             tolerance = max(200_000, 2_000_000 // plan.canvas.fps)
             if abs(media["duration_us"] - clip.duration_us) > tolerance:
                 raise MediaError(f"第 {index + 1} 段剪映素材时长与方案不一致")
-            material = VideoMaterial(str(output), material_name=f"片段 {index + 1:02}", duration=media["duration_us"])
+            material = VideoMaterial(str(output), material_name=f"片段 {index + 1:02}",
+                                     duration=media["duration_us"], ffprobe=settings.ffprobe)
             material.duration = media["duration_us"]
             material.path = str(output.resolve())
             material.local_material_id = output.stem

@@ -20,7 +20,8 @@ class JianyingDraftTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.settings = Settings(self.root / "data")
+        self.settings = Settings(self.root / "data", ffmpeg=shutil.which("ffmpeg"),
+                                 ffprobe=shutil.which("ffprobe"))
         self.settings.prepare()
         self.source = self.root / "直播.mp4"
         run_process([self.settings.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
@@ -46,7 +47,8 @@ class JianyingDraftTests(unittest.TestCase):
 
     def test_draft_has_separate_timeline_clips_and_private_media_copies(self):
         output_root = self.root / "jianying-projects"
-        with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root)}):
+        with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root), "PATH": ""}), \
+                patch("app._vendor.pyJianYingDraft.local_materials.pymediainfo", None):
             result = create_jianying_draft(self.plan, {self.asset.id: self.asset}, self.settings, "job_12345678")
         draft_path = Path(result["draft_path"])
         content = json.loads((draft_path / "draft_info.json").read_text(encoding="utf-8"))

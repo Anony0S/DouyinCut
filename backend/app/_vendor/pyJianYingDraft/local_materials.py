@@ -11,10 +11,10 @@ from typing import Optional, Literal
 from typing import Dict, Any
 
 
-def _probe_media(path: str) -> Dict[str, Any]:
+def _probe_media(path: str, ffprobe: str = "ffprobe") -> Dict[str, Any]:
     """Probe media with ffprobe when pymediainfo/libmediainfo is unavailable."""
     cmd = [
-        "ffprobe",
+        ffprobe,
         "-v",
         "error",
         "-show_entries",
@@ -24,7 +24,8 @@ def _probe_media(path: str) -> Dict[str, Any]:
         "json",
         path,
     ]
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if res.returncode != 0:
         raise ValueError(res.stderr.strip() or f"ffprobe failed for {path}")
     return json.loads(res.stdout or "{}")
@@ -98,10 +99,11 @@ class VideoMaterial:
     material_type: Literal["video", "photo"]
     """素材类型: 视频或图片"""
 
-    def __init__(self, path: str, material_name: Optional[str] = None, crop_settings: CropSettings = CropSettings(), duration: Optional[int] = None):
+    def __init__(self, path: str, material_name: Optional[str] = None, crop_settings: CropSettings = CropSettings(), duration: Optional[int] = None, *, ffprobe: str = "ffprobe"):
         """从指定位置加载视频（或图片）素材
         Args:
             duration (`int`, optional): 某些格式(如webm)解析可能会失败, 此时可手动传入时长(us)
+            ffprobe (`str`, optional): 后备媒体探测程序路径.
         """
         path = os.path.abspath(path)
         postfix = os.path.splitext(path)[1]
@@ -117,7 +119,7 @@ class VideoMaterial:
         self.local_material_id = os.path.splitext(os.path.basename(self.path))[0]
 
         if not pymediainfo or not pymediainfo.MediaInfo.can_parse():
-            probed = _probe_media(path)
+            probed = _probe_media(path, ffprobe)
             streams = probed.get("streams", [])
             video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
             image_exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}

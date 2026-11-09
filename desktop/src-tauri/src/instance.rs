@@ -85,6 +85,7 @@ mod platform {
 
     pub(super) struct WindowsInstance {
         _mutex: OwnedHandle,
+        _installer_guard: OwnedHandle,
         activation: OwnedHandle,
         stopping: Arc<AtomicBool>,
         listener: Mutex<Option<JoinHandle<()>>>,
@@ -210,9 +211,17 @@ mod platform {
             return Ok(InstanceAcquisition::AlreadyRunning);
         }
 
+        // A fixed session-local marker lets Inno Setup detect the application
+        // without reproducing the SID-specific activation protocol.
+        let installer_name = wide("Local\\DouyinCut-InstallerGuard");
+        let installer_guard = unsafe { CreateMutexW(ptr::null(), 0, installer_name.as_ptr()) };
+        if installer_guard.is_null() {
+            return Err(format!("无法建立安装保护锁：{}", std::io::Error::last_os_error()));
+        }
         Ok(InstanceAcquisition::Primary(CurrentUserInstance {
             platform: WindowsInstance {
                 _mutex: mutex,
+                _installer_guard: OwnedHandle::new(installer_guard),
                 activation,
                 stopping: Arc::new(AtomicBool::new(false)),
                 listener: Mutex::new(None),

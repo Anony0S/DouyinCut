@@ -23,6 +23,7 @@
     "test:events": "node scripts/verify-events.cjs",
     "test:runtime-session": "node scripts/verify-runtime-session.cjs",
     "test:exit-guards": "node scripts/verify-exit-guards.cjs",
+    "test:updates": "node scripts/verify-updates.cjs",
     "test:error-message": "node scripts/verify-error-message.cjs",
     "test:work-directory": "node scripts/verify-work-directory.cjs",
     "test:job-error": "node scripts/verify-job-error.cjs",

@@ -6,7 +6,7 @@
   #error AppVersion must be supplied by the build script from SPEC.md
 #endif
 #define AppPublisher "DouyinCut"
-#define AppURL "https://github.com/user/douyincut"
+#define AppURL "https://github.com/Anony0S/DouyinCut"
 #define AppExeName "douyincut.exe"
 #define RuntimeDirName "DouyinCutRuntime"
 
@@ -31,6 +31,9 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Updates use the app's own graceful shutdown, never Restart Manager termination.
+CloseApplications=no
+RestartApplications=no
 ; Preserve work data on uninstall
 UninstallFilesDir={app}\uninst
 
@@ -58,47 +61,38 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+#include "update.iss"
+
 function InitializeSetup(): Boolean;
-var
-  ResultCode: Integer;
 begin
-  Result := True;
+  Result := WaitForUpdateExit();
+  if not Result then
+    Exit;
 
   // Check if the application is running
-  if CheckForMutexes('DouyinCut_SingleInstance_Mutex') then
+  if CheckForMutexes('Local\DouyinCut-InstallerGuard') then
   begin
-    if MsgBox('DouyinCut 正在运行。安装前必须完全退出应用程序。' + #13#10 +
-              '是否继续？', mbConfirmation, MB_YESNO) = IDYES then
-    begin
-      Result := False;
-      MsgBox('请先关闭 DouyinCut，然后重新运行安装程序。', mbError, MB_OK);
-    end
-    else
-    begin
-      Result := False;
-    end;
+    Result := False;
+    MsgBox('DouyinCut 正在运行。请先完全退出，再重新运行安装程序。', mbError, MB_OK);
   end;
 end;
 
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if CheckForMutexes('Local\DouyinCut-InstallerGuard') then
+    Result := 'DouyinCut 正在运行。请完全退出后重试安装。';
+end;
+
 function InitializeUninstall(): Boolean;
-var
-  ResultCode: Integer;
 begin
   Result := True;
 
   // Check if the application is running during uninstall
-  if CheckForMutexes('DouyinCut_SingleInstance_Mutex') then
+  if CheckForMutexes('Local\DouyinCut-InstallerGuard') then
   begin
-    if MsgBox('DouyinCut 正在运行。卸载前必须完全退出应用程序。' + #13#10 +
-              '是否继续？', mbConfirmation, MB_YESNO) = IDYES then
-    begin
-      Result := False;
-      MsgBox('请先关闭 DouyinCut，然后重新运行卸载程序。', mbError, MB_OK);
-    end
-    else
-    begin
-      Result := False;
-    end;
+    Result := False;
+    MsgBox('DouyinCut 正在运行。请先完全退出，再重新运行卸载程序。', mbError, MB_OK);
   end;
 end;
 

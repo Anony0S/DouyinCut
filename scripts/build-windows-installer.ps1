@@ -93,8 +93,8 @@ try {
     Write-Host "  Path: $isccPath" -ForegroundColor Gray
 
     # Read version from SPEC.md
-    $specContent = Get-Content (Join-Path $repo 'SPEC.md') -Raw
-    if ($specContent -match '- 版本：(\d+\.\d+\.\d+)') {
+    $specContent = Get-Content (Join-Path $repo 'SPEC.md') -Raw -Encoding UTF8
+    if ($specContent -match '(?m)^- \u7248\u672c\uff1a(\d+\.\d+\.\d+)\s*$') {
         $version = $Matches[1]
     } else {
         throw 'Could not extract version from SPEC.md'
@@ -187,6 +187,9 @@ try {
         throw 'Installer output is missing'
     }
 
+    Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/prepare-github-release.py',
+        '--installer', $installerExe) 'GitHub Release checksum generation'
+
     $installerSize = (Get-Item $installerExe).Length
     $installerSizeMB = [math]::Round($installerSize / 1MB, 2)
 
@@ -204,6 +207,8 @@ try {
         timestamp = $timestamp
         installer_path = $installerExe
         installer_size_bytes = $installerSize
+        release_tag = "v$version"
+        checksum_path = "$installerExe.sha256"
         components = @{
             frontend = "desktop/dist"
             runtime = $runtime

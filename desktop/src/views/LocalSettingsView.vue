@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onUnmounted, ref } from "vue";
 import { api } from "../api";
+import SoftwareUpdate from "../components/SoftwareUpdate.vue";
 
 type TauriInternals = {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -11,9 +12,6 @@ function tauri(): TauriInternals {
   if (!internals) throw new Error("此操作需要在桌面应用中使用");
   return internals;
 }
-const appVersion = "0.2.101";
-const checkingUpdate = ref(false);
-const updateResult = ref<{ hasUpdate: boolean; message: string } | null>(null);
 type DialogState = { title: string; message: string; kind: "confirm" | "info" | "error"; action?: () => Promise<void | DialogState> };
 const dialog = ref<DialogState | null>(null);
 const dialogBusy = ref(false);
@@ -86,20 +84,6 @@ function clearLogs() {
   });
 }
 
-async function checkForUpdate() {
-  checkingUpdate.value = true;
-  updateResult.value = null;
-  try {
-    const result = await tauri().invoke("check_for_update");
-    updateResult.value = result as { hasUpdate: boolean; message: string };
-    openDialog({ title: "版本更新", message: updateResult.value.message, kind: "info" });
-  } catch (error) {
-    updateResult.value = { hasUpdate: false, message: `检查更新失败: ${error}` };
-    openDialog({ title: "检查更新失败", message: String(error), kind: "error" });
-  } finally {
-    checkingUpdate.value = false;
-  }
-}
 </script>
 
 <template>
@@ -134,17 +118,7 @@ async function checkForUpdate() {
         </div>
       </li>
 
-      <li class="list-row local-update-row">
-        <div class="local-setting-copy">
-          <h2>版本更新</h2>
-          <p>当前版本 <strong>v{{ appVersion }}</strong>，检查是否有新版本。</p>
-        </div>
-        <div class="local-setting-actions">
-          <button class="btn btn-outline" type="button" :disabled="checkingUpdate" @click="checkForUpdate">
-            {{ checkingUpdate ? "检查中..." : "检查更新" }}
-          </button>
-        </div>
-      </li>
+      <SoftwareUpdate />
     </ul>
 
     <div v-if="dialog" class="modal modal-open local-settings-dialog" role="presentation">
@@ -188,7 +162,7 @@ async function checkForUpdate() {
 }
 
 .page-heading p,
-.local-setting-copy p {
+:deep(.local-setting-copy p) {
   margin: 5px 0 0;
   color: var(--text-secondary);
   font-size: 14px;
@@ -202,7 +176,7 @@ async function checkForUpdate() {
   background: var(--color-base-100);
 }
 
-.local-settings-list .list-row {
+.local-settings-list :deep(.list-row) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -210,29 +184,23 @@ async function checkForUpdate() {
   padding: 20px 24px;
 }
 
-.local-setting-copy {
+:deep(.local-setting-copy) {
   min-width: 0;
 }
 
-.local-setting-copy h2 {
+:deep(.local-setting-copy h2) {
   margin: 0;
   font-size: 17px;
 }
 
-.local-setting-actions {
+:deep(.local-setting-actions) {
   display: flex;
+  flex-wrap: wrap;
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
-}
-
-.local-update-result {
-  width: fit-content;
-  margin-top: 10px;
-  padding: 8px 12px;
-  font-size: 13px;
 }
 
 .local-settings-dialog .modal-box {
@@ -252,14 +220,14 @@ async function checkForUpdate() {
 }
 
 @media (max-width: 620px) {
-  .local-settings-list .list-row {
+  .local-settings-list :deep(.list-row) {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
     gap: 14px;
     padding: 18px;
   }
 
-  .local-setting-actions {
+  :deep(.local-setting-actions) {
     width: 100%;
     margin-left: 0;
     justify-content: flex-start;

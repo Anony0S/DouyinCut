@@ -4,6 +4,7 @@ mod instance;
 mod session;
 mod window_preferences;
 mod workspace;
+mod updates;
 
 fn main() {
     use tauri::Manager;
@@ -23,13 +24,18 @@ fn main() {
     let application = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(instance)
+        .manage(updates::UpdateHost::default())
         .invoke_handler(tauri::generate_handler![
             workspace::workspace_action,
             workspace::delete_workspace_config,
             workspace::relaunch,
             workspace::open_log_directory,
             workspace::clear_logs,
-            workspace::check_for_update,
+            updates::check_for_update,
+            updates::get_update_status,
+            updates::download_update,
+            updates::cancel_update_download,
+            updates::install_update,
             session::complete_exit,
             window_preferences::get_window_preferences,
             window_preferences::set_window_preferences

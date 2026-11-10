@@ -20,7 +20,9 @@ def run_process(args: list[str], checkpoint: Callable | None = None, timeout: in
     import tempfile
     with tempfile.TemporaryFile(mode="w+b") as output:
         try:
-            process = subprocess.Popen(args, stdout=output, stderr=subprocess.STDOUT,
+            # The desktop host uses stdin for its control protocol; media tools
+            # must not compete with that pipe for input.
+            process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except FileNotFoundError as exc:
             raise MediaError(f"找不到程序 {Path(args[0]).name}，请安装或设置其路径") from exc

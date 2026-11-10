@@ -345,10 +345,15 @@ class Store:
     def start_session(self):
         self.recover_exit_interrupted_operations()
         with self.connection() as conn:
+            now = time.time()
             conn.execute("""UPDATE jobs SET state='queued',owner=NULL,lease=NULL,updated=?
                 WHERE kind='analyze' AND state IN ('queued','paused','pause_requested','running')
                 AND EXISTS (SELECT 1 FROM cloud_operations op WHERE op.job_id=jobs.id
-                    AND op.attempt=jobs.attempts AND op.status='succeeded')""", (time.time(),))
+                    AND op.attempt=jobs.attempts AND op.status='succeeded')""", (now,))
+            # Re-queue product clip jobs that were interrupted by shutdown so they resume
+            # automatically instead of staying paused and blocking new split requests.
+            conn.execute("UPDATE jobs SET state='queued',owner=NULL,lease=NULL,updated=? "
+                         "WHERE kind='live_product_clips' AND state IN ('paused','pause_requested')", (now,))
             conn.execute("DELETE FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,))
 
     def is_shutting_down(self):

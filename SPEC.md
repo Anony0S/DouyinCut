@@ -1,7 +1,7 @@
 # DouyinCut 产品与技术规格
 
-- 版本：0.2.140
-- 日期：2026-11-09（Asia/Shanghai）
+- 版本：0.2.141
+- 日期：2026-11-10（Asia/Shanghai）
 - 状态：当前开发与验收基线
 - 平台：Windows；Python / uv、FastAPI、Vue 3 / pnpm、Tauri 开发外壳
 

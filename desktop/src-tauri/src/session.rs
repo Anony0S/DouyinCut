@@ -344,10 +344,13 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let (width, height) = app.state::<crate::window_preferences::WindowPreferencesHost>().startup_size().dimensions();
     config.width = f64::from(width);
     config.height = f64::from(height);
-    config.visible = false; // Start hidden to avoid flash
+    // Keep the setup window hidden until the page knows whether user input is
+    // required. WorkDirectorySetup shows it only for first-run selection or
+    // directory repair; an already configured workspace opens the workbench
+    // directly without flashing this intermediate window.
+    config.visible = false;
     let window = tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
     app.state::<crate::window_preferences::WindowPreferencesHost>().restore_position(&window);
-    window.show()?;
     Ok(())
 }
 

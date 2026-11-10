@@ -12,6 +12,13 @@ async function main() {
   // Check the generated command ACL against both actual desktop window labels.
   // Frontend mocks alone cannot catch Tauri rejecting a command before its handler.
   const tauriRoot = path.join(__dirname, '../src-tauri')
+  const session = fs.readFileSync(path.join(tauriRoot, 'src/session.rs'), 'utf8')
+  const setupWindowStart = session.indexOf('config.url = tauri::WebviewUrl::App("setup.html".into());')
+  const setupWindowEnd = session.indexOf('\n    Ok(())', setupWindowStart)
+  assert.ok(setupWindowStart >= 0 && setupWindowEnd > setupWindowStart, 'Could not locate production setup window creation')
+  const setupWindow = session.slice(setupWindowStart, setupWindowEnd)
+  assert.match(setupWindow, /config\.visible = false;/, 'Setup window must start hidden')
+  assert.doesNotMatch(setupWindow, /window\.show\(\)/, 'Setup window must not be shown unconditionally during startup')
   const acl = JSON.parse(fs.readFileSync(path.join(tauriRoot, 'gen/schemas/acl-manifests.json'), 'utf8'))['__app-acl__']
   const capabilities = Object.values(JSON.parse(fs.readFileSync(path.join(tauriRoot, 'gen/schemas/capabilities.json'), 'utf8')))
   const localSettings = fs.readFileSync(path.join(__dirname, '../src/views/LocalSettingsView.vue'), 'utf8')

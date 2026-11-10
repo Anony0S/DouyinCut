@@ -51,6 +51,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     live_store = LiveStore(store)
     thumbnails = ThumbnailCache(settings)
     token = token or os.environ.get("DOUYINCUT_SESSION_TOKEN") or secrets.token_urlsafe(32)
+    # WebView profiles are shared by development and installed workbenches.
+    # Cookies are host-scoped, not port-scoped: a fixed name lets another
+    # loopback session replace the credential used by <video> range requests.
+    session_cookie = f"douyincut_session_{settings.port}"
     app = FastAPI(title="DouyinCut", version="0.1.0")
     app.state.store, app.state.settings, app.state.live_store = store, settings, live_store
     app.state.product_platform = ProductPlatformService(store)
@@ -67,7 +71,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         trace = secrets.token_hex(8)
         if request.url.path.startswith("/api/") and request.method != "OPTIONS":
             origin = request.headers.get("origin")
-            provided = request.headers.get("x-session-token") or request.cookies.get("douyincut_session", "")
+            provided = request.headers.get("x-session-token") or request.cookies.get(session_cookie, "")
             if (origin is not None and origin not in allowed) or not hmac.compare_digest(provided.encode(), token.encode()):
                 return JSONResponse({"detail": "本地会话未授权，请通过项目启动器打开界面"}, status_code=401)
             if request.method in {"POST", "PUT", "PATCH", "DELETE"} and store.is_shutting_down():
@@ -113,7 +117,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
 
     @app.post("/api/v1/auth")
     def authenticate(response: Response):
-        response.set_cookie("douyincut_session", token, httponly=True, samesite="strict", path="/api/v1")
+        response.set_cookie(session_cookie, token, httponly=True, samesite="strict", path="/api/v1")
         return {"authenticated": True}
 
     @app.get("/api/v1/diagnostics")

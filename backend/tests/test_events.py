@@ -30,7 +30,7 @@ class EventAuthTests(unittest.TestCase):
                 while not server.started and thread.is_alive() and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertTrue(server.started, 'Test server did not start')
-                for cookie in (None, 'douyincut_session=stale-session'):
+                for cookie in (None, f'douyincut_session_{port}=stale-session'):
                     headers = {'X-Session-Token': 'mock-event-session', 'Accept': 'text/event-stream'}
                     if cookie:
                         headers['Cookie'] = cookie

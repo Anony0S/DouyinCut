@@ -105,6 +105,26 @@ def run(tool, *args, env):
                           capture_output=True, check=True, timeout=60).stdout
 
 
+def check_shared_profile_media(session, executable, root, media_urls, env):
+    """Two real frozen sessions share the cookie jar just like Tauri WebViews."""
+    work = root / '第二 工作目录'
+    work.mkdir()
+    locator = root / '第二 配置' / 'workspace.json'
+    WorkDirectoryRegistry(locator).select(work)
+    other = FrozenSession(executable, root, work, locator, env)
+    try:
+        other.client.cookies = session.client.cookies.jar
+        assert other.client.post('/api/v1/auth').status_code == 200
+        for client in (session.client, other.client):
+            assert client.get('/api/v1/assets', headers={'X-Session-Token': ''}).status_code == 200
+        for url in media_urls:
+            response = session.client.get(url, headers={'Range': 'bytes=0-63', 'X-Session-Token': ''})
+            assert response.status_code == 206, f'Concurrent session broke media: {response.status_code}'
+            assert len(response.content) == 64 and response.headers['content-type'].startswith('video/')
+    finally:
+        other.close()
+
+
 def check_artifact(artifact, tools, env, blue_first=True):
     video = Path(artifact['video_path'])
     metadata = json.loads(run(tools.ffprobe, '-show_format', '-show_streams', '-of', 'json', str(video), env=env))
@@ -250,6 +270,8 @@ def main():
                     assert anonymous.get(url).status_code == 401
                 streamed = session.client.get(url, headers={'Range': 'bytes=0-63', 'X-Session-Token': ''})
                 assert streamed.status_code == 206 and len(streamed.content) == 64
+            check_shared_profile_media(session, executable, root, [media_url, *[
+                '/api/v1/exports/' + item['id'] + '/media' for item in (preview, output)]], env)
             repeated = session.request('POST', '/plans/' + plan['id'] + '/exports', json={'format': 'mp4'})
             second = session.job(repeated['id'])['result']
             assert second['path'] != output['path']
@@ -283,6 +305,7 @@ def main():
                       'jianying_draft_generated': True, 'jianying_templates_bundled': True,
                       'system_only_path': True, 'media_environment_overrides_ignored': True,
                       'chinese_space_paths': True, 'authenticated_api_sse_range_media': True,
+                      'concurrent_sessions_cookie_media_isolated': True,
                       'real_decoded_clip_order_audio_and_srt': True, 'source_unchanged': True,
                       'history_preserved': True, 'cloud_fixture': 'saved_successful_current_format_responses',
                       'paid_cloud_requests': 0, 'production_frontend_served': True,

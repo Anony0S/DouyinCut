@@ -65,6 +65,48 @@ class ApiTests(unittest.TestCase):
         response=self.client.post('/api/v1/plans/unknown/exports',json={'format':'jianying'})
         self.assertEqual(response.status_code,422)
 
+    def test_media_cookie_isolated_between_loopback_ports(self):
+        """A shared WebView profile must keep both workbenches playable."""
+        from fastapi.testclient import TestClient
+        from http.cookiejar import CookieJar
+        from app.api import create_app
+        from app.core.config import Settings
+        from app.core.domain import Asset
+
+        cookies = CookieJar()
+        with tempfile.TemporaryDirectory() as temporary:
+            clients = []
+            try:
+                for port in (8765, 50479):
+                    root = Path(temporary) / str(port)
+                    app = create_app(Settings(root, port=port), token=f"session-{port}")
+                    source = root / 'source.mp4'
+                    source.write_bytes(b'0123456789')
+                    asset = Asset(id='source', path=str(source), name=source.name, sha256='test',
+                                  duration_us=1_000_000, width=160, height=120, has_audio=True)
+                    app.state.store.put('asset', asset.model_dump())
+                    preview = root / 'previews' / 'preview.mp4'
+                    preview.write_bytes(source.read_bytes())
+                    app.state.store.put('export', {'id': 'preview', 'video_path': str(preview)})
+                    client = TestClient(app, base_url=f'http://127.0.0.1:{port}', cookies=cookies)
+                    clients.append(client)
+                    auth = client.post('/api/v1/auth', headers={'X-Session-Token': f'session-{port}'})
+                    self.assertEqual(auth.status_code, 200)
+                    other_cookie = auth.headers['set-cookie'].split(';', 1)[0]
+                # Video elements send cookies, without the fetch API's token header.
+                for client in clients:
+                    for path in ('/assets/source/media', '/exports/preview/media'):
+                        response = client.get('/api/v1' + path, headers={'Range': 'bytes=0-3'})
+                        self.assertEqual(response.status_code, 206, response.text)
+                        self.assertEqual(response.content, b'0123')
+                        self.assertEqual(response.headers['content-range'], 'bytes 0-3/10')
+                # A different session's cookie cannot authorize another server.
+                self.assertEqual(clients[0].get('/api/v1/assets/source/media', headers={
+                    'Cookie': other_cookie}).status_code, 401)
+            finally:
+                for client in clients:
+                    client.close()
+
     def test_ts_asset_media_is_served_as_source_without_generating_preview_proxy(self):
         from app.core.domain import Asset
 

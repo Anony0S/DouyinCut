@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useRoute } from "vue-router";
 import type { CloudConfig } from "../api";
-import { cloudApi, type ModelConnectionTestResult } from "../services/cloud";
+import { cloudApi, type ModelConnectionTestResult, type OssConnectionTestResult } from "../services/cloud";
 import { useSessionStore } from "../stores/session";
 import SecretInput from "../components/SecretInput.vue";
 import ProductPlatformLoginCard from "../components/product/ProductPlatformLoginCard.vue";
@@ -90,6 +90,18 @@ const modelKeyPreview = computed(() =>
   modelKeyConfigured.value ? secretPreviews.value.llm_api_key || "" : "",
 );
 const testingModel = ref(false);
+const testingOss = ref(false);
+const ossTestResult = ref<OssConnectionTestResult | null>(null);
+let ossTestVersion = 0;
+const canTestOss = computed(() => connected.value && !busy.value && !testingOss.value &&
+  Boolean(config.value.oss_endpoint.trim() && config.value.oss_bucket.trim() &&
+    (secretDrafts.value.oss_access_key_id.trim() || secrets.value.oss_access_key_id) &&
+    (secretDrafts.value.oss_access_key_secret.trim() || secrets.value.oss_access_key_secret)));
+watch([() => config.value.oss_endpoint, () => config.value.oss_bucket,
+  () => secretDrafts.value.oss_access_key_id, () => secretDrafts.value.oss_access_key_secret], () => {
+    ossTestVersion++;
+    ossTestResult.value = null;
+  });
 const modelTestResult = ref<ModelConnectionTestResult | null>(null);
 const canTestModel = computed(
   () =>
@@ -131,6 +143,25 @@ watch(
 );
 
 let disposed = false;
+async function testOssConnection() {
+  if (!canTestOss.value) return;
+  const version = ++ossTestVersion;
+  const started = Date.now();
+  testingOss.value = true;
+  ossTestResult.value = null;
+  try {
+    const result = await cloudApi.testOss({oss_endpoint: config.value.oss_endpoint, oss_bucket: config.value.oss_bucket},
+      secretDrafts.value.oss_access_key_id.trim(), secretDrafts.value.oss_access_key_secret.trim());
+    if (!disposed && version === ossTestVersion) ossTestResult.value = result;
+  } catch (cause) {
+    if (!disposed && version === ossTestVersion) ossTestResult.value = {
+      ok: false, elapsed_ms: Date.now() - started,
+      message: cause instanceof Error ? cause.message : "测试失败，请重试",
+    };
+  } finally {
+    if (!disposed) testingOss.value = false;
+  }
+}
 async function testModelConnection() {
   if (!canTestModel.value) return;
   const version = ++modelTestVersion;
@@ -182,6 +213,7 @@ async function saveConfigFields(fields: (keyof CloudConfig)[]) {
   } as CloudConfig;
 }
 async function saveSettings() {
+  if (testingOss.value) return;
   await session.act(async () => {
     await saveConfigFields(["oss_endpoint", "oss_bucket"]);
     for (const { name } of ossSecretFields) {
@@ -469,9 +501,18 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="settings-actions">
-            <button class="btn btn-primary" :disabled="busy || !connected">
+            <button type="button" class="btn" :disabled="!canTestOss" @click="testOssConnection">
+              {{ testingOss ? "测试中…" : "测试 OSS" }}
+            </button>
+            <button class="btn btn-primary" :disabled="busy || testingOss || !connected">
               保存 OSS 配置
             </button>
+          </div>
+          <p class="hint">测试会上传一个很小的测试对象，按 Bucket 生命周期规则清理；不保存表单，不上传用户音视频。最长等待 30 秒。</p>
+          <p v-if="testingOss" role="status" class="hint">正在测试 OSS，请稍候…</p>
+          <div v-if="ossTestResult" :role="ossTestResult.ok ? 'status' : 'alert'" class="alert alert-soft mt-3 text-sm"
+            :class="ossTestResult.ok ? 'alert-success' : 'alert-error'">
+            <span>{{ ossTestResult.message }} · {{ (ossTestResult.elapsed_ms / 1000).toFixed(1) }} 秒</span>
           </div>
         </form>
       </section>

@@ -319,11 +319,16 @@ async function verifyModelTestButton() {
   const settle = async () => { for (let i=0;i<16;i++) { await Promise.resolve(); await vue.nextTick() } }
   const pending = () => { let resolve; const promise=new Promise(ok=>{resolve=ok}); return {promise,resolve} }
   const config={region:'cn',base_url:'https://saved.example/v1',planner_model:'saved-model',
-    asr_base_url:'https://speech.example',asr_model:'qwen-audio-3.1-asr-flash',asr_timeout_seconds:300,oss_endpoint:'',oss_bucket:'',chat_timeout_seconds:300}
+    asr_base_url:'https://speech.example',asr_model:'qwen-audio-3.1-asr-flash',asr_timeout_seconds:300,oss_endpoint:'https://oss-cn-beijing.aliyuncs.com',oss_bucket:'test-bucket',chat_timeout_seconds:300}
   const requests=[]
+  const ossRequests=[]
+  let ossRespond=()=>({ok:true,elapsed_ms:200,message:'OSS 上传测试成功'})
   let respond=body=>({ok:true,model:body.config.planner_model,elapsed_ms:250,message:'文本模型可用'})
   const testApi=async (url,method='GET',body)=>{
-    if(url==='/settings/cloud' && method==='GET') return {config:{...config},secrets:{llm_api_key:true},secret_previews:{llm_api_key:'sk-sav*****1234'}}
+    if(url==='/settings/cloud' && method==='GET') return {config:{...config},secrets:{llm_api_key:true,oss_access_key_id:true,oss_access_key_secret:true},secret_previews:{llm_api_key:'sk-sav*****1234'}}
+    if(url==='/settings/cloud/test-oss' && method==='POST') {
+      ossRequests.push(structuredClone(body));return ossRespond(body)
+    }
     if(url==='/settings/cloud/test-model' && method==='POST') {
       requests.push(structuredClone(body));return respond(body)
     }
@@ -363,7 +368,39 @@ async function verifyModelTestButton() {
     assert.equal(ossSaveButtons.length,1,'OSS has one save button for all configuration')
     assert.equal(text(ossSaveButtons[0]).trim(),'保存 OSS 配置')
     assert.ok(all(ossForms[0],el=>el.type==='input' && el.props.id==='oss_access_key_secret')[0], 'OSS form contains secret fields')
-    assert.ok(all(ossForms[0].children.at(-1),el=>el===ossSaveButtons[0])[0], 'Save action appears at the bottom of the OSS form')
+    const ossActions=all(ossForms[0],el=>el.props.class?.includes('settings-actions'))[0]
+    assert.ok(all(ossActions,el=>el===ossSaveButtons[0])[0], 'Save action shares the OSS action row')
+    const ossButton=all(ossPanel,el=>el.type==='button' && text(el).trim()==='测试 OSS')[0]
+    assert.ok(ossButton,'OSS card renders its test button')
+    assert.equal(ossButton.props.type,'button')
+    assert.equal(ossRequests.length,0,'Opening settings does not submit an OSS test')
+    await ossButton.props.onClick();await settle()
+    assert.deepEqual(ossRequests[0],{config:{oss_endpoint:config.oss_endpoint,oss_bucket:config.oss_bucket},access_key_id:'',access_key_secret:''})
+    assert.ok(text(ossPanel).includes('OSS 上传测试成功'))
+    const ossBucket=all(ossPanel,el=>el.props.id==='oss-bucket')[0]
+    ossBucket.props['onUpdate:modelValue']('draft-bucket');await settle()
+    assert.ok(!text(ossPanel).includes('OSS 上传测试成功'),'Editing OSS configuration clears its old result')
+    const ossKey=all(ossPanel,el=>el.type==='input' && el.props.id==='oss_access_key_secret')[0]
+    ossKey.props.onInput({target:{value:'draft-oss-secret'}});await settle()
+    const ossDelayed=pending();ossRespond=()=>ossDelayed.promise
+    const ossRun=ossButton.props.onClick();await settle()
+    assert.equal(ossButton.props.disabled,true)
+    assert.equal(ossSaveButtons[0].props.disabled,true)
+    assert.equal(session.busy,false,'OSS test does not lock other settings cards')
+    const ossCount=ossRequests.length
+    await ossButton.props.onClick();await settle()
+    assert.equal(ossRequests.length,ossCount,'Duplicate OSS clicks do not send another request')
+    assert.equal(ossRequests.at(-1).access_key_secret,'draft-oss-secret')
+    assert.equal(ossRequests.at(-1).config.oss_bucket,'draft-bucket')
+    ossBucket.props['onUpdate:modelValue']('new-bucket');await settle()
+    ossDelayed.resolve({ok:true,elapsed_ms:2,message:'stale-oss-success'})
+    await ossRun;await settle()
+    assert.ok(!text(ossPanel).includes('stale-oss-success'))
+    ossRespond=()=>({ok:false,elapsed_ms:30000,message:'OSS 测试超时（30 秒）'})
+    await ossButton.props.onClick();await settle()
+    assert.ok(all(ossPanel,el=>el.props.role==='alert').some(el=>text(el).includes('超时')))
+    assert.equal(ossButton.props.disabled,false,'OSS failure allows explicit retry')
+    assert.equal(ossKey.props.value,'draft-oss-secret','Testing preserves replacement secret')
     const speechInput=all(root,el=>el.type==='input' && el.props.id==='asr-api-key')[0]
     assert.ok(speechInput,'Speech card renders its independent credential input')
     assert.ok(all(root,el=>el.type==='input' && el.props.id==='asr-base-url')[0])

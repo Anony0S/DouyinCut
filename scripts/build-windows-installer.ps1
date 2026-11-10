@@ -157,6 +157,8 @@ try {
             '--runtime', $runtime) 'Session verification'
         Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/verify-windows-media.py',
             '--runtime', $runtime) 'Media verification'
+        Invoke-Checked 'uv' @('run', '--no-sync', 'python', 'scripts/verify-windows-oss.py',
+            '--runtime', $runtime) 'OSS child-process verification'
         Write-Host "✓ All verification tests passed" -ForegroundColor Green
     }
 
@@ -218,6 +220,7 @@ try {
         verification = @{
             session_test = -not $SkipTests
             media_test = -not $SkipTests
+            oss_test = -not $SkipTests
         }
     }
 

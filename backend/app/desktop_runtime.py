@@ -52,11 +52,29 @@ class StopSignal:
         return True
 
 
+def _sync_windows_standard_handles():
+    # multiprocessing replaces sys.stdin with NUL during bootstrap, but leaves
+    # Windows' standard handle pointing at the closed (and potentially reused)
+    # handle. A nested frozen process can then block before Python initializes.
+    # Keep the OS handles aligned with the live Python streams before spawning.
+    if sys.platform == 'win32':
+        import ctypes
+        import msvcrt
+        set_handle = ctypes.WinDLL('kernel32', use_last_error=True).SetStdHandle
+        set_handle.argtypes = (ctypes.c_ulong, ctypes.c_void_p)
+        set_handle.restype = ctypes.c_int
+        for kind, stream in ((-10, sys.stdin), (-11, sys.stdout), (-12, sys.stderr)):
+            if stream is not None:
+                if not set_handle(kind & 0xffffffff, msvcrt.get_osfhandle(stream.fileno())):
+                    raise ctypes.WinError(ctypes.get_last_error())
+
+
 def _run_role(role, settings, frontend, token, listener, stop, report):
     # Only the launcher writes descriptors to stdout. Third-party diagnostics
     # stay on stderr, which the native host redirects to its diagnostic log.
     sys.stdout = sys.stderr
     try:
+        _sync_windows_standard_handles()
         if role == 'api':
             import uvicorn
             from .api import create_app

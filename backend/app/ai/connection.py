@@ -1,8 +1,12 @@
 import time
+import secrets
+import re
+from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 
 from ..core.domain import Model
+from ..core.credentials import read_secret
 from .providers import (CloudConfig, ExitInterrupted, ProviderError, ProviderHTTPError,
                         interruptible_network_call, model_api_key)
 
@@ -19,6 +23,59 @@ class ModelConnectionTestRequest(Model):
         except ProviderError as exc:
             raise ValueError(str(exc)) from None
         return config
+
+
+class OssConnectionTestRequest(Model):
+    config: CloudConfig
+    access_key_id: str = Field(default="", max_length=20000, repr=False)
+    access_key_secret: str = Field(default="", max_length=20000, repr=False)
+
+
+def check_oss_connection(request: OssConnectionTestRequest) -> dict:
+    started = time.monotonic()
+    result = {"ok": False}
+    try:
+        endpoint = urlparse(request.config.oss_endpoint)
+        if (endpoint.scheme != "https" or not endpoint.hostname or
+                not endpoint.hostname.endswith(".aliyuncs.com") or endpoint.username or endpoint.password or
+                endpoint.query or endpoint.fragment or endpoint.path not in ("", "/")):
+            raise ProviderError("OSS Endpoint 必须是阿里云 HTTPS 地址")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", request.config.oss_bucket):
+            raise ProviderError("请填写有效的 OSS Bucket 名称（3–63 位小写字母、数字或连字符）")
+        key_id = request.access_key_id.strip() or read_secret("oss_access_key_id")
+        key_secret = request.access_key_secret.strip() or read_secret("oss_access_key_secret")
+        if not key_id or not key_secret:
+            raise ProviderError("请填写 OSS AccessKey ID 和 Secret")
+        interruptible_network_call("oss_test", (request.config, secrets.token_hex(16), key_id, key_secret),
+                                   deadline_seconds=30)
+        result.update(ok=True, message="OSS 上传测试成功，当前配置具有写入权限")
+    except ExitInterrupted:
+        result.update(message="应用正在退出，测试已中断")
+    except ProviderError as exc:
+        details = exc.details or {}
+        if details.get("stage") == "process_timeout":
+            result.update(message="OSS 测试超时（30 秒），请检查网络和 Endpoint")
+        elif details.get("stage") in ("oss_upload", "process_start", "process_exit"):
+            hints = {"InvalidAccessKeyId": "AccessKey ID 无效或已停用",
+                     "SignatureDoesNotMatch": "签名不匹配，请检查 AccessKey Secret",
+                     "AccessDenied": "无写入权限，请检查 RAM 授权与 Bucket 策略",
+                     "NoSuchBucket": "Bucket 不存在，请检查名称和地域",
+                     "PermanentRedirect": "Endpoint 与 Bucket 地域不一致",
+                     "RequestTimeTooSkewed": "本机时间偏差过大，请同步系统时间",
+                     "RequestError": "网络连接失败，请检查网络、代理和 Endpoint"}
+            parts = [str(details.get("reason", "请求失败"))]
+            if details.get("http_status"):
+                parts.append(f"HTTP {details['http_status']}")
+            if details.get("oss_error_code"):
+                parts.append(str(details["oss_error_code"]))
+            hint = hints.get(details.get("oss_error_code"), hints.get(details.get("reason")))
+            result.update(message="OSS 测试失败：" + (hint + "；" if hint else "") + "，".join(parts))
+        else:
+            result.update(message=str(exc))
+    except Exception:
+        result.update(message="OSS 测试无法完成，请检查本机凭据服务和运行环境")
+    result["elapsed_ms"] = round((time.monotonic() - started) * 1000)
+    return result
 
 
 def check_model_connection(request: ModelConnectionTestRequest) -> dict:

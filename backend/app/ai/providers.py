@@ -125,6 +125,8 @@ def _network_child(pipe, kind, args, kwargs):
     try:
         if kind in {"asr", "planner", "model_test"}:
             result = cloud_json(*args, **kwargs)
+        elif kind == "oss_test":
+            result = _test_oss_request(*args, **kwargs)
         else:
             result = _upload_audio_request(*args, **kwargs)
         pipe.send(("ok", result))
@@ -133,13 +135,26 @@ def _network_child(pipe, kind, args, kwargs):
     except ProviderError as exc:
         pipe.send(("provider", str(exc), exc.details))
     except BaseException as exc:
-        pipe.send(("error", type(exc).__name__, str(exc)))
+        if kind in {"upload", "oss_test"}:
+            # Only expose bounded identifiers; exception text may contain signed URLs or credentials.
+            code = getattr(exc, "code", None)
+            status = getattr(exc, "status", None)
+            details = {"stage": "oss_upload", "error_source": "transport",
+                       "reason": type(exc).__name__, "response_body": None}
+            if isinstance(status, int) and 100 <= status <= 599:
+                details["http_status"] = status
+                details["error_source"] = "http_response"
+            if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9_]{1,80}", code):
+                details["oss_error_code"] = code
+            pipe.send(("provider", "OSS 上传请求失败", details))
+        else:
+            pipe.send(("error", type(exc).__name__, str(exc)))
     finally:
         pipe.close()
 
 
 def interruptible_network_call(kind, args, *, store=None, operation_id=None, cache_key=None, checkpoint=None,
-                               kwargs=None):
+                               kwargs=None, deadline_seconds=None):
     """Run one network call in a child process so an exit can stop it without waiting.
 
     Background jobs pass the store so the reply is accepted inside the exit gate.
@@ -151,18 +166,35 @@ def interruptible_network_call(kind, args, *, store=None, operation_id=None, cac
                               name=f"douyincut-cloud-{kind}")
     try:
         process.start()
-    except BaseException:
+    except BaseException as exc:
         if store:
             store.fail_cloud_operation(operation_id)
         receive.close()
         send.close()
         process.close()
-        raise ProviderError("无法启动可中断的云端请求进程") from None
+        raise ProviderError("无法启动可中断的云端请求进程",
+                            {"stage": "process_start", "reason": type(exc).__name__,
+                             "response_body": None}) from None
     send.close()
+    deadline = time.monotonic() + deadline_seconds if deadline_seconds else None
     try:
         while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                if store:
+                    store.fail_cloud_operation(operation_id)
+                raise ProviderError(f"云端请求超时（{deadline_seconds} 秒）",
+                                    {"stage": "process_timeout", "reason": "TimeoutError",
+                                     "timeout_seconds": deadline_seconds, "response_body": None})
             if receive.poll(0.05):
-                message = receive.recv()
+                try:
+                    message = receive.recv()
+                except EOFError:
+                    process.join(2)
+                    if store:
+                        store.fail_cloud_operation(operation_id)
+                    raise ProviderError("云端请求进程未返回结果",
+                                        {"stage": "process_exit", "reason": f"exit code: {process.exitcode}",
+                                         "response_body": None}) from None
                 process.join(2)
                 if message[0] == "ok":
                     body = None
@@ -202,11 +234,16 @@ def interruptible_network_call(kind, args, *, store=None, operation_id=None, cac
             if not process.is_alive():
                 if store:
                     store.fail_cloud_operation(operation_id)
-                raise ProviderError("云端请求进程提前退出")
+                raise ProviderError("云端请求进程提前退出",
+                                    {"stage": "process_exit", "reason": f"exit code: {process.exitcode}",
+                                     "response_body": None})
     finally:
         receive.close()
         if process.is_alive():
             process.terminate()
+            process.join(2)
+        if process.is_alive():
+            process.kill()
             process.join(2)
         process.close()
 
@@ -372,6 +409,14 @@ def required_secret(name: str):
     return value
 
 
+def _test_oss_request(config: CloudConfig, object_id: str, access_key_id: str, access_key_secret: str):
+    import oss2
+    bucket = oss2.Bucket(oss2.Auth(access_key_id, access_key_secret), config.oss_endpoint, config.oss_bucket,
+                         connect_timeout=10)
+    bucket.put_object(f"douyincut/audio/test-{object_id}.txt", b"DouyinCut OSS test")
+    return True
+
+
 def _upload_audio_request(audio: Path, config: CloudConfig, object_id: str, access_key_id: str,
                          access_key_secret: str) -> str:
     import oss2
@@ -411,13 +456,17 @@ def upload_audio(audio: Path, config: CloudConfig, object_id: str, *, operation=
         operation_id = store.begin_cloud_operation(job_id, "oss_upload", config.model_dump())
         return interruptible_network_call("upload", (audio, config, object_id, access_key_id, access_key_secret),
                                             store=store, operation_id=operation_id, cache_key=upload_cache_key,
-                                            checkpoint=checkpoint)
+                                            checkpoint=checkpoint, deadline_seconds=300)
     except ImportError:
         raise ProviderError("尚未安装 OSS 客户端依赖") from None
     except ExitInterrupted:
         raise
-    except Exception:
-        raise ProviderError("OSS 上传失败，请检查权限、Bucket 和 endpoint") from None
+    except ProviderError as exc:
+        raise ProviderError("OSS 上传失败，请检查任务错误详情", exc.details) from None
+    except Exception as exc:
+        raise ProviderError("OSS 上传失败，请检查任务错误详情",
+                            {"stage": "oss_upload", "reason": type(exc).__name__,
+                             "response_body": None}) from None
 
 
 ASR_CHUNK_US = 120_000_000

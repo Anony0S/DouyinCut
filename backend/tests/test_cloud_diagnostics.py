@@ -1,16 +1,18 @@
 import io
 import http.client
 import json
+import threading
 import tempfile
 import unittest
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.core.config import Settings
 from app.core.domain import Asset, Transcript
 from app.ai.providers import (CloudConfig, ProviderError, ProviderHTTPError, cloud_json,
-                           transcribe)
+                           transcribe, interruptible_network_call, upload_audio, _network_child)
 from app.ai.roughcut import RoughcutRequest, select_intervals
 from app.core.storage import Store
 from app.worker import Worker
@@ -32,9 +34,58 @@ class CloudDiagnosticsTests(unittest.TestCase):
         self.store = Store(self.settings.database)
         self.asset = Asset(id="test-asset", sha256="test-digest", path="source.mp4", name="测试",
                            duration_us=10_000_000, width=320, height=240, has_audio=True)
-        self.config = CloudConfig()
+        self.config = CloudConfig(
+            base_url="https://model.example.invalid/v1", planner_model="test-model",
+            asr_base_url="https://asr.example.invalid", asr_model="test-asr")
         self.transcripts = [Transcript(source_asset_id=self.asset.id, start_us=0, end_us=5000000, text="面料柔软。")]
         self.request = RoughcutRequest(product_name="测试")
+
+    def test_upload_child_reaches_local_oss_service(self):
+        class Handler(BaseHTTPRequestHandler):
+            received = b""
+
+            def do_PUT(self):
+                Handler.received = self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        audio = Path(self.temp.name) / "audio.wav"
+        audio.write_bytes(b"test audio")
+        config = CloudConfig(oss_endpoint=f"http://127.0.0.1:{server.server_port}", oss_bucket="test-bucket")
+        url = interruptible_network_call("upload", (audio, config, "test", "id", "secret"))
+        self.assertEqual(Handler.received, b"test audio")
+        self.assertIn("Signature=", url)
+
+    def test_upload_child_excludes_exception_text(self):
+        class Pipe:
+            def send(self, value):
+                self.value = value
+            def close(self):
+                pass
+        pipe = Pipe()
+        with patch("app.ai.providers._upload_audio_request", side_effect=RuntimeError("secret https://host/?signature=secret")):
+            _network_child(pipe, "upload", (), {})
+        self.assertEqual(pipe.value[2]["reason"], "RuntimeError")
+        self.assertNotIn("secret", str(pipe.value))
+
+    def test_upload_preserves_safe_process_diagnostics(self):
+        config = CloudConfig(oss_endpoint="https://oss-cn-test.aliyuncs.com", oss_bucket="test-bucket")
+        details = {"stage": "process_exit", "reason": "exit code: 1", "response_body": None}
+        store = Mock()
+        store.cached.return_value = None
+        with patch("app.ai.providers.required_secret", return_value="secret"), \
+                patch("app.ai.providers.interruptible_network_call", side_effect=ProviderError("failed", details)):
+            with self.assertRaises(ProviderError) as raised:
+                upload_audio(Path("audio.wav"), config, "test", operation=(store, "job", lambda: None))
+        self.assertEqual(raised.exception.details, details)
 
     def test_nonjson_response_preserves_full_body_and_metadata(self):
         body = "<html>502 Bad Gateway\n" + "中文内容" * 3000 + "<script>never execute</script></html>"

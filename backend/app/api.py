@@ -20,7 +20,7 @@ from .media.editing import make_batches, remap_subtitles, validate_plan
 from .media.processing import diagnostics, probe_stream_timing
 from .media.thumbnails import PreviewBusy, ThumbnailCache
 from .ai.providers import CloudConfig, ProviderError, asr_api_key, model_api_key
-from .ai.connection import ModelConnectionTestRequest, check_model_connection
+from .ai.connection import ModelConnectionTestRequest, check_model_connection, OssConnectionTestRequest, check_oss_connection
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
 from .core.storage import SessionStopping, Store
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, ProjectDraft, delete_plan, delete_project, job_summary,
@@ -556,6 +556,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.post("/api/v1/settings/cloud/test-model")
     def test_cloud_model(body: ModelConnectionTestRequest):
         return check_model_connection(body)
+
+    @app.post("/api/v1/settings/cloud/test-oss")
+    def test_cloud_oss(body: OssConnectionTestRequest):
+        return check_oss_connection(body)
 
     @app.patch("/api/v1/settings/cloud")
     def set_cloud_config(body: CloudConfig):

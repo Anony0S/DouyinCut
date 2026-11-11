@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { LiveMonitor, LiveMonitorSettings } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
@@ -138,6 +138,26 @@ function onOutside(event: PointerEvent) {
 function onEscape(event: KeyboardEvent) {
   if (event.key === "Escape") closeSettings();
 }
+const settingToggles: { key: keyof LiveMonitorSettings; name: string; hint: string }[] = [
+  { key: "auto_record", name: "开播自动录制", hint: "开播后自动开始，关闭后需手动开始" },
+  { key: "notify_live", name: "开播提醒", hint: "开播时弹出 Windows 通知" },
+  { key: "notify_offline", name: "下播提醒", hint: "检测到直播结束时弹出 Windows 通知" },
+  { key: "notify_split_complete", name: "切分完成提醒", hint: "商品视频片段全部生成后弹出 Windows 通知" },
+];
+function changeSetting(monitor: LiveMonitor, key: keyof LiveMonitorSettings, event: Event) {
+  emit("settings", monitor, { [key]: (event.target as HTMLInputElement).checked });
+}
+// A checkbox flips in the DOM before the request settles. Once the action ends, put every
+// toggle back on the saved value so a failed save does not leave a setting shown as changed.
+watch(() => props.busy, async (busy) => {
+  if (busy) return;
+  await nextTick();
+  const monitor = settingsMonitor.value;
+  if (!monitor) return;
+  settingsPanel.value?.querySelectorAll<HTMLInputElement>("input[data-setting]").forEach((input) => {
+    input.checked = monitor[input.dataset.setting as keyof LiveMonitorSettings];
+  });
+});
 onUnmounted(closeSettings);
 </script>
 
@@ -352,56 +372,17 @@ onUnmounted(closeSettings);
         :aria-label="`${settingsMonitor.name || '抖音直播间'}设置`"
         :style="{ top: `${anchor.top}px`, left: `${anchor.left}px` }">
         <div class="live-room-settings-title">直播间设置</div>
-        <label class="live-room-setting">
+        <label v-for="item in settingToggles" :key="item.key" class="live-room-setting">
           <input
             class="toggle toggle-sm"
             type="checkbox"
-            :checked="settingsMonitor.auto_record"
-            @change="
-              $emit('settings', settingsMonitor, {
-                auto_record: ($event.target as HTMLInputElement).checked,
-              })
-            " />
+            :data-setting="item.key"
+            :checked="settingsMonitor[item.key]"
+            :disabled="busy"
+            @change="changeSetting(settingsMonitor, item.key, $event)" />
           <span>
-            开播自动录制
-            <small>开播后自动开始，关闭后需手动开始</small>
-          </span>
-        </label>
-        <label class="live-room-setting">
-          <input
-            class="toggle toggle-sm"
-            type="checkbox"
-            :checked="settingsMonitor.notify_live"
-            @change="
-              $emit('settings', settingsMonitor, {
-                notify_live: ($event.target as HTMLInputElement).checked,
-              })
-            " />
-          <span>
-            开播提醒
-            <small>开播时弹出 Windows 通知</small>
-          </span>
-        </label>
-        <label class="live-room-setting">
-          <input
-            class="toggle toggle-sm"
-            type="checkbox"
-            :checked="settingsMonitor.notify_offline"
-            @change="$emit('settings', settingsMonitor, { notify_offline: ($event.target as HTMLInputElement).checked })" />
-          <span>
-            下播提醒
-            <small>检测到直播结束时弹出 Windows 通知</small>
-          </span>
-        </label>
-        <label class="live-room-setting">
-          <input
-            class="toggle toggle-sm"
-            type="checkbox"
-            :checked="settingsMonitor.notify_split_complete"
-            @change="$emit('settings', settingsMonitor, { notify_split_complete: ($event.target as HTMLInputElement).checked })" />
-          <span>
-            切分完成提醒
-            <small>商品视频片段全部生成后弹出 Windows 通知</small>
+            {{ item.name }}
+            <small>{{ item.hint }}</small>
           </span>
         </label>
       </div>

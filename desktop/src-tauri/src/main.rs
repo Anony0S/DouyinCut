@@ -30,8 +30,6 @@ fn main() {
             workspace::workspace_action,
             workspace::delete_workspace_config,
             workspace::relaunch,
-            workspace::open_log_directory,
-            workspace::clear_logs,
             updates::check_for_update,
             updates::get_update_status,
             updates::download_update,

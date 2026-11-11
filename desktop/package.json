@@ -36,6 +36,7 @@
     "test:live-thumbnail-layout": "pnpm build && node scripts/verify-live-thumbnail-layout.cjs",
     "test:live-badge-contrast": "pnpm build && node scripts/verify-live-badge-contrast.cjs",
     "test:roughcut": "node scripts/verify-roughcut.cjs",
+    "test:logs": "node scripts/verify-logs.cjs",
     "test:routing": "node scripts/verify-routing.cjs",
     "tauri": "tauri"
   },

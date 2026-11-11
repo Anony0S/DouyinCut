@@ -14,6 +14,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import Field
 
 from .core.config import Settings
+from .core.logs import LogLibrary, configure_logging
 from .core.credentials import read_secret, secret_preview, storage_status, write_secret
 from .core.domain import Asset, Candidate, Model, Plan, Product, Transcript
 from .media.editing import make_batches, remap_subtitles, validate_plan
@@ -39,6 +40,11 @@ class JianyingDraftRequest(Model):
     revision: int = Field(ge=1)
 
 
+class LogLocation(Model):
+    category: Literal["runtime", "task"]
+    name: str | None = Field(None, max_length=200)
+
+
 class SecretRequest(Model):
     name: Literal["llm_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]
     value: str = Field(max_length=20000)
@@ -46,10 +52,14 @@ class SecretRequest(Model):
 
 def create_app(settings: Settings | None = None, token: str | None = None, *, frontend_dir: Path | None = None):
     settings = settings or Settings.from_env()
+    if os.environ.get("DOUYINCUT_LOG_FILE"):
+        # The development launcher runs this factory under the uvicorn CLI.
+        configure_logging("api")
     settings.prepare()
     store = Store(settings.database)
     live_store = LiveStore(store)
     thumbnails = ThumbnailCache(settings)
+    logs = LogLibrary(settings, store)
     token = token or os.environ.get("DOUYINCUT_SESSION_TOKEN") or secrets.token_urlsafe(32)
     # WebView profiles are shared by development and installed workbenches.
     # Cookies are host-scoped, not port-scoped: a fixed name lets another
@@ -138,6 +148,25 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         except OSError as exc:
             raise HTTPException(409, f"打开工作目录失败：{exc}") from None
         return {"opened": True}
+
+    @app.get("/api/v1/logs")
+    def list_logs():
+        return {"files": logs.files(), "runtime_available": logs.runtime_dir is not None}
+
+    @app.get("/api/v1/logs/{category}/{name}")
+    def read_log(category: Literal["runtime", "task"], name: str, after: int | None = Query(None, ge=0)):
+        return logs.read(category, name, after)
+
+    @app.post("/api/v1/logs/open")
+    def open_log_location(body: LogLocation):
+        try:
+            return logs.open_location(body.category, body.name)
+        except OSError as exc:
+            raise HTTPException(409, f"打开日志位置失败：{exc}") from None
+
+    @app.delete("/api/v1/logs")
+    def clear_logs():
+        return logs.clear()
 
     @app.get("/api/v1/product-platform/status")
     def product_platform_status():

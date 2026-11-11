@@ -62,28 +62,6 @@ async function openWorkDirectory() {
     openDialog({ title: "无法打开工作目录", message: String(error), kind: "error" });
   }
 }
-
-async function openLogDirectory() {
-  try {
-    await tauri().invoke("open_log_directory");
-    openDialog({ title: "日志目录", message: "已打开应用日志目录。", kind: "info" });
-  } catch (error) {
-    openDialog({ title: "无法打开日志目录", message: String(error), kind: "error" });
-  }
-}
-
-function clearLogs() {
-  openDialog({
-    title: "清理日志",
-    message: "确认删除所有日志文件？此操作不可恢复。",
-    kind: "confirm",
-    action: async () => {
-      await tauri().invoke("clear_logs");
-      return { title: "日志已清理", message: "应用日志文件已删除。", kind: "info" };
-    },
-  });
-}
-
 </script>
 
 <template>
@@ -91,7 +69,7 @@ function clearLogs() {
     <div class="page-heading">
       <div>
         <h1>本地设置</h1>
-        <p>管理本机工作目录、日志和应用版本。</p>
+        <p>管理本机工作目录和应用版本。</p>
       </div>
     </div>
 
@@ -104,17 +82,6 @@ function clearLogs() {
         <div class="local-setting-actions">
           <button class="btn btn-outline" type="button" @click="openWorkDirectory">打开目录</button>
           <button class="btn btn-outline" type="button" @click="changeWorkDirectory">更换目录</button>
-        </div>
-      </li>
-
-      <li class="list-row">
-        <div class="local-setting-copy">
-          <h2>日志管理</h2>
-          <p>查看或清理应用运行日志。</p>
-        </div>
-        <div class="local-setting-actions">
-          <button class="btn btn-outline" type="button" @click="openLogDirectory">打开目录</button>
-          <button class="btn btn-outline btn-error" type="button" @click="clearLogs">清理日志</button>
         </div>
       </li>
 

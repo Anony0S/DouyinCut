@@ -1,5 +1,6 @@
 """Production process ownership shared by source and frozen desktop launchers."""
 
+import logging
 import multiprocessing
 import secrets
 import socket
@@ -73,6 +74,11 @@ def _run_role(role, settings, frontend, token, listener, stop, report):
     # Only the launcher writes descriptors to stdout. Third-party diagnostics
     # stay on stderr, which the native host redirects to its diagnostic log.
     sys.stdout = sys.stderr
+    # The runtime log is read as UTF-8; a redirected stream otherwise uses the ANSI code page.
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
+    from .core.logs import configure_logging
+    configure_logging(role)
     try:
         _sync_windows_standard_handles()
         if role == 'api':
@@ -82,7 +88,7 @@ def _run_role(role, settings, frontend, token, listener, stop, report):
 
             app = create_app(settings, token, frontend_dir=frontend)
             server = uvicorn.Server(uvicorn.Config(app, loop='asyncio', http='h11', ws='none', lifespan='on',
-                                                  log_level='warning', access_log=False,
+                                                  log_level='warning', access_log=False, log_config=None,
                                                   timeout_graceful_shutdown=2))
 
             def request_stop():
@@ -94,6 +100,7 @@ def _run_role(role, settings, frontend, token, listener, stop, report):
 
             threading.Thread(target=request_stop, daemon=True).start()
             report.send({'ready': True})
+            logging.getLogger('douyincut.runtime').info('api 已启动')
             server.run(sockets=[listener])
         else:
             if role == 'worker':
@@ -103,9 +110,12 @@ def _run_role(role, settings, frontend, token, listener, stop, report):
                 from .live_monitoring.service import LiveMonitorWorker
                 worker = LiveMonitorWorker(settings)
             report.send({'ready': True})
+            logging.getLogger('douyincut.runtime').info('%s 已启动', role)
             worker.run(stop)
     except BaseException as exc:
         report.send({'error': f'{role}: {type(exc).__name__}: {exc}'})
+        if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            logging.getLogger('douyincut.runtime').exception('%s 异常退出', role)
         raise
     finally:
         report.close()

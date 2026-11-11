@@ -9,6 +9,7 @@ import {
   type LiveMonitor,
   type LiveMonitorSettings,
   type LiveSession,
+  type LiveSessionSummary,
   type LiveSplitResult,
 } from "../services/liveMonitoring";
 import LiveIcon from "../components/live/LiveIcon.vue";
@@ -40,6 +41,8 @@ let refreshVersion = 0;
 let disposed = false;
 let chooseRoomDefault = false;
 let pendingRecordingMonitorId = "";
+// A clicked timeline session is applied by the next refresh, which reads its detail.
+let requestedSessionId = "";
 const urlInput = ref<HTMLInputElement>(),
   createDialog = ref<HTMLDialogElement>();
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -50,7 +53,6 @@ const dateLoading = computed(() => loading.value
   && (updatedAt.value === null || selectedDate.value !== recordingWindow.value.date));
 const latestSelectableDate = computed(() => localDate(new Date(currentTime.value * 1000)));
 const windowLabel = computed(() => `${recordingWindow.value.date || `今天 · ${localDate(new Date(recordingWindow.value.start * 1000))}`} · 00:00–24:00`);
-const emptyMessage = computed(() => recordingWindow.value.date ? "当天无录制" : "今天无录制，可选择其他日期");
 
 function localDate(value: Date) {
   return `${String(value.getFullYear()).padStart(4, "0")}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
@@ -82,33 +84,39 @@ const selectedMonitor = computed(
 const sessions = computed(() =>
   [...(selectedMonitor.value?.sessions ?? [])].sort(recordingFirst),
 );
-function recordingFirst(a: LiveSession, b: LiveSession) {
+function recordingFirst(a: LiveSessionSummary, b: LiveSessionSummary) {
   return Number(b.status === "recording") - Number(a.status === "recording") || b.started - a.started;
 }
+// The window lists sessions before the selected one's detail has been read.
+const readingSession = computed(() => !selectedSession.value && sessions.value.length > 0);
+const emptyMessage = computed(() => readingSession.value ? "正在读取场次…"
+  : recordingWindow.value.date ? "当天无录制" : "今天无录制，可选择其他日期");
+const cardEmptyMessage = computed(() => readingSession.value ? "正在读取场次…"
+  : recordingWindow.value.date ? "当天无录制" : "今天无录制");
 const selectionOutsideWindow = computed(() => selectedSession.value
   && !sessions.value.some(item => item.id === selectedSession.value?.id));
-function defaultSession(items: LiveSession[]) {
+function defaultSession(items: LiveSessionSummary[]) {
   return [...items].sort(recordingFirst)[0];
 }
-function latestSession(items: LiveSession[]) {
+function latestSession(items: LiveSessionSummary[]) {
   return [...items].sort((a, b) => b.started - a.started)[0];
 }
 function selectMonitor(id: string) {
   if (id === selectedMonitor.value?.id) return;
   pendingRecordingMonitorId = "";
+  requestedSessionId = "";
   selectedId.value = id;
-  selectedSession.value = defaultSession(sessions.value);
-  chooseRoomDefault = loading.value;
-  if (loading.value) void refresh();
+  selectedSession.value = undefined;
+  selectedPeriodId.value = "";
+  chooseRoomDefault = true;
+  void refresh();
 }
 function selectSession(id: string) {
-  const item = sessions.value.find(item => item.id === id);
-  if (!item) return;
+  if (!sessions.value.some(item => item.id === id)) return;
   pendingRecordingMonitorId = "";
   chooseRoomDefault = false;
-  selectedSession.value = item;
-  selectedPeriodId.value = "";
-  if (loading.value) void refresh();
+  requestedSessionId = id === selectedSession.value?.id ? "" : id;
+  if (requestedSessionId || loading.value) void refresh();
 }
 function focusPeriod(id: string) {
   document.getElementById(`live-period-${id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -160,35 +168,41 @@ async function refresh() {
     // session. Keep the one-time jump pending across refreshes until it appears.
     const startedSession = pendingRecordingMonitorId === nextMonitor?.id
       ? defaultSession(items.filter(item => item.status === "recording")) : undefined;
-    let nextSession = startedSession ?? items.find(item => item.id === current?.id);
-    if (!nextSession && current && nextMonitor) {
+    const wantedId = requestedSessionId || current?.id;
+    let target = startedSession ?? items.find(item => item.id === wantedId);
+    let nextSession: LiveSession | null | undefined;
+    if (!target && current && nextMonitor) {
       if (dateChanged) {
-        nextSession = latestSession(items);
+        target = latestSession(items);
       } else {
         // Absence from a time window does not establish that the session was deleted.
-        const retained = await liveMonitoringApi.session(nextMonitor.id, current.id);
+        nextSession = await liveMonitoringApi.session(nextMonitor.id, current.id);
         if (disposed || version !== refreshVersion) return;
-        nextSession = retained ?? latestSession(items);
+        if (!nextSession) target = latestSession(items);
       }
-    } else if (!nextSession && !current) {
-      nextSession = !chooseRoomDefault && dateChanged && previousMonitor === nextMonitor?.id
+    } else if (!target && !current) {
+      target = !chooseRoomDefault && dateChanged && previousMonitor === nextMonitor?.id
         ? latestSession(items) : defaultSession(items);
+    }
+    if (!nextSession && target && nextMonitor) {
+      nextSession = await liveMonitoringApi.session(nextMonitor.id, target.id);
+      if (disposed || version !== refreshVersion) return;
     }
     currentTime.value = now;
     recordingWindow.value = range;
     monitors.value = result;
     selectedId.value = nextMonitor?.id ?? "";
-    selectedSession.value = nextSession;
-    if (startedSession) {
-      pendingRecordingMonitorId = "";
-      selectedPeriodId.value = "";
-    }
+    if (nextSession?.id !== selectedSession.value?.id) selectedPeriodId.value = "";
+    selectedSession.value = nextSession ?? undefined;
+    requestedSessionId = "";
+    if (startedSession) pendingRecordingMonitorId = "";
     chooseRoomDefault = false;
     if (session.error === refreshError.value) session.error = "";
     refreshError.value = "";
     updatedAt.value = Date.now() / 1000;
   } catch (cause) {
     if (disposed || version !== refreshVersion) return;
+    requestedSessionId = "";
     selectedDate.value = pendingRecordingMonitorId ? "" : recordingWindow.value.date;
     refreshError.value = cause instanceof Error ? cause.message : "操作失败";
     session.report(cause);
@@ -274,14 +288,6 @@ async function remove(monitor: LiveMonitor) {
     await refresh();
   });
 }
-async function importSegment(segmentId: string) {
-  await session.act(async () => {
-    const result = await liveMonitoringApi.importSegment(segmentId);
-    session.message = "录制文件已提交导入；完成后可从此处打开视频项目";
-    await refresh();
-    if ("asset_id" in result) await workspace.openProject(result.asset_id);
-  });
-}
 async function importProductClip(clipId: string) {
   await session.act(async () => {
     const result = await liveMonitoringApi.importProductClip(clipId);
@@ -294,12 +300,6 @@ async function openClipFile(clipId: string, reveal: boolean) {
   await session.act(async () => {
     await liveMonitoringApi.openProductClip(clipId, reveal);
     if (reveal) session.message = "已在文件夹中显示商品片段";
-  });
-}
-async function openSegmentFile(segmentId: string, reveal: boolean) {
-  await session.act(async () => {
-    await liveMonitoringApi.openSegment(segmentId, reveal);
-    if (reveal) session.message = "已在文件夹中显示录制文件";
   });
 }
 async function viewSource(segmentId: string, offset: number) {
@@ -320,15 +320,6 @@ async function splitPeriod(periodId: string, confirmedMissingSegmentIds: string[
     session.report(cause);
     throw cause;
   }
-}
-async function deleteSegment(segmentId: string) {
-  await session.act(async () => {
-    const result = await liveMonitoringApi.deleteSegment(segmentId);
-    session.message = result.file_deleted
-      ? "录制文件及本地媒体已删除"
-      : "录制文件记录已移除；本地文件原已不存在，商品讲解记录保留";
-    await refresh();
-  });
 }
 async function deleteProductClip(clipId: string) {
   await session.act(async () => {
@@ -357,16 +348,20 @@ async function retryProductListener(monitorId: string, sessionId: string) {
     await refresh();
   });
 }
+// Recording and detection run in the backend; a hidden window only needs to catch up once shown.
+function syncWhenVisible() {
+  if (!document.hidden && !loading.value) void refresh();
+}
 onMounted(() => {
   void refresh();
-  timer = setInterval(() => {
-    if (!loading.value) void refresh();
-  }, 5000);
+  timer = setInterval(syncWhenVisible, 5000);
+  document.addEventListener("visibilitychange", syncWhenVisible);
 });
 onUnmounted(() => {
   disposed = true;
   refreshVersion++;
   if (timer) clearInterval(timer);
+  document.removeEventListener("visibilitychange", syncWhenVisible);
 });
 </script>
 
@@ -577,20 +572,17 @@ onUnmounted(() => {
           :selected-period-id="selectedPeriodId"
           :monitor-id="selectedMonitor.id"
           :busy="busy"
-          @import="importSegment"
           @import-product-clip="importProductClip"
           @open="workspace.openProject"
-          :on-delete="deleteSegment"
           :on-delete-product-clip="deleteProductClip"
           :on-retry-product-listener="retryProductListener"
           @select-period="selectedPeriodId = $event"
-          @open-file="openClipFile"
-          @open-segment-file="openSegmentFile" />
+          @open-file="openClipFile" />
         <div v-else class="live-content-columns">
           <section v-for="title in ['商品讲解', '商品视频片段']" :key="title"
             class="card card-border bg-base-100 live-content-card">
             <div class="live-content-card-heading"><h3>{{ title }}</h3></div>
-            <div class="live-card-empty"><strong>{{ recordingWindow.date ? '当天无录制' : '今天无录制' }}</strong></div>
+            <div class="live-card-empty"><strong>{{ cardEmptyMessage }}</strong></div>
           </section>
         </div>
       </div>

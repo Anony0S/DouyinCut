@@ -9,6 +9,8 @@ class Settings:
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
     port: int = 8765
+    # The application log that the process owner appends stderr to; None when nothing collects it.
+    runtime_log: Path | None = None
 
     @classmethod
     def from_env(cls):
@@ -18,6 +20,7 @@ class Settings:
             ffmpeg=os.environ.get("DOUYINCUT_FFMPEG", "ffmpeg"),
             ffprobe=os.environ.get("DOUYINCUT_FFPROBE", "ffprobe"),
             port=int(os.environ.get("DOUYINCUT_PORT", "8765")),
+            runtime_log=Path(os.environ["DOUYINCUT_LOG_FILE"]).resolve() if os.environ.get("DOUYINCUT_LOG_FILE") else None,
         )
 
     def prepare(self):

@@ -198,14 +198,9 @@
 .live-event-content > small { margin-top: 5px; color: var(--text-muted); font-size: 12px; }
 .live-card-foot { display: flex; align-items: center; gap: 7px; margin-top: auto; padding: 13px 18px; border-top: 1px solid var(--color-base-300); background: var(--color-base-100); color: var(--text-muted); font-size: 12px; line-height: 1.7; }
 .live-card-foot .live-icon { width: 13px; height: 13px; }
-.live-segment-filters { display: flex; flex-wrap: wrap; padding: 8px 18px; border-bottom: 1px solid var(--color-base-300); }
 .live-segment-list { min-height: 175px; padding: 0 16px; }
 .live-segment-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: start; gap: 13px; padding: 19px 0; border-bottom: 1px solid var(--color-base-300); }
 .live-segment-row:last-child { border-bottom: 0; }
-.live-segment-cover { display: grid; place-items: center; gap: 3px; width: 48px; height: 55px; flex: none; padding: 8px; border: 1px solid var(--color-base-300); border-radius: 8px; background: var(--color-base-200); color: var(--text-muted); }
-.live-segment-cover .live-icon { width: 20px; height: 20px; }
-.live-segment-cover > span { font-size: 9px; letter-spacing: 1px; }
-.live-segment-cover.recording { border-color: color-mix(in oklab, var(--color-error) 25%, var(--color-base-100)); background: color-mix(in oklab, var(--color-error) 8%, var(--color-base-100)); color: var(--color-error); }
 .live-segment-title { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 1px 0 8px; }
 .live-segment-title > strong { font-size: 12px; font-weight: 600; }
 .live-segment-meta { display: flex; flex-wrap: wrap; gap: 6px 13px; color: var(--text-muted); font-size: 12px; }
@@ -263,7 +258,6 @@
 @container live-detail (max-width: 1500px) {
   .live-segment-row { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; }
   .live-segment-row.live-product-clip-row { grid-template-columns: minmax(0, 1fr); }
-  .live-segment-cover { width: 40px; height: 49px; }
   .live-segment-actions { grid-column: -2 / -1; justify-content: flex-start; margin-top: 0; }
 }
 @container live-detail (max-width: 1100px) {
@@ -306,7 +300,6 @@
   .live-toolbar > p { font-size: 12px; }
   .live-content-card-heading { padding: 14px; }
   .live-segment-row { grid-template-columns: 38px minmax(0, 1fr); }
-  .live-segment-cover { width: 38px; height: 48px; }
   .live-segment-actions { grid-column: 2; }
   .live-welcome h2 { font-size: 18px; }
   .live-welcome-steps { gap: 8px; flex-wrap: wrap; justify-content: center; }

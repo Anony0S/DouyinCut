@@ -42,6 +42,11 @@ class LiveMonitoringTests(unittest.TestCase):
         self.addCleanup(self.client.close)
         self.headers = {"X-Session-Token": "test-token"}
 
+    def _session_details(self):
+        """Full details of the first monitor's listed sessions, in list order."""
+        monitor = self.live.list_monitors()[0]
+        return [self.live.recording_session(monitor["id"], item["id"]) for item in monitor["sessions"]]
+
     def test_monitor_api_returns_all_recording_sessions_intersecting_window(self):
         monitor = self.live.create_monitor("https://live.douyin.com/timeline", "时间线")
         expected = set()
@@ -248,7 +253,12 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(details[recovered]["status"], "failed")
         self.assertEqual(details[recovered]["end_time_source"], "recovery_check")
         self.assertEqual(details[recovered]["ended"], 2000)
-        self.assertEqual(self.client.get(url + recovered, headers=self.headers).json(), details[recovered])
+        summary = details[recovered]
+        self.assertEqual(set(summary), {"id", "status", "started", "ended", "end_time_source", "product_error"},
+                         "the polled list carries session summaries only")
+        detail = self.client.get(url + recovered, headers=self.headers).json()
+        self.assertEqual({key: detail[key] for key in summary if key != "product_error"},
+                         {key: value for key, value in summary.items() if key != "product_error"})
         # A later worker restart must not replace the first recovery check's time.
         with patch("app.live_monitoring.service.time.time", return_value=3000):
             LiveMonitorWorker(self.settings, resolver=object())
@@ -464,7 +474,7 @@ class LiveMonitoringTests(unittest.TestCase):
 
         prepare.assert_called_once_with(cookie="sessionid=from-app-settings")
 
-        result = self.live.list_monitors()[0]["sessions"][0]
+        result = self._session_details()[0]
         self.assertEqual(len(result["product_events"]), 1)
         event = result["product_events"][0]
         self.assertEqual(event["product_name"], "")
@@ -493,7 +503,7 @@ class LiveMonitoringTests(unittest.TestCase):
             event_time=event_time, received_at=received_at)
         self.assertEqual(event_id, duplicate_id)
         self.assertNotEqual(event_id, other_id)
-        sessions = self.live.list_monitors()[0]["sessions"]
+        sessions = self._session_details()
         by_id = {session["id"]: session for session in sessions}
         self.assertEqual(len(by_id[session_id]["product_events"]), 1)
         self.assertEqual(by_id[session_id]["product_events"][0]["event_time"], event_time)
@@ -509,7 +519,7 @@ class LiveMonitoringTests(unittest.TestCase):
 
         self.live.update_product_name(session_id, "p1", "接口商品标题")
 
-        events = self.live.list_monitors()[0]["sessions"][0]["product_events"]
+        events = self._session_details()[0]["product_events"]
         self.assertEqual(sorted(event["product_name"] for event in events),
                          ["", "接口商品标题", "用户确认名称"])
 
@@ -533,10 +543,17 @@ class LiveMonitoringTests(unittest.TestCase):
         session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "catalog-error")
         detail = {"summary": "请求失败", "response": {"http_status": 403}}
         self.live.set_product_catalog_error(session_id, detail)
-        listed = self.live.list_monitors()[0]["sessions"][0]["product_catalog_error"]
+        listed = self._session_details()[0]["product_catalog_error"]
         self.assertEqual(listed["detail"], detail)
+        self.assertTrue(self.live.list_monitors()[0]["sessions"][0]["product_error"])
         self.live.set_product_catalog_error(session_id, None)
-        self.assertIsNone(self.live.list_monitors()[0]["sessions"][0]["product_catalog_error"])
+        self.assertIsNone(self._session_details()[0]["product_catalog_error"])
+        self.assertFalse(self.live.list_monitors()[0]["sessions"][0]["product_error"])
+        self.live.set_product_listener_state(session_id, "error", "连接失败")
+        self.assertTrue(self.live.list_monitors()[0]["sessions"][0]["product_error"],
+                        "a broken product connection is flagged without reading session detail")
+        self.live.set_product_listener_state(session_id, "listening")
+        self.assertFalse(self.live.list_monitors()[0]["sessions"][0]["product_error"])
 
     def test_product_listener_retry_is_persisted_for_live_session_and_rejects_other_states(self):
         monitor = self.live.create_monitor("https://live.douyin.com/retry-product", "room")
@@ -546,7 +563,7 @@ class LiveMonitoringTests(unittest.TestCase):
         requested = self.client.post(url, headers=self.headers)
         self.assertEqual(requested.status_code, 202, requested.text)
         self.assertEqual(requested.json()["state"], "retrying")
-        self.assertEqual(self.live.list_monitors()[0]["sessions"][0]["product_listener"]["status"], "retrying")
+        self.assertEqual(self._session_details()[0]["product_listener"]["status"], "retrying")
         duplicate = self.client.post(url, headers=self.headers)
         self.assertEqual(duplicate.status_code, 409, duplicate.text)
         requests = self.live.take_product_listener_retries()
@@ -587,19 +604,19 @@ class LiveMonitoringTests(unittest.TestCase):
             product_name="初始商品名",
         )
 
-        session = self.live.list_monitors()[0]["sessions"][0]
+        session = self._session_details()[0]
         self.assertEqual(session["current_product"]["promotion_id"], "p-current")
         self.assertEqual(session["current_product"]["product_name"], "初始商品名")
         self.assertEqual(session["product_events"], [])
 
         self.live.update_product_name(session_id, "p-current", "当前商品标题")
-        session = self.live.list_monitors()[0]["sessions"][0]
+        session = self._session_details()[0]
         self.assertEqual(session["current_product"]["product_name"], "初始商品名")
 
         self.live.set_current_product(
             session_id, promotion_id="p-next", event_time=200, received_at=201,
         )
-        session = self.live.list_monitors()[0]["sessions"][0]
+        session = self._session_details()[0]
         self.assertEqual(session["current_product"]["promotion_id"], "p-next")
         self.assertEqual(session["current_product"]["product_name"], "")
 
@@ -1007,7 +1024,7 @@ class LiveMonitoringTests(unittest.TestCase):
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
             self._generate_test_period(session_id)
-        clip = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]
+        clip = self._session_details()[0]["product_clips"][0]
 
         with patch("app.live_monitoring.service.os.startfile") as startfile, \
              patch("app.live_monitoring.service.subprocess.Popen") as popen:
@@ -1063,7 +1080,7 @@ class LiveMonitoringTests(unittest.TestCase):
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
             self._generate_test_period(session_id)
-        clip_id = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]["id"]
+        clip_id = self._session_details()[0]["product_clips"][0]["id"]
 
         first = self.client.post(f"/api/v1/live/product-clips/{clip_id}/import", headers=self.headers)
         second = self.client.post(f"/api/v1/live/product-clips/{clip_id}/import", headers=self.headers)
@@ -1080,7 +1097,7 @@ class LiveMonitoringTests(unittest.TestCase):
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
             self._generate_test_period(session_id)
-        clip = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]
+        clip = self._session_details()[0]["product_clips"][0]
         path = Path(clip["path"])
         deleted = self.client.delete(f"/api/v1/live/product-clips/{clip['id']}", headers=self.headers)
         self.assertEqual(deleted.status_code, 200, deleted.text)
@@ -1092,7 +1109,7 @@ class LiveMonitoringTests(unittest.TestCase):
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
         ):
             self._generate_test_period(session_id)
-        clip = self.live.list_monitors()[0]["sessions"][0]["product_clips"][0]
+        clip = self._session_details()[0]["product_clips"][0]
         path = Path(clip["path"])
         with self.store.connection() as conn:
             conn.execute("UPDATE live_segment_product_clips SET status='imported',asset_id='asset-test' WHERE id=?",
@@ -1122,7 +1139,7 @@ class LiveMonitoringTests(unittest.TestCase):
             session_id, promotion_id="p-stale", event_time=100, received_at=101,
             product_name="旧商品",
         )
-        current = self.live.list_monitors()[0]["sessions"][0]["current_product"]
+        current = self._session_details()[0]["current_product"]
         self.assertEqual(current["promotion_id"], "p-new")
 
     def test_delete_monitor_removes_event_indexes_but_retains_recording_files(self):

@@ -140,6 +140,9 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
       <button class="sidebar-link" :class="{active:route.name==='local-settings'}" :disabled="busy" @click="workspace.go('local-settings')">
         <LiveIcon name="server"/><span class="nav-text">本地设置</span>
       </button>
+      <button class="sidebar-link" :class="{active:route.name==='logs'}" :disabled="busy" @click="workspace.go('logs')">
+        <LiveIcon name="document"/><span class="nav-text">运行日志</span>
+      </button>
       <div class="sidebar-bottom">
         <span
           class="connection-status"
@@ -153,7 +156,7 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
       </div>
     </aside>
 
-    <main :class="{ 'workspace-main': route.name==='workspace', 'live-monitoring-main': route.name==='live-monitoring', 'projects-main': route.name==='projects', 'jobs-main': route.name==='jobs' }">
+    <main :class="{ 'workspace-main': route.name==='workspace', 'live-monitoring-main': route.name==='live-monitoring', 'projects-main': route.name==='projects', 'jobs-main': route.name==='jobs', 'logs-main': route.name==='logs' }">
       <input ref="fileInput" class="file-input" type="file" accept="video/*,.mkv,.flv,.ts" @change="selectFile"/>
       <RouterView/>
     </main>

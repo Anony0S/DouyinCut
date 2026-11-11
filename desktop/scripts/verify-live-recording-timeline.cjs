@@ -31,6 +31,10 @@ const session = (id, started, ended, index) => ({
 const monitor = (id, sessions) => ({ id, sessions, name: `直播间-${id}`, url: `https://live.douyin.com/${id}`, auto_record: false, notify_live: false, live_state: 'offline', is_live: false, live_checked: null, error: null })
 let response = [monitor('一', [session('历史', now - 18000, now - 10800, 7), session('当前', now - 3600, null, 8)])]
 let lastWindow
+// Sessions of the latest window list are readable by id, as on the real backend;
+// detailResponse answers reads of sessions that the window no longer lists.
+let lastListed = []
+let listRequests = 0
 let detailResponse = null
 let recordingResponse = null
 const openedUrls = []
@@ -44,12 +48,19 @@ const api = async (url, method, body) => {
     openedSegments.push({ url, method, body })
     return { opened: true, revealed: Boolean(body?.reveal), path: 'segment.ts' }
   }
-  if (/^\/live\/monitors\/[^/]+\/sessions\//.test(url)) {
+  const detailUrl = /^\/live\/monitors\/([^/]+)\/sessions\/([^/]+)$/.exec(url)
+  if (detailUrl) {
+    const [monitorId, sessionId] = detailUrl.slice(1).map(decodeURIComponent)
+    const listed = lastListed.find(item => item.id === monitorId)?.sessions.find(item => item.id === sessionId)
+    if (listed) return structuredClone(listed)
     return structuredClone(typeof detailResponse === 'function' ? await detailResponse(url) : detailResponse)
   }
   if (url.startsWith('/live/monitors')) {
+    listRequests++
     lastWindow = new URL(url, 'http://test').searchParams
-    return structuredClone(typeof response === 'function' ? await response(lastWindow) : response)
+    const listed = typeof response === 'function' ? await response(lastWindow) : response
+    lastListed = listed
+    return structuredClone(listed)
   }
   throw new Error(`Unexpected request: ${url}`)
 }
@@ -78,6 +89,12 @@ function load(file) {
 }
 const node = type => ({ focus() {}, type, props: {}, children: [], parent: null, text: '' })
 global.window = { addEventListener() {}, removeEventListener() {} }
+const visibilityListeners = new Set()
+global.document = {
+  hidden: false,
+  addEventListener(type, listener) { if (type === 'visibilitychange') visibilityListeners.add(listener) },
+  removeEventListener(type, listener) { if (type === 'visibilitychange') visibilityListeners.delete(listener) },
+}
 const body = node('body')
 const renderer = vue.createRenderer({
   createElement: node, createComment: () => node('comment'), createText: text => ({ ...node('text'), text }),
@@ -161,6 +178,15 @@ async function verify() {
     polling.resolve(originalResponse)
     response = originalResponse
     await settle()
+    const requestsWhileVisible = listRequests
+    document.hidden = true
+    for (const poll of polls) poll()
+    await settle()
+    assert.equal(listRequests, requestsWhileVisible, 'a hidden window does not poll the backend')
+    document.hidden = false
+    for (const listener of visibilityListeners) listener()
+    await settle()
+    assert.equal(listRequests, requestsWhileVisible + 1, 'becoming visible again synchronizes immediately')
     assert.equal(lastWindow.get('window_start'), '1792684800', 'same-day polling does not shift the start')
     assert.equal(lastWindow.get('window_end'), '1792771200', 'same-day polling does not shift the end')
     const recordingPeriod = all(root, el => el.type === 'button' && el.props.class?.includes('live-recording-timeline-period') && el.props.class?.includes('is-recording'))[0]
@@ -195,6 +221,7 @@ async function verify() {
     assert.ok(text(root).includes('片段-历史'), 'click switches product clips')
     assert.ok(!text(root).includes('片段-当前'), 'previous session content is replaced')
   } finally { app.unmount(); clockNow = fixedNow }
+  assert.equal(visibilityListeners.size, 0, 'leaving the page removes its visibility listener')
 
   response = [monitor('一', [session('跨界', now - 59400, now - 52200, 9), session('较新', now - 7200, now - 3600, 10)]), monitor('二', [])]
   const second = await mount()

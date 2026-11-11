@@ -115,7 +115,7 @@ async function verify() {
     { id: 'busy', status: 'processing', product_name: '生成中', promotion_id: 'r' },
   ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, splitting: true }] }
   const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, monitorId: 'monitor', busy: false, selectedPeriodId: '',
-    onDelete: async id => calls.push(`/segments/${id}`), onDeleteProductClip: async id => calls.push(`/clips/${id}`),
+    onDeleteProductClip: async id => calls.push(`/clips/${id}`),
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   assert.equal(all(panel.root, el => el.type === 'h3' && text(el) === '录制分段').length, 0, 'internal media chunks are not shown as a recording segment card')
@@ -128,7 +128,7 @@ async function verify() {
   const retryPanel = await mount('components/live/LiveSessionPanel.vue', {
     session: {...liveSession, status: 'recording', product_listener: {status: 'error', detail: '连接失败', updated: 1},
       product_catalog_error: {detail: {summary: '商品列表获取失败'}, updated: 1}},
-    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDelete: async () => {}, onDeleteProductClip: async () => {},
+    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDeleteProductClip: async () => {},
     onSplit: async () => ({state: 'noop', message: ''}),
     onRetryProductListener: async (monitorId, sessionId) => retryCalls.push([monitorId, sessionId]),
   })
@@ -137,7 +137,7 @@ async function verify() {
   assert.deepEqual(retryCalls, [['monitor', liveSession.id]])
   const noRetry = await mount('components/live/LiveSessionPanel.vue', {
     session: {...liveSession, status: 'recording', product_listener: {status: 'listening', detail: '商品消息连接已建立', updated: 1}, product_catalog_error: null},
-    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDelete: async () => {}, onDeleteProductClip: async () => {},
+    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDeleteProductClip: async () => {},
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   assert.equal(button(noRetry.root, '重试商品连接'), undefined, 'healthy product listener has no manual retry')

@@ -48,6 +48,10 @@ impl SessionHost {
             .join("logs");
         std::fs::create_dir_all(&logs).map_err(|e| format!("无法准备诊断日志：{e}"))?;
         let log_path = logs.join("desktop-runtime.log");
+        // Keep one earlier generation so the log cannot grow without bound.
+        if std::fs::metadata(&log_path).is_ok_and(|log| log.len() > 5 * 1024 * 1024) {
+            let _ = std::fs::rename(&log_path, logs.join("desktop-runtime.previous.log"));
+        }
         let log = std::fs::OpenOptions::new()
             .create(true)
             .append(true)

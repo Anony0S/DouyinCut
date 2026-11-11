@@ -1151,6 +1151,7 @@ h1 {
 .workspace-project-bar > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary); }
 .workspace-project-bar button { flex-shrink: 0; }
 .jobs-main { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+.logs-main { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
 .jobs-panel { flex: 1; min-height: 0; overflow: hidden; }
 .jobs-heading { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 16px; padding: 24px; border-bottom: 1px solid var(--app-border); }
 .jobs-heading h1 { margin: 0; font-size: 21px; font-weight: 600; }

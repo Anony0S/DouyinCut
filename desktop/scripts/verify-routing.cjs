@@ -98,6 +98,8 @@ async function verify() {
   assert.equal(router.currentRoute.value.name,'appearance','Appearance is reachable as its own sidebar destination')
   await workspace.go('local-settings')
   assert.equal(router.currentRoute.value.name,'local-settings','Local settings is reachable as its own sidebar destination')
+  await workspace.go('logs')
+  assert.equal(router.currentRoute.value.name,'logs','Runtime logs are reachable as their own sidebar destination')
   // Navigation cancellation must also prevent the old detail request from replacing Pinia state.
   holdB=true
   const pending=router.push('/projects/b/edit')

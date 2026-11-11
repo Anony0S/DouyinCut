@@ -247,17 +247,26 @@ class LiveStore:
             monitors = [self._decode_monitor(row) for row in conn.execute(
                 f"SELECT {self._MONITOR_COLUMNS} {self._MONITOR_JOINS} "
                 "ORDER BY m.updated DESC,m.created DESC").fetchall()]
+            by_id = {monitor["id"]: monitor for monitor in monitors}
             for monitor in monitors:
-                sessions = conn.execute(
-                    "SELECT * FROM live_sessions WHERE monitor_id=? AND "
-                    "((started<? AND ended>?) OR (status='recording' AND "
-                    "(started<? OR (? AND started=?)))) "
-                    "ORDER BY started DESC,id",
-                    (monitor["id"], window_end, window_start, window_end,
-                     include_end_recording, window_end)).fetchall()
                 monitor["sessions"] = []
-                for session in sessions:
-                    monitor["sessions"].append(self._session_detail(conn, session))
+            # This list is polled every few seconds for every room, so it carries only what the
+            # timeline and attention markers need; full detail is read per selected session.
+            for row in conn.execute(
+                    "SELECT s.id,s.monitor_id,s.status,s.started,s.ended,s.end_time_source,"
+                    "(c.session_id IS NOT NULL OR COALESCE(l.status,'')='error') AS product_error "
+                    "FROM live_sessions s "
+                    "LEFT JOIN live_session_product_catalog_state c ON c.session_id=s.id "
+                    "LEFT JOIN live_product_listener_state l ON l.session_id=s.id "
+                    "WHERE (s.started<? AND s.ended>?) OR (s.status='recording' AND "
+                    "(s.started<? OR (? AND s.started=?))) "
+                    "ORDER BY s.started DESC,s.id",
+                    (window_end, window_start, window_end, include_end_recording, window_end)).fetchall():
+                session = dict(row)
+                session["product_error"] = bool(session["product_error"])
+                monitor = by_id.get(session.pop("monitor_id"))
+                if monitor is not None:
+                    monitor["sessions"].append(session)
         return monitors
 
     def recording_session(self, monitor_id: str, session_id: str):
@@ -1647,6 +1656,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
+    from ..core.logs import configure_logging
+    configure_logging("live_monitor")
     settings = Settings.from_env()
     settings.prepare()
     worker = LiveMonitorWorker(settings)

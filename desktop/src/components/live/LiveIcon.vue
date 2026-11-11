@@ -20,6 +20,7 @@ const paths: Record<string, string> = {
   layers: 'm12 3 10 5-10 5L2 8l10-5z M2 12l10 5 10-5 M2 16l10 5 10-5',
   bag: 'M5 7h14l1 14H4L5 7z M8 8V6a4 4 0 0 1 8 0v2',
   palette: 'M12 3a9 9 0 1 0 0 18h1.2a2.8 2.8 0 0 0 2.1-4.7 1.6 1.6 0 0 1 1.2-2.7H18a3 3 0 0 0 3-3c0-4.2-4-7.6-9-7.6z M7.5 12h.01 M9.5 7.8h.01 M14.5 7.8h.01 M17 11h.01',
+  document: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h6 M9 17h6',
   server: 'M4 5h16v10H4z M8 19h8 M12 15v4 M7 9h.01 M10 9h.01',
 }
 </script>

@@ -6,9 +6,11 @@ import multiprocessing
 import sys
 import threading
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 from .core.config import Settings
+from .core.logs import RUNTIME_LOG
 from .desktop_runtime import DesktopSession
 
 
@@ -72,9 +74,10 @@ def main() -> int:
             from .bundled_media import bundled_settings
             settings = bundled_settings(args.work_dir, resources)
         else:
-            settings = Settings.from_env()
-            from dataclasses import replace
-            settings = replace(settings, data_dir=args.work_dir.absolute())
+            settings = replace(Settings.from_env(), data_dir=args.work_dir.absolute())
+        # Same location the native host appends this runtime's stderr to.
+        log_root = args.workspace_config.parent if args.workspace_config else args.work_dir
+        settings = replace(settings, runtime_log=(log_root / 'logs' / RUNTIME_LOG).absolute())
         session = DesktopSession(settings, frontend,
                                  workspace_config=args.workspace_config, application_dir=args.application_dir)
         info = session.start()

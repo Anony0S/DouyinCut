@@ -251,6 +251,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
+    from .core.logs import configure_logging
+    configure_logging("worker")
     worker = Worker(Settings.from_env())
     worker.run_once() if args.once else worker.run()
 

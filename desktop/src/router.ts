@@ -9,6 +9,7 @@ import JobsView from './views/JobsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import AppearanceView from './views/AppearanceView.vue'
 import LocalSettingsView from './views/LocalSettingsView.vue'
+import LogsView from './views/LogsView.vue'
 import LiveMonitoringView from './views/LiveMonitoringView.vue'
 
 export function createAppRouter(pinia: Pinia, history: RouterHistory = createWebHashHistory()) {
@@ -22,6 +23,7 @@ export function createAppRouter(pinia: Pinia, history: RouterHistory = createWeb
     {path:'/appearance',name:'appearance',component:AppearanceView},
     {path:'/settings',name:'settings',component:SettingsView},
     {path:'/local-settings',name:'local-settings',component:LocalSettingsView},
+    {path:'/logs',name:'logs',component:LogsView},
     {path:'/:pathMatch(.*)*',redirect:'/live-monitoring'},
   ],scrollBehavior:(_to,_from,saved)=>saved || {left:0,top:0}})
   let navigation=0

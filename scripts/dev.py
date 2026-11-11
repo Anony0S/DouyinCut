@@ -27,6 +27,11 @@ def main():
     env["DOUYINCUT_SESSION_TOKEN"] = secrets.token_urlsafe(32)
     env["VITE_SESSION_TOKEN"] = env["DOUYINCUT_SESSION_TOKEN"]
     env["DOUYINCUT_DATA_DIR"] = str(ROOT / "data")
+    # The packaged host redirects stderr into this log; in development each process copies its lines there.
+    runtime_log = ROOT / "data" / "runtime-logs" / "desktop-runtime.log"
+    if runtime_log.is_file() and runtime_log.stat().st_size > 5 * 1024 * 1024:
+        runtime_log.replace(runtime_log.with_name("desktop-runtime.previous.log"))
+    env["DOUYINCUT_LOG_FILE"] = str(runtime_log)
     port = env.get("DOUYINCUT_PORT", "8765")
     processes = []
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0

@@ -45,8 +45,12 @@ def run_process(args: list[str], checkpoint: Callable | None = None, timeout: in
         output.seek(0)
         text = output.read().decode("utf-8", errors="replace")
         if log_path:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_path.write_text(text, encoding="utf-8")
+            if text.strip():
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_path.write_text(text, encoding="utf-8")
+            else:
+                # Most runs print nothing; an empty file per run only buries the useful logs.
+                log_path.unlink(missing_ok=True)
         if process.returncode:
             raise MediaError(f"媒体处理失败（退出码 {process.returncode}），请检查任务日志")
         return text

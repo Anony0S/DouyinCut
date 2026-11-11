@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { LiveSession } from '../../services/liveMonitoring'
+import type { LiveSession, LiveSessionSummary } from '../../services/liveMonitoring'
+
+type SessionTiming = Pick<LiveSessionSummary, 'status' | 'started' | 'ended' | 'end_time_source'>
 import ConfirmPopover from '../ConfirmPopover.vue'
 import LiveIcon from './LiveIcon.vue'
 import { formatBytes, formatLiveTime } from './presentation'
 import RecordingDatePicker from './RecordingDatePicker.vue'
 
 const props = defineProps<{
-  sessions: LiveSession[]
+  sessions: LiveSessionSummary[]
   selectedId: string
   selectedSession: LiveSession | undefined
   start: number
@@ -45,22 +47,22 @@ const ticks = computed(() => Array.from({ length: 5 }, (_, index) => {
     label: `${String(index * 6).padStart(2, '0')}:00`,
   }
 }))
-function position(item: LiveSession) {
+function position(item: SessionTiming) {
   const start = Math.max(props.start, item.started)
   const end = Math.min(props.end, item.status === 'recording' ? props.now : item.ended ?? item.started)
   return { left: `${(start - props.start) / (props.end - props.start) * 100}%`, width: `${Math.max(0, end - start) / (props.end - props.start) * 100}%` }
 }
-function duration(item: LiveSession) {
+function duration(item: SessionTiming) {
   const seconds = Math.max(0, Math.floor((item.status === 'recording' ? props.now : item.ended ?? item.started) - item.started))
   const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds / 60) % 60
   return [hours ? `${hours} 小时` : '', minutes ? `${minutes} 分钟` : '', seconds % 60 ? `${seconds % 60} 秒` : ''].filter(Boolean).join(' ') || '不足 1 秒'
 }
-function state(item: LiveSession) {
+function state(item: SessionTiming) {
   if (item.status === 'recording') return '录制中'
   if (item.status !== 'failed') return '已结束'
   return item.end_time_source === 'recovery_check' ? '异常结束，结束时间可能晚于实际停录时间' : '异常结束'
 }
-function summary(item: LiveSession) {
+function summary(item: SessionTiming) {
   return `${formatLiveTime(item.started)} — ${item.status === 'recording' ? '至今' : formatLiveTime(item.ended)} · ${duration(item)} · ${state(item)}`
 }
 function deleteCounts(item: LiveSession) {

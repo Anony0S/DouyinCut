@@ -11,9 +11,11 @@ export type LiveCurrentProduct = { promotion_id:string; product_name:string; eve
 export type LiveProductListener = { status:string; detail:string; updated:number }
 export type LiveProductCatalogError = { detail:Record<string,unknown>; updated:number }
 export type LiveSession = { id:string; status:string; started:number; ended:number|null; end_time_source:'observed'|'recovery_check'|null; segments:LiveSegment[]; product_clips:LiveProductClip[]; product_periods:LiveProductPeriod[]; current_product:LiveCurrentProduct|null; product_events:LiveProductEvent[]; product_listener:LiveProductListener|null; product_catalog_error:LiveProductCatalogError|null }
+/** Window list entry: enough for the timeline and attention markers; details are read per selected session. */
+export type LiveSessionSummary = { id:string; status:string; started:number; ended:number|null; end_time_source:'observed'|'recovery_check'|null; product_error:boolean }
 export type LiveSessionDeleteResult = { deleted_session_id:string; deleted_segments:number; deleted_product_clips:number; deleted_files:number; bytes_reclaimed:number; retained_files:number }
 export type LiveMonitorSettings = { auto_record?:boolean; notify_live?:boolean; notify_offline?:boolean; notify_split_complete?:boolean }
-export type LiveMonitor = { id:string; url:string; name:string; auto_record:boolean; notify_live:boolean; notify_offline:boolean; notify_split_complete:boolean; record_requested:boolean; record_held:boolean; retry_blocked:boolean; live_state:string; is_live:boolean|null; live_checked:number|null; last_checked:number|null; error:string|null; sessions:LiveSession[] }
+export type LiveMonitor = { id:string; url:string; name:string; auto_record:boolean; notify_live:boolean; notify_offline:boolean; notify_split_complete:boolean; record_requested:boolean; record_held:boolean; retry_blocked:boolean; live_state:string; is_live:boolean|null; live_checked:number|null; last_checked:number|null; error:string|null; sessions:LiveSessionSummary[] }
 
 export const liveMonitoringApi = {
   session: (monitorId: string, sessionId: string) => api<LiveSession | null>(`/live/monitors/${encodeURIComponent(monitorId)}/sessions/${encodeURIComponent(sessionId)}`),
@@ -24,11 +26,9 @@ export const liveMonitoringApi = {
   updateSettings: (id:string,settings:LiveMonitorSettings) => api<LiveMonitor>(`/live/monitors/${encodeURIComponent(id)}`,'PATCH',settings),
   setRecording: (id:string,action:'start'|'stop') => api<LiveMonitor>(`/live/monitors/${encodeURIComponent(id)}/recording`,'POST',{action}),
   remove: (id:string) => api<{deleted_monitor_id:string;recordings_retained:boolean}>(`/live/monitors/${encodeURIComponent(id)}`,'DELETE'),
-  importSegment: (id:string) => api<Job|{asset_id:string;state:'imported'}>(`/live/segments/${encodeURIComponent(id)}/import`,'POST'),
   openSegment: (id:string,reveal=false) => api<{opened:boolean;revealed:boolean;path:string}>(`/live/segments/${encodeURIComponent(id)}/open`,'POST',{reveal}),
   importProductClip: (id:string) => api<Job|{asset_id:string;state:'imported'}>(`/live/product-clips/${encodeURIComponent(id)}/import`,'POST'),
   openProductClip: (id:string,reveal=false) => api<{opened:boolean;revealed:boolean;path:string}>(`/live/product-clips/${encodeURIComponent(id)}/open`,'POST',{reveal}),
   deleteProductClip: (id:string) => api<{deleted_clip_id:string;file_deleted:boolean;project_file_retained:boolean}>(`/live/product-clips/${encodeURIComponent(id)}`,'DELETE'),
   splitPeriod: (id:string, confirmedMissingSegmentIds:string[] = [], range?: {start:number; end:number}) => api<LiveSplitResult>(`/live/product-periods/${encodeURIComponent(id)}/product-clips`,'POST',{confirmed_missing_segment_ids:confirmedMissingSegmentIds, ...(range || {})}),
-  deleteSegment: (id:string) => api<{deleted_segment_id:string;file_deleted:boolean}>(`/live/segments/${encodeURIComponent(id)}`,'DELETE'),
 }

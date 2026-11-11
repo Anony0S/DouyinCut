@@ -22,6 +22,6 @@ commands.allow = ["get_appearance_preference", "set_appearance_preference"]
 
 [[permission]]
 identifier = "allow-local-maintenance"
-description = "允许工作台执行本地目录、日志和版本维护操作"
-commands.allow = ["delete_workspace_config", "relaunch", "open_log_directory", "clear_logs", "check_for_update", "get_update_status", "download_update", "cancel_update_download", "install_update"]
+description = "允许工作台执行本地目录和版本维护操作"
+commands.allow = ["delete_workspace_config", "relaunch", "check_for_update", "get_update_status", "download_update", "cancel_update_download", "install_update"]
 

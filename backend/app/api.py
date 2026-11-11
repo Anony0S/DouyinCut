@@ -24,7 +24,8 @@ from .ai.providers import CloudConfig, ProviderError, asr_api_key, model_api_key
 from .ai.connection import ModelConnectionTestRequest, check_model_connection, OssConnectionTestRequest, check_oss_connection
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
 from .core.storage import SessionStopping, Store
-from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, ProjectDraft, delete_plan, delete_project, job_summary,
+from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, WorkspaceLayout,
+                       workspace_layout, save_workspace_layout, ProjectDraft, delete_plan, delete_project, job_summary,
                        project_detail, project_list, save_draft)
 from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
 from .product_platform import ProductPlatformService
@@ -573,6 +574,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.put("/api/v1/settings/editing-defaults")
     def set_editing_defaults(body: EditingDefaults):
         return save_editing_defaults(store, body)
+
+    @app.get("/api/v1/settings/workspace-layout")
+    def get_workspace_layout():
+        return workspace_layout(store)
+
+    @app.put("/api/v1/settings/workspace-layout")
+    def set_workspace_layout(body: WorkspaceLayout):
+        return save_workspace_layout(store, body)
 
     @app.get("/api/v1/settings/cloud")
     def get_cloud_config():

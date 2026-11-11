@@ -11,8 +11,6 @@ export const projectsApi = {
   analyze: (id: string, draft: ProjectDraft, refreshAsr: boolean) => api<Job>(`/assets/${encodeURIComponent(id)}/analyze`, 'POST', {...draft,refresh_asr:refreshAsr}),
   savePlan: (plan: Plan) => api<Plan>(`/plans/${encodeURIComponent(plan.id)}`, 'PATCH', plan),
   deletePlan: (id: string) => api<{deleted_plan_id:string;source_asset_id:string;cleanup_pending:string[]}>(`/plans/${encodeURIComponent(id)}`, 'DELETE'),
-  approve: (id: string) => api<Plan>(`/plans/${encodeURIComponent(id)}/approve`, 'POST'),
-  export: (id: string) => api(`/plans/${encodeURIComponent(id)}/exports`, 'POST', {format:'mp4'}),
   createJianyingDraft: (id: string, revision: number) => api<Job>(`/plans/${encodeURIComponent(id)}/jianying-drafts`, 'POST', {revision}),
   transcript: (id: string) => api<TranscriptResult>(`/jobs/${encodeURIComponent(id)}/transcript`),
 }

@@ -37,6 +37,27 @@ def save_editing_defaults(store, defaults):
     return normalized
 
 
+class WorkspaceLayout(Model):
+    # Left pane width of the roughcut workbench in pixels; None means the default width.
+    left_width: float | None = Field(default=None, ge=230, le=10000)
+
+
+def workspace_layout(store):
+    try:
+        return WorkspaceLayout.model_validate(store.get("config", "workspace_layout")["config"])
+    except KeyError:
+        return WorkspaceLayout()
+
+
+def save_workspace_layout(store, layout):
+    data = {"id": "workspace_layout", "config": layout.model_dump()}
+    # Saved after every drag: keep one row instead of a revision per adjustment.
+    with store.connection() as conn:
+        conn.execute("INSERT OR REPLACE INTO objects VALUES ('config', ?, 1, ?, ?)",
+                     (data["id"], json.dumps(data, ensure_ascii=False), time.time()))
+    return layout
+
+
 def new_project_draft(store, **fields):
     return ProjectDraft(**{"instructions": editing_defaults(store).instructions, **fields})
 

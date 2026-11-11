@@ -23,7 +23,6 @@ const selectedPlan = ref<Plan | null>(null)
 const activeAsset = computed(() => assets.value.find(a => a.id === assetId.value))
 const assetPlans = computed(() => plans.value.filter(p => p.clips.every(c => c.source_asset_id === assetId.value)))
 const previewArtifact = computed(() => selectedPlan.value ? artifacts.value.find(a => a.plan_id === selectedPlan.value!.id && ['preview','mp4'].includes(a.format) && a.revision === selectedPlan.value!.revision) : undefined)
-const projectExports = computed(() => artifacts.value.filter(a => a.format === 'mp4' && assetPlans.value.some(p => p.id === a.plan_id)))
 const planDirty = computed(() => {
   const saved=plans.value.find(p=>p.id===selectedPlan.value?.id)
   return Boolean(saved && selectedPlan.value && JSON.stringify(saved.clips)!==JSON.stringify(selectedPlan.value.clips))
@@ -110,13 +109,6 @@ async function loadTranscript() { await session.act(async()=>{
   const loaded=await projectsApi.transcript(job.id)
   if(assetId.value===currentAsset) { transcript.value=loaded;transcriptVisible.value=true }
 }) }
-async function approveAndExport(plan: Plan) { await session.act(async()=>{
-  if(planDirty.value) throw new Error('请先保存片段调整，查看新的拼接预览后再导出')
-  const saved=plans.value.find(p=>p.id===plan.id)
-  const approved=saved?.status==='approved' ? saved : await projectsApi.approve(plan.id)
-  selectedPlan.value=clonePlan(approved)
-  await projectsApi.export(approved.id);await refresh();session.message='MP4 与字幕导出已排队'
-}) }
 async function createJianyingDraft(plan: Plan) { await session.act(async()=>{
   if(planDirty.value) throw new Error('请先保存片段调整，再生成剪映草稿')
   const task=await projectsApi.createJianyingDraft(plan.id,plan.revision)
@@ -145,15 +137,18 @@ async function deletePlan(id: string) { await session.act(async()=>{
   if(selectedPlan.value?.id===id) selectedPlan.value=clonePlan(assetPlans.value[0])
   session.message=result.cleanup_pending.length?'方案记录已删除，部分本地文件暂时无法清理':'粗剪方案及其本地产物已删除；源视频、ASR 对话和 OSS 临时音频已保留'
 }) }
-function moveClip(index: number, delta: number) {
+/** Move a clip to an insertion slot: slot N means "before the clip currently at N", and the clip count means the end. */
+function moveClipTo(from: number, slot: number) {
   const clips=selectedPlan.value?.clips
-  if(!clips||index+delta<0||index+delta>=clips.length) return
-  ;[clips[index],clips[index+delta]]=[clips[index+delta],clips[index]]
+  if(!clips||from<0||from>=clips.length||slot<0||slot>clips.length||slot===from||slot===from+1) return
+  const [clip]=clips.splice(from,1)
+  clips.splice(slot>from?slot-1:slot,0,clip)
 }
+function moveClip(index: number, delta: number) { moveClipTo(index,delta<0?index+delta:index+delta+1) }
 
 return {projectAnalysis,savedDraft,assets,candidates,plans,jobs,artifacts,assetId,productName,pendingAnalyzeId,
  defaultInstructions,instructions,targetSeconds,toleranceSeconds,refreshAsr,transcript,transcriptVisible,selectedPlan,
- activeAsset,assetPlans,previewArtifact,projectExports,planDirty,assetJobs,analyzingAsset,latestAnalysis,
+ activeAsset,assetPlans,previewArtifact,planDirty,assetJobs,analyzingAsset,latestAnalysis,
  currentDraft,persistDraft,saveProjectInfo,saveDefaultInstructions,load,refresh,invalidate,checkSwitch,trackRetry,
- analyze,loadTranscript,approveAndExport,createJianyingDraft,savePlan,deletePlan,moveClip}
+ analyze,loadTranscript,createJianyingDraft,savePlan,deletePlan,moveClip,moveClipTo}
 })

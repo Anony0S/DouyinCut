@@ -99,6 +99,25 @@ class ProjectTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             save_draft(self.store, 'missing', saved)
 
+    def test_workspace_layout_is_saved_with_the_work_directory_and_survives_a_new_app(self):
+        url = '/api/v1/settings/workspace-layout'
+        self.assertEqual(self.client.put(url, json={'left_width': 420}).status_code, 401)
+        self.assertEqual(self.client.get(url, headers=self.headers).json(), {'left_width': None})
+        for width in (420, 512.5):
+            saved = self.client.put(url, headers=self.headers, json={'left_width': width})
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertEqual(saved.json(), {'left_width': width})
+        with self.store.connection() as conn:
+            rows = conn.execute("SELECT COUNT(*) FROM objects WHERE kind='config' AND id='workspace_layout'").fetchone()[0]
+        self.assertEqual(rows, 1, 'repeated adjustments replace the saved width instead of adding revisions')
+        for invalid in (100, 20000, 'wide'):
+            self.assertEqual(self.client.put(url, headers=self.headers, json={'left_width': invalid}).status_code, 422)
+        # The packaged workbench gets a new loopback port on every launch; the width must not depend on it.
+        with TestClient(create_app(Settings(Path(self.temp.name), port=18999), token='test')) as restarted:
+            self.assertEqual(restarted.get(url, headers=self.headers).json(), {'left_width': 512.5})
+        cleared = self.client.put(url, headers=self.headers, json={'left_width': None})
+        self.assertEqual(cleared.json(), {'left_width': None})
+
     def test_saved_default_instructions_survive_failure_and_new_app(self):
         from app.ai.roughcut import DEFAULT_INSTRUCTIONS
         from app.projects.service import new_project_draft

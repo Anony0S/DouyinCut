@@ -10,7 +10,7 @@ const {modules}=require('./test-modules.cjs')
 const {createPinia,setActivePinia,storeToRefs}=require('pinia')
 const {createMemoryHistory}=require('vue-router')
 const copy = value => JSON.parse(JSON.stringify(value))
-let bindings, uploaded, analyzeBody, exported, savedDraft, savedDefaultInstructions, approvalCount = 0
+let bindings, uploaded, analyzeBody, savedDraft, savedDefaultInstructions
 let failDefaultSave=false
 let releaseOtherProject
 const requests=[]
@@ -60,13 +60,6 @@ const api = async (url, method = 'GET', body) => {
     lists['/plans'] = [saved]
     return copy(saved)
   }
-  if (url === '/plans/roughcut/approve') {
-    approvalCount++
-    const saved = { ...lists['/plans'][0], revision: lists['/plans'][0].revision + 1, status: 'approved' }
-    lists['/plans'] = [saved]
-    return copy(saved)
-  }
-  if (url === '/plans/roughcut/exports') { exported = copy(body); return {} }
   throw new Error(`Unexpected route ${url}`)
 }
 const uploadVideo = async file => {
@@ -97,7 +90,7 @@ async function verify() {
   const app = renderer.createApp({ setup() {
     bindings={...storeToRefs(project),...storeToRefs(session),...project,
       ...storeToRefs(project),...storeToRefs(session),...workspace,...provideVideoImport(workspace),
-      defaultInstructions:project.defaultInstructions,subtitlePath:loaded.load('presentation.ts').subtitlePath,
+      defaultInstructions:project.defaultInstructions,
       page:vue.computed(()=>router.currentRoute.value.name),
       navigate:name=>name==='projects' ? workspace.goProjects() : workspace.go(name)}
     return () => vue.h('div')
@@ -152,8 +145,6 @@ async function verify() {
     bindings.moveClip(1, -1)
     assert.equal(bindings.planDirty.value, true)
     assert.equal(bindings.plans.value[0].clips[0].candidate_id, 'fabric', 'Draft must be isolated from saved state')
-    await bindings.approveAndExport(bindings.selectedPlan.value)
-    assert.equal(approvalCount, 0, 'Unsaved edits cannot export')
     await bindings.savePlan()
     assert.equal(bindings.selectedPlan.value.revision, 2)
     assert.equal(bindings.selectedPlan.value.clips[1].timeline_start_us, 5e6)
@@ -161,25 +152,19 @@ async function verify() {
     assert.equal(bindings.previewArtifact.value, undefined, 'Previous revision cannot represent changed cuts')
     lists['/exports'].unshift({ id: 'preview2', plan_id: 'roughcut', revision: 2, format: 'preview' })
     await bindings.refresh()
-    await bindings.approveAndExport(bindings.selectedPlan.value)
-    assert.deepEqual(exported, { format: 'mp4' })
-    assert.equal(approvalCount, 1)
-    assert.equal(bindings.selectedPlan.value.revision, 3)
-    lists['/exports'].unshift({ id: 'mp4', plan_id: 'roughcut', revision: 3, format: 'mp4',
-      path:'C:\\成片\\当前版本',video_path:'C:\\成片\\当前版本\\video.mp4',duration_us:10e6 })
-    await bindings.refresh()
-    assert.equal(bindings.previewArtifact.value.id, 'mp4')
-    assert.deepEqual(bindings.projectExports.value.map(item=>item.id),['mp4'],'Only final exports are shown as project deliveries')
-    assert.equal(bindings.subtitlePath(bindings.projectExports.value[0]),'C:\\成片\\当前版本\\subtitles.srt')
-    lists['/exports'].push({id:'history',plan_id:'roughcut',revision:1,format:'mp4',
-      path:'/generated/history/',video_path:'/generated/history/video.mp4',duration_us:10e6})
-    lists['/exports'].push({id:'foreign',plan_id:'another-project-plan',revision:1,format:'mp4',
-      path:'/generated/other',video_path:'/generated/other/video.mp4',duration_us:10e6})
-    await bindings.refresh()
-    assert.deepEqual(bindings.projectExports.value.map(item=>item.id),['mp4','history'],'Saved revision exports remain accessible without mixing another project')
-    assert.equal(bindings.subtitlePath(bindings.projectExports.value[1]),'/generated/history/subtitles.srt')
-    await bindings.approveAndExport(bindings.selectedPlan.value)
-    assert.equal(approvalCount, 1, 'Repeated export need not approve another revision')
+    assert.equal(bindings.previewArtifact.value.id, 'preview2', 'The saved revision shows its own preview')
+    // Drag reordering moves a clip to an insertion slot; the slot counts positions before the move.
+    const order = () => bindings.selectedPlan.value.clips.map(item => item.candidate_id)
+    const saved = order()
+    bindings.moveClipTo(0, 2)
+    assert.deepEqual(order(), [saved[1], saved[0]], 'Dropping after the last clip moves the first clip to the end')
+    assert.equal(bindings.planDirty.value, true, 'A dragged order is an unsaved adjustment')
+    for (const [from, slot] of [[0, 0], [0, 1], [1, 2], [-1, 0], [0, 3], [2, 0]]) bindings.moveClipTo(from, slot)
+    assert.deepEqual(order(), [saved[1], saved[0]], 'Dropping beside itself or outside the list changes nothing')
+    bindings.moveClipTo(1, 0)
+    assert.deepEqual(order(), saved, 'Dropping before the first clip moves a clip to the start')
+    assert.equal(bindings.planDirty.value, false, 'Restoring the saved order leaves nothing to save')
+    assert.equal(typeof bindings.approveAndExport, 'undefined', 'The workbench no longer exports MP4 files')
     // Selecting a saved plan uses a clone even when objects are already Vue proxies.
     await bindings.openProject('video')
     assert.equal(bindings.selectedPlan.value.id, 'roughcut')
@@ -218,14 +203,13 @@ async function verify() {
     assert.equal(bindings.targetSeconds.value,90)
     assert.equal(bindings.toleranceSeconds.value,10,'Opening another project restores its own tolerance')
     assert.equal(bindings.selectedPlan.value,null,'New projects do not display another project’s plan')
-    assert.equal(bindings.projectExports.value.length,0,'Switching projects clears previous deliveries')
     assert.equal(bindings.transcriptVisible.value,false)
     await bindings.openProject('video')
     assert.equal(bindings.instructions.value,'已保存的剪辑要求')
     assert.equal(bindings.selectedPlan.value.id,'roughcut')
     assert.ok(!requests.includes('/assets') && !requests.includes('/plans') && !requests.includes('/candidates'), 'Editor must not fetch the full library')
-    assert.ok(!requests.includes('/exports'),'Project deliveries must not fetch a global export list')
-    console.log('ASR roughcut workflow checks passed (local file, product input, automatic preview, edit and export).')
+    assert.ok(!requests.includes('/exports'),'The editor must not fetch a global export list')
+    console.log('ASR roughcut workflow checks passed (local file, product input, automatic preview, edit and reorder).')
   } finally { app.unmount() }
 }
 async function verifyEditingControls() {

@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, useId } from 'vue'
+import { workspaceLayoutApi } from '../services/layout'
 
-const storageKey = 'douyincut.workspace-left-width'
+// The packaged workbench is served from a new loopback port on every launch, so WebView
+// storage (scoped to that origin) does not survive a restart. The width is saved with the
+// work directory instead. `remembered` keeps it across page visits; undefined = not read yet.
+let remembered: number | null | undefined
+let saving: Promise<unknown> = Promise.resolve()
 const minimumLeft = 230, minimumRight = 360, separatorWidth = 16
 const root = ref<HTMLDivElement | null>(null), left = ref<HTMLDivElement | null>(null)
 const width = ref<number | null>(null), available = ref(0), stacked = ref(false), dragging = ref(false)
@@ -12,6 +17,7 @@ const paneStyle = computed(() => width.value === null ? {} : { '--workspace-left
 let observer: ResizeObserver | undefined
 let pointer: number | null = null, startX = 0, startWidth = 0
 let handle: HTMLElement | null = null
+let mounted = false, adjusted = false
 
 function defaultWidth() {
   return root.value ? Number.parseFloat(getComputedStyle(root.value).getPropertyValue('--workspace-default-left')) || 280 : 280
@@ -22,10 +28,14 @@ function measure() {
   if (stacked.value) finishDrag()
 }
 function remember() {
-  try {
-    if (width.value === null) localStorage.removeItem(storageKey)
-    else localStorage.setItem(storageKey, String(boundedWidth.value))
-  } catch { /* Layout remains adjustable when browser storage is unavailable. */ }
+  const value = width.value === null ? null : Math.round(boundedWidth.value)
+  adjusted = true
+  remembered = value
+  // One request at a time, so a slow earlier save cannot overwrite a later width.
+  saving = saving.then(() => workspaceLayoutApi.save(value)).catch(() => { /* Still adjustable for this session. */ })
+}
+function restore(value: number | null) {
+  width.value = value !== null && Number.isFinite(value) && value >= minimumLeft ? value : null
 }
 function startDrag(event: PointerEvent) {
   if (event.button !== 0 || stacked.value || pointer !== null) return
@@ -66,17 +76,19 @@ function resizeWithKey(event: KeyboardEvent) {
   remember()
 }
 onMounted(() => {
-  try {
-    const stored = localStorage.getItem(storageKey)
-    const value = stored === null ? NaN : Number(stored)
-    if (Number.isFinite(value) && value >= minimumLeft) width.value = value
-  } catch { /* Use the default width. */ }
+  mounted = true
+  if (remembered !== undefined) restore(remembered)
+  else void workspaceLayoutApi.get().then(layout => {
+    // An adjustment made while this was loading is newer than the saved width.
+    if (remembered === undefined) remembered = layout.left_width
+    if (mounted && !adjusted) restore(remembered)
+  }).catch(() => { /* Use the default width; the next visit reads it again. */ })
   measure()
   observer = new ResizeObserver(measure)
   if (root.value) observer.observe(root.value)
   window.addEventListener('resize', measure)
 })
-onUnmounted(() => { finishDrag(); observer?.disconnect(); window.removeEventListener('resize', measure) })
+onUnmounted(() => { mounted = false; finishDrag(); observer?.disconnect(); window.removeEventListener('resize', measure) })
 </script>
 
 <template>

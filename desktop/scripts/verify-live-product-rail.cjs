@@ -62,7 +62,8 @@ const all = (element, predicate) => [
   ...element.children.flatMap(child => all(child, predicate)),
 ]
 const teleportBody = makeNode('body')
-const settle = async () => { for (let i = 0; i < 12; i++) { await Promise.resolve(); await vue.nextTick() } }
+// The thumbnail mock returns a real Response; reading its Blob needs event-loop turns, not only microtasks.
+const settle = async () => { for (let i = 0; i < 12; i++) { await new Promise(resolve => setImmediate(resolve)); await vue.nextTick() } }
 const load = file => {
   let source = fs.readFileSync(file, 'utf8')
   if (file.endsWith('.vue')) {

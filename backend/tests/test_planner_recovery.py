@@ -79,7 +79,9 @@ class PlannerRecoveryFixture:
         self.store = Store(self.settings.database)
         self.asset = self.make_asset()
         self.store.put("asset", self.asset.model_dump())
-        self.config = CloudConfig()
+        # Unconfigured connections are rejected before any request; the URLs are patched to the local server.
+        self.config = CloudConfig(base_url="https://example.com/v1", planner_model="planner",
+                                  asr_base_url="https://example.com/asr", asr_model="asr-model")
 
         PlannerHandler.requests = PlannerHandler.asr_requests = 0
         PlannerHandler.arrived = threading.Event()

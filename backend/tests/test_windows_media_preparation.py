@@ -46,9 +46,11 @@ class WindowsMediaPreparationTests(unittest.TestCase):
                               env={**os.environ, 'PYTHONIOENCODING': 'utf-8'})
 
     def write_inventory(self):
+        # Follow the pinned distribution so a media upgrade does not strand this fixture.
+        manifest = json.loads((REPO / 'packaging/windows/media-manifest.json').read_text(encoding='utf-8'))
         inventory = {
-            'version': '8.1-full_build-www.gyan.dev',
-            'readme_sha256': '557205ec68086511f87c0c2ca7ba077d4c687f71e55f3165aed425ebe704b5d8',
+            'version': manifest['version'],
+            'readme_sha256': manifest['files']['README.txt'],
             'redistribution_ready': False,
         }
         path = self.root / 'packaging/windows/media-sources.json'

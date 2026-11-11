@@ -13,7 +13,8 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', required=True, type=Path,
-                        help='Extracted ffmpeg-8.1-full_build directory containing bin, LICENSE and README.txt')
+                        help='Extracted FFmpeg distribution pinned in media-manifest.json, '
+                             'containing bin, LICENSE and README.txt')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / 'packaging/windows/media-manifest.json').read_text(encoding='utf-8'))

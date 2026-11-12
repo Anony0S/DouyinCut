@@ -214,7 +214,23 @@ class CloudDiagnosticsTests(unittest.TestCase):
             self.assertEqual(select_intervals(self.transcripts, self.request, config, self.asset.duration_us).clips[0].end_ms, 5000)
         self.assertEqual(network.call_args.kwargs, {"timeout_seconds": 600, "operation": "planner"})
         self.assertFalse(network.call_args.args[2]['stream'])
-        self.assertEqual(network.call_args.args[2]['max_tokens'], 4096)
+        self.assertEqual(network.call_args.args[2]['max_tokens'], 16000)
+
+    def test_planner_reports_truncated_or_empty_output_and_field_errors(self):
+        cases = [({"content": "", "finish_reason": "length"}, "达到 16000 token 上限被截断"),
+                 ({"content": "", "finish_reason": "stop"}, "返回了空内容"),
+                 ({"content": '{"clips":[{"start_ms":0,"end_ms":5000.5,"reason":"面料"}]}', "finish_reason": "stop"},
+                  r"clips\.0\.end_ms")]
+        for reply, message in cases:
+            with self.subTest(message=message), \
+                    patch("app.ai.roughcut.model_api_key", return_value="mock-key"), \
+                    patch("app.ai.roughcut.cloud_json", return_value={"choices": [{
+                        "message": {"role": "assistant", "content": reply["content"]},
+                        "finish_reason": reply["finish_reason"]}]}):
+                with self.assertRaisesRegex(ProviderError, message) as raised:
+                    select_intervals(self.transcripts, self.request, self.config, self.asset.duration_us)
+                self.assertNotIn("validation error for", str(raised.exception))
+                self.assertEqual(raised.exception.details["error_source"], "response_validation")
 
     def test_generic_transport_default_timeout_is_90_seconds(self):
         with patch("urllib.request.build_opener") as opener:

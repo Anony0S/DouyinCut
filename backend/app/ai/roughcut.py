@@ -1,6 +1,6 @@
 import json
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from ..core.domain import Candidate, Model, Transcript
 from .providers import (ProviderError, interruptible_network_call, aggregate_transcript, cloud_json, model_api_key,
@@ -9,6 +9,8 @@ from .providers import (ProviderError, interruptible_network_call, aggregate_tra
 
 DEFAULT_INSTRUCTIONS = "保留上身效果、版型、面料和穿着感受的介绍，去掉价格、优惠、催单、无关互动及重复口播，保持表达完整，生成约 60 秒的视频。"
 MAX_CLIP_DURATION_US = 10_000_000
+# Reasoning models count hidden thinking against this budget, so it must leave room for the JSON answer.
+PLANNER_MAX_TOKENS = 16_000
 _MAX_DURATION_CORRECTIONS = 2
 
 
@@ -97,7 +99,7 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
     for attempt in range(_MAX_DURATION_CORRECTIONS + 1):
         args = ("POST", config.chat_url,
                 {"model": config.planner_model, "messages": messages,
-                 "temperature": 0.1, "stream": False, "max_tokens": 4096}, key)
+                 "temperature": 0.1, "stream": False, "max_tokens": PLANNER_MAX_TOKENS}, key)
         # Transport failures keep their original semantics; only known duration errors are corrected.
         if operation is None:
             response = cloud_json(*args, **kwargs)
@@ -108,7 +110,16 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
             response = interruptible_network_call("planner", args, store=store, operation_id=operation_id,
                                                    checkpoint=checkpoint, kwargs=kwargs)
         try:
-            raw = response["choices"][0]["message"]["content"].strip()
+            choice = response["choices"][0]
+            raw = (choice["message"].get("content") or "").strip()
+            if choice.get("finish_reason") == "length":
+                raise ProviderError(
+                    f"剪辑决策模型输出达到 {PLANNER_MAX_TOKENS} token 上限被截断，未返回完整 JSON；"
+                    "推理模型的思考过程也计入输出额度，请换用推理更少的模型或精简剪辑要求后重试",
+                    parsed_response_details(response, config.chat_url, config.planner_model, key))
+            if not raw:
+                raise ProviderError("剪辑决策模型返回了空内容，未给出时间区间 JSON",
+                                    parsed_response_details(response, config.chat_url, config.planner_model, key))
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             selection = TimeSelection.model_validate_json(raw)
@@ -142,8 +153,18 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
             messages = [*messages, {"role": "assistant", "content": raw},
                         {"role": "user", "content": correction}]
         except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
-            raise ProviderError("剪辑决策时间区间无效或没有符合要求的片段：" + str(exc).split("\n")[0],
+            raise ProviderError("剪辑决策时间区间无效或没有符合要求的片段：" + _error_summary(exc),
                                 parsed_response_details(response, config.chat_url, config.planner_model, key)) from None
+
+
+def _error_summary(exc) -> str:
+    """Name the failing field instead of pydantic's bare 'N validation errors for X' headline."""
+    if isinstance(exc, ValidationError):
+        first = exc.errors()[0]
+        location = ".".join(str(part) for part in first["loc"])
+        summary = f"{location + '：' if location else ''}{first['msg']}"
+        return summary if exc.error_count() == 1 else f"{summary}（共 {exc.error_count()} 处错误）"
+    return str(exc).split("\n")[0]
 
 
 def validate_selection_duration(selection: TimeSelection, target_us: int, tolerance_us: int = 15_000_000):

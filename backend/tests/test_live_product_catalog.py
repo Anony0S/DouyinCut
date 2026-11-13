@@ -60,6 +60,88 @@ class LiveProductCatalogTests(unittest.TestCase):
             lookup.assert_called_once_with(self.monitor["id"], "new")
         refresher.resolver.lookup_catalog.assert_not_called()
 
+    def test_database_lookup_does_not_block_cached_request(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"known": "已有商品"})
+        refresher = self.refresher()
+        entered, release, returned = threading.Event(), threading.Event(), threading.Event()
+        real_lookup = self.live.product_name
+
+        def blocked_lookup(monitor_id, promotion_id):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("database lookup was not released")
+            return real_lookup(monitor_id, promotion_id)
+
+        with patch.object(self.live, "product_name", side_effect=blocked_lookup):
+            lookup_thread = threading.Thread(target=refresher.request_missing, args=("unknown",))
+            cached_thread = threading.Thread(
+                target=lambda: (refresher.request_missing("known"), returned.set())
+            )
+            try:
+                lookup_thread.start()
+                self.assertTrue(entered.wait(5))
+                cached_thread.start()
+                self.assertTrue(returned.wait(1), "cached request blocked by database lookup")
+            finally:
+                release.set()
+                lookup_thread.join(5)
+                if cached_thread.ident is not None:
+                    cached_thread.join(5)
+            self.assertFalse(lookup_thread.is_alive())
+            self.assertFalse(cached_thread.is_alive())
+
+    def test_refresh_publication_wins_over_older_database_lookup(self):
+        self.live.replace_monitor_products(self.monitor["id"], {})
+        resolver = Mock(lookup_catalog=Mock(return_value=({"new": "新名称"}, None)))
+        refresher = self.refresher(resolver=resolver)
+        entered, release = threading.Event(), threading.Event()
+
+        def blocked_lookup(_monitor_id, _promotion_id):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("database lookup was not released")
+            return "旧名称"
+
+        with patch.object(self.live, "product_name", side_effect=blocked_lookup), \
+             patch.object(self.live, "update_product_name", wraps=self.live.update_product_name) as update:
+            thread = threading.Thread(target=refresher.request_missing, args=("new",))
+            try:
+                thread.start()
+                self.assertTrue(entered.wait(5))
+                refresher.request_refresh()
+                self.wait_for_refresh(refresher)
+            finally:
+                release.set()
+                thread.join(5)
+            self.assertFalse(thread.is_alive())
+            update.assert_called_once_with(self.session_id, "new", "新名称")
+
+    def test_refresh_removal_wins_over_older_database_lookup(self):
+        self.live.replace_monitor_products(self.monitor["id"], {})
+        refresher = self.refresher(resolver=Mock(lookup_catalog=Mock(return_value=({}, None))))
+        entered, release = threading.Event(), threading.Event()
+
+        def blocked_lookup(_monitor_id, _promotion_id):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("database lookup was not released")
+            return "已下架"
+
+        with patch.object(self.live, "product_name", side_effect=blocked_lookup), \
+             patch.object(self.live, "update_product_name", wraps=self.live.update_product_name) as update:
+            thread = threading.Thread(target=refresher.request_missing, args=("removed",))
+            try:
+                thread.start()
+                self.assertTrue(entered.wait(5))
+                refresher.request_refresh()
+                self.wait_for_refresh(refresher)
+            finally:
+                release.set()
+                thread.join(5)
+            self.assertFalse(thread.is_alive())
+            update.assert_not_called()
+            self.assertNotIn("removed", refresher.product_names)
+
     def test_unknown_id_uses_database_once_then_reuses_refreshed_name(self):
         entered, release = threading.Event(), threading.Event()
 

@@ -527,6 +527,13 @@ class LiveStore:
                 (product_name, session_id, str(promotion_id)),
             )
 
+    def monitor_products(self, monitor_id: str) -> dict[str, str]:
+        with self.store.connection() as conn:
+            return {row["promotion_id"]: row["product_name"] for row in conn.execute(
+                "SELECT promotion_id,product_name FROM live_monitor_products WHERE monitor_id=?",
+                (monitor_id,),
+            )}
+
     def product_name(self, monitor_id: str, promotion_id: str) -> str:
         with self.store.connection() as conn:
             row = conn.execute(

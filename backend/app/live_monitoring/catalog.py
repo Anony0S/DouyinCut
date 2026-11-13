@@ -10,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 CATALOG_REFRESH_INTERVAL = 60
 MISSING_PRODUCT_COOLDOWN = 300
+# A room with no catalog yet keeps retrying on the normal interval; without a cap a
+# permanently failing room would request the catalog every minute for the whole stream.
+INITIAL_ATTEMPT_LIMIT = 3
 
 
 class ProductCatalogRefresher:
@@ -20,6 +23,7 @@ class ProductCatalogRefresher:
         self.clock = clock or time.time
         state = live.product_catalog_state(monitor_id)
         self.initial = state["fetched"] is None
+        self.initial_attempts = 0
         self.last_attempt = state["attempted"]
         self.completed_at = None
         self.misses = state["misses"]
@@ -115,7 +119,16 @@ class ProductCatalogRefresher:
                         self.misses.update({product_id: retry_at for product_id in missing})
                         for product_id in names if succeeded else ():
                             self.misses.pop(product_id, None)
-                        self.live.defer_missing_products(self.monitor_id, missing, retry_at)
+                        if succeeded:
+                            self.initial_attempts = 0
+                        elif include_current and self.initial_attempts + 1 < INITIAL_ATTEMPT_LIMIT:
+                            # The room still has no usable catalog; the normal interval
+                            # keeps the retry from becoming a tight loop.
+                            self.initial_attempts += 1
+                            self.initial = True
+                    # Database writes stay outside the lock so close() is never blocked
+                    # behind a slow SQLite call.
+                    self.live.defer_missing_products(self.monitor_id, missing, retry_at)
                     for product_id in pending.difference(missing):
                         self.live.update_product_name(self.session_id, product_id, names[product_id])
             finally:

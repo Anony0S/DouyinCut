@@ -233,3 +233,59 @@ class LiveProductCatalogTests(unittest.TestCase):
         self.assertEqual(self.live.product_name(self.monitor["id"], "new"), "新目录")
         self.assertIsNone(self.live.recording_session(self.monitor["id"], self.session_id)["current_product"],
                           "refreshing a reused directory cannot invent a current product")
+
+    def test_new_session_seeds_current_product_from_one_page_even_with_cached_catalog(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"known": "已知商品"})
+        self.live.stop_session(self.monitor["id"], self.session_id)
+        self.session_id = self.live.start_session(self.monitor["id"], Path(self.temp.name) / "seeded")
+        resolver = Mock(lookup_current=Mock(return_value=("known", "已知商品")))
+        self.run_listener(resolver)
+        resolver.lookup_current.assert_called_once()
+        resolver.lookup_catalog.assert_not_called()
+        result = self.live.recording_session(self.monitor["id"], self.session_id)
+        self.assertEqual(result["current_product"]["promotion_id"], "known")
+        self.assertEqual([p["promotion_id"] for p in result["product_periods"]], ["known"])
+
+    def test_probe_current_product_is_quiet_when_it_fails_or_is_unsupported(self):
+        from app.live_monitoring.service import probe_current_product
+
+        failing = Mock(lookup_current=Mock(side_effect=RuntimeError("网络失败")))
+        self.assertFalse(probe_current_product(self.live, self.session_id, self.monitor["id"],
+                                               failing, threading.Event()))
+        self.assertIsNone(self.live.recording_session(self.monitor["id"], self.session_id)["current_product"])
+        self.assertIsNone(self.live.recording_session(self.monitor["id"], self.session_id)["product_catalog_error"],
+                          "a failed probe must not report a competing catalog error")
+        self.assertFalse(probe_current_product(self.live, self.session_id, self.monitor["id"],
+                                               Mock(), threading.Event()))
+
+    def test_stopping_the_listener_keeps_a_connection_error_and_explains_a_quiet_session(self):
+        self.live.set_product_listener_state(self.session_id, "listening")
+        self.assertTrue(self.live.mark_product_listener_stopped(self.session_id, "正常收尾"))
+        self.assertEqual(self.live.recording_session(self.monitor["id"], self.session_id)["product_listener"]["status"],
+                         "stopped")
+        self.live.set_product_listener_state(self.session_id, "error", "Python 商品 WebSocket 连接异常：1006")
+        self.assertFalse(self.live.mark_product_listener_stopped(self.session_id, "不应写入"))
+        listener = self.live.recording_session(self.monitor["id"], self.session_id)["product_listener"]
+        self.assertEqual(listener["status"], "error")
+        self.assertEqual(listener["detail"], "Python 商品 WebSocket 连接异常：1006")
+
+        self.live.set_product_listener_state(self.session_id, "listening")
+        self.assertTrue(self.live.mark_product_listener_stopped(self.session_id, "已停止"))
+        listener = self.live.recording_session(self.monitor["id"], self.session_id)["product_listener"]
+        self.assertEqual((listener["status"], listener["detail"]), ("stopped", "已停止"))
+        self.assertIn("本场没有讲解记录", self.live.listener_detail(self.session_id, self.monitor["id"]))
+
+    def test_connected_session_without_messages_is_reported_as_silent(self):
+        from unittest.mock import patch as _patch
+        from app.live_monitoring import service as service_module
+
+        self.live.set_product_listener_state(self.session_id, "listening")
+        detail = lambda: self.live.recording_session(self.monitor["id"], self.session_id)["product_listener"]
+        self.assertFalse(detail()["silent"], "a freshly connected listener is not silent yet")
+        with _patch.object(service_module.time, "time",
+                           return_value=detail()["updated"] + service_module.LISTENER_SILENCE_SECONDS + 1):
+            self.assertTrue(detail()["silent"])
+            self.assertIn("尚未收到商品消息", detail()["silent_detail"])
+        self.live.set_current_product(self.session_id, promotion_id="any", event_time=1, received_at=1)
+        self.live.record_product_event(self.session_id, event_key="k", promotion_id="any")
+        self.assertFalse(detail()["silent"], "a received message clears the silent state")

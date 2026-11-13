@@ -98,7 +98,7 @@ class DouyinPromotionNameResolver:
         self._client = client or httpx.Client(follow_redirects=False, timeout=timeout, http2=True)
         self._owns_client = client is None
 
-    def lookup_catalog(self, *, page_size: int = 20) -> tuple[dict[str, str], tuple[str, str] | None]:
+    def lookup_catalog(self, *, page_size: int = 100) -> tuple[dict[str, str], tuple[str, str] | None]:
         if page_size < 1 or page_size > 100:
             raise ValueError("商品列表分页大小无效")
         names: dict[str, str] = {}
@@ -133,6 +133,17 @@ class DouyinPromotionNameResolver:
                 })
             offset = next_offset
         return names, current
+
+    def lookup_current(self) -> tuple[str, str] | None:
+        """Read only the room's top promotion with a single request.
+
+        One page is enough: `top_promotion` is what the host is explaining now, which is
+        what a session needs when no WebSocket product message ever arrives. This never
+        pages and never replaces the cached catalog, and it is not retried so a failing
+        probe cannot hold up the message listener.
+        """
+        _, _, _, current, _, _ = self._fetch_page_once(0, 1)
+        return current
 
     def _fetch_page(self, offset: int, limit: int):
         failures = []

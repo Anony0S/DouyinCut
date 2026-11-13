@@ -8,7 +8,7 @@ export type LiveSplitResult = Job | {state:'confirmation_required'; missing_segm
 export type LiveProductEvent = { id:string; promotion_id:string; product_name:string; explain_type:number|null; event_time:number; received_at:number; source:string }
 export type LiveProductClip = { id:string; segment_id:string; segment_index:number; period_id:string; promotion_id:string; product_name:string; start:number; end:number; path:string; status:string; size_bytes:number; duration_us:number|null; asset_id:string|null; import_job_id:string|null; error:string }
 export type LiveCurrentProduct = { promotion_id:string; product_name:string; event_time:number; received_at:number }
-export type LiveProductListener = { status:string; detail:string; updated:number }
+export type LiveProductListener = { status:string; detail:string; updated:number; event_count?:number; silent?:boolean; silent_detail?:string }
 export type LiveProductCatalogError = { detail:Record<string,unknown>; updated:number }
 export type LiveSession = { id:string; status:string; started:number; ended:number|null; end_time_source:'observed'|'recovery_check'|null; segments:LiveSegment[]; product_clips:LiveProductClip[]; product_periods:LiveProductPeriod[]; current_product:LiveCurrentProduct|null; product_events:LiveProductEvent[]; product_listener:LiveProductListener|null; product_catalog_error:LiveProductCatalogError|null }
 /** Window list entry: enough for the timeline and attention markers; details are read per selected session. */

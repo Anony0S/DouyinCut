@@ -82,6 +82,15 @@ const canRetryProductListener = computed(
     && listenerStatus.value !== "retrying"
     && (listenerStatus.value === "error" || Boolean(props.session.product_catalog_error)),
 );
+// Connected but silent, an ended session's summary, and real errors all need one line;
+// the silent case used to render nothing at all.
+const listenerNote = computed(() => {
+  const listener = props.session.product_listener;
+  if (listener?.silent && listener.silent_detail) return listener.silent_detail;
+  if (!listener?.detail) return "";
+  if (listenerStatus.value === "error") return listener.detail;
+  return listener.detail === "商品消息连接已建立" ? "" : listener.detail;
+});
 </script>
 
 <template>
@@ -126,11 +135,11 @@ const canRetryProductListener = computed(
           重试商品连接
         </button>
         <p
-          v-if="session.product_listener?.detail && (listenerStatus === 'error' || session.product_listener.detail !== '商品消息连接已建立')"
+          v-if="listenerNote"
           class="live-listener-note pl-4 pt-2"
           :class="{ 'is-error': listenerStatus === 'error' }">
           <LiveIcon :name="listenerStatus === 'error' ? 'alert' : 'radio'" />
-          {{ session.product_listener.detail }}
+          {{ listenerNote }}
         </p>
         <div class="live-subheading">
           <span>讲解列表</span>

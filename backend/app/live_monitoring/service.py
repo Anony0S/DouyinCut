@@ -26,6 +26,9 @@ from .catalog import ProductCatalogRefresher
 
 SEGMENT_SECONDS = 1200
 POLL_SECONDS = 20
+# A connected listener that receives nothing is indistinguishable from a working one
+# unless it says so; this is how long it stays quiet before the badge explains itself.
+LISTENER_SILENCE_SECONDS = 180
 PRODUCT_CLIP_JOB = "live_product_clips"
 ACTIVE_JOB_STATES = ("queued", "running", "pause_requested", "paused", "cancel_requested")
 
@@ -456,6 +459,22 @@ class LiveStore:
         listener = conn.execute("SELECT status,detail,updated FROM live_product_listener_state WHERE session_id=?",
                                 (session["id"],)).fetchone()
         item["product_listener"] = dict(listener) if listener else None
+        if listener is not None:
+            # "listening" alone says nothing about whether messages arrive. A session that
+            # has connected but recorded no product message for a while is reported here
+            # so the page can explain an empty lecture list instead of showing nothing.
+            events = conn.execute("SELECT COUNT(*) FROM live_product_events WHERE session_id=?",
+                                  (session["id"],)).fetchone()[0]
+            quiet = (listener["status"] == "listening" and events == 0
+                     and session["status"] == "recording"
+                     and time.time() - float(listener["updated"]) >= LISTENER_SILENCE_SECONDS)
+            item["product_listener"].update(
+                event_count=events,
+                silent=quiet,
+                silent_detail=("商品消息连接已建立，但本场尚未收到商品消息；"
+                               "可能主播未讲解商品，或抖音消息未送达，可重试商品连接")
+                if quiet else "",
+            )
         catalog_state = conn.execute(
             "SELECT error_detail,updated FROM live_session_product_catalog_state WHERE session_id=?",
             (session["id"],),
@@ -515,6 +534,33 @@ class LiveStore:
                 (monitor_id, str(promotion_id)),
             ).fetchone()
         return row["product_name"] if row else ""
+
+    def current_product(self, session_id: str):
+        with self.store.connection() as conn:
+            row = conn.execute(
+                "SELECT promotion_id,product_name,event_time,received_at "
+                "FROM live_session_current_product WHERE session_id=?", (session_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def session_started(self, session_id: str) -> float | None:
+        with self.store.connection() as conn:
+            row = conn.execute("SELECT started FROM live_sessions WHERE id=?", (session_id,)).fetchone()
+        return float(row["started"]) if row else None
+
+    def listener_counts(self, session_id: str, monitor_id: str) -> tuple[int, int]:
+        """Confirmed product messages and cached catalog entries for the stop summary."""
+        with self.store.connection() as conn:
+            events = conn.execute("SELECT COUNT(*) FROM live_product_events WHERE session_id=?",
+                                  (session_id,)).fetchone()[0]
+            catalog = conn.execute("SELECT COUNT(*) FROM live_monitor_products WHERE monitor_id=?",
+                                   (monitor_id,)).fetchone()[0]
+        return events, catalog
+
+    def listener_detail(self, session_id: str, monitor_id: str) -> str:
+        events, catalog = self.listener_counts(session_id, monitor_id)
+        return (f"商品监听已停止：本场收到 {events} 条商品消息，商品目录 {catalog} 条"
+                + ("；本场没有讲解记录，可能主播未讲解商品，也可能抖音消息未送达" if not events else ""))
 
     def product_catalog_state(self, monitor_id: str):
         with self.store.connection() as conn:
@@ -627,6 +673,24 @@ class LiveStore:
             conn.execute("INSERT INTO live_product_listener_state(session_id,status,detail,updated) VALUES(?,?,?,?) "
                          "ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,detail=excluded.detail,updated=excluded.updated",
                          (session_id, status, detail[:1000], time.time()))
+
+    def mark_product_listener_stopped(self, session_id: str, detail: str) -> bool:
+        """Record the stop without discarding an unresolved error.
+
+        Returns False only when an error is kept, so the caller leaves the row alone.
+        """
+        with self.store.connection() as conn:
+            row = conn.execute("SELECT status FROM live_product_listener_state WHERE session_id=?",
+                               (session_id,)).fetchone()
+            if row is not None and row["status"] == "error":
+                return False
+            if row is None:
+                conn.execute("INSERT INTO live_product_listener_state(session_id,status,detail,updated) "
+                             "VALUES(?,?,?,?)", (session_id, "stopped", detail[:1000], time.time()))
+                return True
+            conn.execute("UPDATE live_product_listener_state SET status='stopped',detail=?,updated=? "
+                         "WHERE session_id=?", (detail[:1000], time.time(), session_id))
+        return True
 
     def set_monitor_state(self, monitor_id: str, state: str, error: str | None = None,
                           retry_blocked: bool | None = None):
@@ -1201,6 +1265,47 @@ class DouyinResolver:
                 "anchor_name": getattr(data, "anchor_name", "") or "", "room_id": room_id}
 
 
+def probe_current_product(live, session_id: str, monitor_id: str, resolver,
+                          stop_event: threading.Event) -> bool:
+    """Seed this session's current product from one catalog page, once per session.
+
+    The room catalog is cached per monitor and reused across sessions, so a session
+    otherwise only learns its current product from a WebSocket message. Reading
+    `top_promotion` here means a host whose messages never arrive still gets a first
+    lecture interval instead of a silently empty list.
+    """
+    if stop_event.is_set():
+        return False
+    if live.current_product(session_id) is not None:
+        return False
+    lookup = getattr(resolver, "lookup_current", None)
+    if lookup is None:
+        return False
+    try:
+        current = lookup()
+    except Exception as exc:
+        # The catalog refresh owns the visible error; this probe stays quiet so a
+        # failed seed never reports a second, competing failure.
+        logging.getLogger(__name__).debug("直播间当前商品探测失败 (%s)", type(exc).__name__)
+        return False
+    if stop_event.is_set() or not isinstance(current, (tuple, list)) or len(current) < 1:
+        return False
+    promotion_id = str(current[0] or "").strip()
+    title = str(current[1] or "").strip() if len(current) > 1 else ""
+    if not promotion_id:
+        return False
+    # Seeded at the session's start, matching the "first lecture starts when recording
+    # started" rule. Any real message arrives later, so it always overwrites this seed
+    # instead of being replaced by it.
+    seeded_at = live.session_started(session_id) or time.time()
+    live.set_current_product(
+        session_id, promotion_id=promotion_id,
+        product_name=title or live.product_name(monitor_id, promotion_id),
+        event_time=seeded_at, received_at=seeded_at,
+    )
+    return True
+
+
 def _safe_listener_exception(exc: Exception) -> str:
     if hasattr(exc, "stage"):
         return json.dumps({
@@ -1307,8 +1412,18 @@ class LiveMonitorWorker:
         if thread.is_alive():
             return False
         self.product_threads.pop(monitor_id, None)
-        self.live.set_product_listener_state(session_id, "stopped")
+        self._mark_listener_stopped(session_id, monitor_id)
         return True
+
+    def _mark_listener_stopped(self, session_id: str, monitor_id: str):
+        """Record why listening ended without erasing a real connection error.
+
+        The previous code wrote an unconditional empty `stopped`, so a session whose
+        listener had failed showed neither a list nor any explanation.
+        """
+        detail = self.live.listener_detail(session_id, monitor_id)
+        if not self.live.mark_product_listener_stopped(session_id, detail):
+            self.live.set_product_listener_state(session_id, "stopped", detail)
 
     def _start_python_product_listener(self, monitor: dict, session_id: str, *, refresh_catalog: bool = False):
         if not self._stop_product_listener(monitor["id"]):
@@ -1378,7 +1493,7 @@ class LiveMonitorWorker:
                 preparer.close()
 
         if stop_event.is_set():
-            self.live.set_product_listener_state(session_id, "stopped")
+            self._mark_listener_stopped(session_id, monitor_id)
             return
 
         self.live.set_product_listener_state(session_id, "connecting", "正在连接 Python 商品消息流")
@@ -1397,7 +1512,7 @@ class LiveMonitorWorker:
                 catalog.on_listening()
             elif state in {"error", "disconnected"}:
                 safe_detail = detail if state == "disconnected" else "WebSocket 客户端连接异常"
-                message = f"Python 商品 WebSocket 连接异常：{safe_detail[:200]}"
+                message = f"Python 商品 WebSocket 连接异常：{safe_detail[:300]}"
                 self.live.set_product_listener_state(session_id, "error", message)
 
         def on_product_observed(promotion_id: str):
@@ -1436,6 +1551,10 @@ class LiveMonitorWorker:
 
         try:
             catalog.tick()
+            # Seeded before the message stream starts, stamped with the session start so
+            # any real message is later and always overwrites it. Costs one request per
+            # session; the catalog itself is still reused and never re-fetched.
+            probe_current_product(self.live, session_id, monitor_id, resolver, stop_event)
             client = DouyinProductEventClient(
                 on_event, on_current_product=on_current_product,
                 on_product_observed=on_product_observed,
@@ -1453,7 +1572,7 @@ class LiveMonitorWorker:
                     return
         except Exception as exc:
             failed = True
-            detail = f"Python 商品监听启动失败：{type(exc).__name__}"
+            detail = f"Python 商品监听启动失败：{type(exc).__name__}: {str(exc)[:300]}"
             self.live.set_product_listener_state(session_id, "error", detail)
         finally:
             stop_event.set()
@@ -1466,7 +1585,7 @@ class LiveMonitorWorker:
             if client is not None:
                 client.stop()
             if stop_event.is_set() and not failed:
-                self.live.set_product_listener_state(session_id, "stopped")
+                self._mark_listener_stopped(session_id, monitor_id)
 
     def _scan_segments(self, monitor_id: str, session_id: str, final: bool = False):
         directory = self.settings.data_dir / "recordings" / "live" / monitor_id / session_id

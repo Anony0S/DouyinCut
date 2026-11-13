@@ -33,12 +33,25 @@ class ProductCatalogRefresher:
         self.running = False
         self.closed = False
         self.lock = threading.Lock()
+        with self.lock, live.store.connection() as conn:
+            self.product_names: dict[str, str] = {
+                row["promotion_id"]: row["product_name"] for row in conn.execute(
+                    "SELECT promotion_id,product_name FROM live_monitor_products WHERE monitor_id=?",
+                    (monitor_id,),
+                )
+            }
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="douyin-product-catalog")
         self.future = None
 
     def request_missing(self, promotion_id: str):
-        # A catalog response may have arrived since the message handler's lookup.
-        name = self.live.product_name(self.monitor_id, promotion_id)
+        with self.lock:
+            name = self.product_names.get(promotion_id)
+            if not name:
+                # Serialize the fallback with refresh publication so an older
+                # database result cannot overwrite the newly refreshed cache.
+                name = self.live.product_name(self.monitor_id, promotion_id)
+                if name:
+                    self.product_names[promotion_id] = name
         if name:
             self.live.update_product_name(self.session_id, promotion_id, name)
             return
@@ -120,6 +133,7 @@ class ProductCatalogRefresher:
                         for product_id in names if succeeded else ():
                             self.misses.pop(product_id, None)
                         if succeeded:
+                            self.product_names = dict(names)
                             self.initial_attempts = 0
                         elif include_current and self.initial_attempts + 1 < INITIAL_ATTEMPT_LIMIT:
                             # The room still has no usable catalog; the normal interval

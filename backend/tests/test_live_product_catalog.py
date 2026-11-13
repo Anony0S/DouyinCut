@@ -37,6 +37,101 @@ class LiveProductCatalogTests(unittest.TestCase):
         self.assertIsNotNone(refresher.future)
         refresher.future.result(timeout=5)
 
+    def test_known_names_are_prewarmed_and_backfilled_without_database_lookups(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"known": "已知商品"})
+        self.live.record_product_event(self.session_id, event_key="known", promotion_id="known")
+        with patch.object(self.live, "product_catalog_state", wraps=self.live.product_catalog_state) as state, \
+             patch.object(self.live, "product_name", wraps=self.live.product_name) as lookup:
+            refresher = self.refresher()
+            for _ in range(3):
+                refresher.request_missing("known")
+            state.assert_called_once_with(self.monitor["id"])
+            lookup.assert_not_called()
+        refresher.resolver.lookup_catalog.assert_not_called()
+        events = self.live.recording_session(self.monitor["id"], self.session_id)["product_events"]
+        self.assertEqual(events[0]["product_name"], "已知商品")
+
+    def test_database_name_found_after_construction_is_cached(self):
+        refresher = self.refresher()
+        self.live.replace_monitor_products(self.monitor["id"], {"new": "新商品"})
+        with patch.object(self.live, "product_name", wraps=self.live.product_name) as lookup:
+            for _ in range(3):
+                refresher.request_missing("new")
+            lookup.assert_called_once_with(self.monitor["id"], "new")
+        refresher.resolver.lookup_catalog.assert_not_called()
+
+    def test_unknown_id_uses_database_once_then_reuses_refreshed_name(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def fetch():
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return {"new": "新商品"}, None
+
+        refresher = self.refresher(resolver=Mock(lookup_catalog=Mock(side_effect=fetch)))
+        self.addCleanup(release.set)
+        with patch.object(self.live, "product_name", wraps=self.live.product_name) as lookup:
+            refresher.request_missing("new")
+            self.assertTrue(entered.wait(5))
+            lookup.assert_called_once_with(self.monitor["id"], "new")
+            release.set()
+            self.wait_for_refresh(refresher)
+            for _ in range(3):
+                refresher.request_missing("new")
+            lookup.assert_called_once_with(self.monitor["id"], "new")
+        refresher.resolver.lookup_catalog.assert_called_once()
+
+    def test_failed_refresh_preserves_cached_names(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"known": "已有商品"})
+        refresher = self.refresher(resolver=Mock(lookup_catalog=Mock(side_effect=RuntimeError("网络失败"))))
+        refresher.request_missing("missing")
+        self.wait_for_refresh(refresher)
+        with patch.object(self.live, "product_name", wraps=self.live.product_name) as lookup, \
+             patch.object(self.live, "update_product_name", wraps=self.live.update_product_name) as update:
+            refresher.request_missing("known")
+            lookup.assert_not_called()
+            update.assert_called_once_with(self.session_id, "known", "已有商品")
+        refresher.resolver.lookup_catalog.assert_called_once()
+
+    def test_successful_refresh_replaces_cached_names_and_removes_absent_ids(self):
+        self.live.replace_monitor_products(self.monitor["id"], {"known": "旧名称", "removed": "已下架"})
+        resolver = Mock(lookup_catalog=Mock(side_effect=[({"known": "新名称"}, None), ({}, None)]))
+        refresher = self.refresher(resolver=resolver)
+        refresher.request_missing("new")
+        self.wait_for_refresh(refresher)
+        with patch.object(self.live, "product_name", wraps=self.live.product_name) as lookup, \
+             patch.object(self.live, "update_product_name", wraps=self.live.update_product_name) as update:
+            refresher.request_missing("known")
+            lookup.assert_not_called()
+            update.assert_called_once_with(self.session_id, "known", "新名称")
+            refresher.request_missing("removed")
+            lookup.assert_called_once_with(self.monitor["id"], "removed")
+        refresher.request_refresh()
+        self.wait_for_refresh(refresher)
+        with patch.object(self.live, "product_name", wraps=self.live.product_name) as lookup:
+            refresher.request_missing("known")
+            lookup.assert_called_once_with(self.monitor["id"], "known")
+        self.assertEqual(resolver.lookup_catalog.call_count, 2)
+
+    def test_name_caches_are_isolated_between_monitors(self):
+        other = self.live.create_monitor("https://live.douyin.com/catalog-b", "B")
+        other_session = self.live.start_session(other["id"], Path(self.temp.name) / "b")
+        self.live.replace_monitor_products(self.monitor["id"], {"shared": "A 的商品"})
+        self.live.replace_monitor_products(other["id"], {"shared": "B 的商品"})
+        first = self.refresher()
+        second = self.refresher(monitor=other, session_id=other_session)
+        with patch.object(self.live, "product_name", wraps=self.live.product_name) as lookup, \
+             patch.object(self.live, "update_product_name", wraps=self.live.update_product_name) as update:
+            first.request_missing("shared")
+            second.request_missing("shared")
+            first.request_missing("shared")
+            lookup.assert_not_called()
+            self.assertEqual([call.args for call in update.call_args_list], [
+                (self.session_id, "shared", "A 的商品"),
+                (other_session, "shared", "B 的商品"),
+                (self.session_id, "shared", "A 的商品"),
+            ])
+
     def test_first_fetch_then_reuse_across_sessions_and_restart_including_empty_catalog(self):
         first = self.refresher()
         first.tick()

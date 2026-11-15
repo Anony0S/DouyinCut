@@ -3,7 +3,7 @@
 
 #define AppName "DouyinCut"
 #ifndef AppVersion
-  #error AppVersion must be supplied by the build script from SPEC.md
+  #error AppVersion must be supplied by the build script from .trellis/spec/project/index.md
 #endif
 #define AppPublisher "DouyinCut"
 #define AppURL "https://github.com/Anony0S/DouyinCut"

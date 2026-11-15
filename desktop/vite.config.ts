@@ -4,9 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 import vueDevTools from 'vite-plugin-vue-devtools'
 import { readFileSync } from 'node:fs'
 
-const spec = readFileSync(new URL('../SPEC.md', import.meta.url), 'utf8')
+const spec = readFileSync(new URL('../.trellis/spec/project/index.md', import.meta.url), 'utf8')
 const appVersion = spec.match(/^- 版本：(\d+\.\d+\.\d+)\s*$/m)?.[1]
-if (!appVersion) throw new Error('SPEC.md is missing a valid version')
+if (!appVersion) throw new Error('.trellis/spec/project/index.md is missing a valid version')
 
 export default defineConfig(({ mode }) => ({
   // A developer's environment must never bake a credential into shipped JS.

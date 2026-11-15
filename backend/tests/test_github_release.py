@@ -2,6 +2,9 @@
 import hashlib
 import importlib.util
 from pathlib import Path
+import re
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -13,10 +16,21 @@ module_spec.loader.exec_module(release)
 
 
 class GitHubReleaseTests(unittest.TestCase):
+    def test_cli_uses_current_project_version(self):
+        spec = ROOT / ".trellis/spec/project/index.md"
+        version = re.search(r"^- 版本：(\d+\.\d+\.\d+)\s*$", spec.read_text(encoding="utf-8"), re.M)[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            installer = Path(temporary) / f"DouyinCut-{version}-setup.exe"
+            installer.write_bytes(b"isolated release CLI verification")
+            subprocess.run([sys.executable, str(ROOT / "scripts/prepare-github-release.py"),
+                            "--installer", str(installer)], check=True, capture_output=True)
+            self.assertEqual(installer.with_suffix(".exe.sha256").read_text(encoding="utf-8"),
+                             f"{hashlib.sha256(installer.read_bytes()).hexdigest()}  {installer.name}\n")
+
     def test_generates_checksum_for_exact_versioned_filename(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            spec = root / "SPEC.md"
+            spec = root / "index.md"
             spec.write_text("- 版本：0.2.137\n", encoding="utf-8")
             installer = root / "DouyinCut-0.2.137-setup.exe"
             installer.write_bytes(b"final signed installer bytes")
@@ -31,7 +45,7 @@ class GitHubReleaseTests(unittest.TestCase):
     def test_rejects_version_mismatch_empty_package_and_missing_version(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            spec = root / "SPEC.md"
+            spec = root / "index.md"
             spec.write_text("- 版本：0.2.137\n", encoding="utf-8")
             installer = root / "DouyinCut-0.2.136-setup.exe"
             installer.write_bytes(b"installer")

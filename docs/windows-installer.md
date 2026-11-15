@@ -214,7 +214,7 @@ signtool sign /f certificate.pfx /p password /t http://timestamp.digicert.com Do
 
 ## 版本管理
 
-版本号定义在 `SPEC.md` 的"版本"字段：
+版本号定义在 [项目规格索引](../.trellis/spec/project/index.md)（`.trellis/spec/project/index.md`）的"版本"字段：
 
 ```markdown
 - 版本：0.3.0

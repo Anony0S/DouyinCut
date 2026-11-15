@@ -2,7 +2,7 @@
 
 DouyinCut 是一款面向 Windows 的商品视频剪辑工具。它根据视频中的口播内容和用户填写的剪辑要求，辅助选择片段、生成粗剪预览，并导出成片和字幕。项目也提供抖音直播监控、本地录制与商品讲解片段管理。
 
-> 项目仍在开发中。当前规格和验收边界以 [SPEC.md](SPEC.md) 为准；真实云端服务、直播平台和剪映版本的效果需要在实际环境中验证。
+> 项目仍在开发中。当前规格和验收边界以 [项目规格索引](.trellis/spec/project/index.md) 为准；真实云端服务、直播平台和剪映版本的效果需要在实际环境中验证。
 
 ## 功能
 
@@ -67,7 +67,7 @@ Tauri 会自动启动开发服务，请勿同时运行上面的统一启动器�
 - 模型与 OSS 密钥、抖音 Cookie 保存在本机应用配置中；星斗登录令牌使用 Windows 凭据管理器。请保护工作目录与系统账户，避免将配置、日志或凭据上传到公开仓库。
 - 当前开发版本不提供历史应用数据格式的兼容或迁移。涉及数据清理时应先备份，且不会因为升级自动授权删除用户原始视频。
 
-具体协议、任务恢复和数据策略见 [SPEC.md](SPEC.md)。
+具体协议、任务恢复和数据策略见 [项目规格索引](.trellis/spec/project/index.md)。
 
 ## 构建 Windows 安装包
 
@@ -77,7 +77,7 @@ Tauri 会自动启动开发服务，请勿同时运行上面的统一启动器�
 .\scripts\build-windows-installer.ps1
 ```
 
-安装器输出位于 `desktop/src-tauri/target/release/installer/`，版本号从 [SPEC.md](SPEC.md) 读取。构建脚本默认跳过验证测试；如需执行其内置检查，使用 `-SkipTests:$false`。准备媒体工具及安装器维护步骤分别见 [Windows 随包媒体工具](docs/windows-media.md) 和 [Windows 安装包指南](docs/windows-installer.md)。
+安装器输出位于 `desktop/src-tauri/target/release/installer/`，版本号从 [项目规格索引](.trellis/spec/project/index.md) 读取。构建脚本默认跳过验证测试；如需执行其内置检查，使用 `-SkipTests:$false`。准备媒体工具及安装器维护步骤分别见 [Windows 随包媒体工具](docs/windows-media.md) 和 [Windows 安装包指南](docs/windows-installer.md)。
 
 构建成功后会在安装器旁生成同名 `.exe.sha256` 校验文件，GitHub Release 需要同时上传这两个附件，具体步骤见 [软件更新与发布](docs/software-updates.md)。
 
@@ -108,10 +108,12 @@ desktop/             Vue 前端、Tauri 桌面外壳和前端检查脚本
 packaging/windows/   Windows 安装与媒体资源配置
 scripts/             开发启动、构建和验证脚本
 docs/                架构、Windows 构建与验收文档
-SPEC.md              当前产品和技术规格
+.trellis/spec/project/ 当前产品和技术规格，index.md 为入口及版本来源
 ```
 
 开发约定见 [AGENTS.md](AGENTS.md)，术语见 [GLOSSARY.md](GLOSSARY.md)。
+
+项目已接入 mini-trellis，用于检索既有决策和记录跨会话知识。后续开发与历史文档整理见 [mini-trellis 项目指南](docs/agents/mini-trellis.md)，已有规格、决策和验收文档集中链接在 [项目文档入口](.trellis/spec/project/index.md)。
 
 ## 第三方组件
 

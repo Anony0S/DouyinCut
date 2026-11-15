@@ -92,12 +92,12 @@ try {
     Write-Host "✓ Inno Setup: $isccVersion" -ForegroundColor Green
     Write-Host "  Path: $isccPath" -ForegroundColor Gray
 
-    # Read version from SPEC.md
-    $specContent = Get-Content (Join-Path $repo 'SPEC.md') -Raw -Encoding UTF8
+    # Read version from .trellis/spec/project/index.md
+    $specContent = Get-Content (Join-Path $repo '.trellis/spec/project/index.md') -Raw -Encoding UTF8
     if ($specContent -match '(?m)^- \u7248\u672c\uff1a(\d+\.\d+\.\d+)\s*$') {
         $version = $Matches[1]
     } else {
-        throw 'Could not extract version from SPEC.md'
+        throw 'Could not extract version from .trellis/spec/project/index.md'
     }
     Write-Host "✓ Version: $version" -ForegroundColor Green
 

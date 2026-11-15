@@ -183,7 +183,7 @@ class LiveStore:
                 missing = required - present
                 if missing:
                     raise RuntimeError(
-                        f"直播监控数据库结构不符合当前 SPEC.md：{table} 缺少字段 {', '.join(sorted(missing))}。"
+                        f"直播监控数据库结构不符合当前项目规格：{table} 缺少字段 {', '.join(sorted(missing))}。"
                         "请先备份并修复当前工作目录数据库后重新启动。"
                     )
 

@@ -2,7 +2,7 @@ import tempfile
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -895,6 +895,126 @@ class LiveMonitoringTests(unittest.TestCase):
         # A broken later source does not prevent cutting an earlier complete lecture.
         self.assertFalse(self.live.period_split_plan(self._period_id(session_id))["mapping_error"])
         self.assertEqual(self.live.request_period_product_clips(self._period_id(session_id), [])["state"], "queued")
+
+    def test_segment_scanner_retries_duration_after_transient_probe_failure(self):
+        monitor, session_id, (first, second) = self._two_segment_session("period-probe-retry")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET status='recording',duration_us=NULL WHERE session_id=?",
+                         (session_id,))
+        worker = LiveMonitorWorker(self.settings, resolver=object())
+        with (patch("app.media.processing.probe", side_effect=RuntimeError("temporary probe failure")),
+              patch("app.live_monitoring.service.time.monotonic", return_value=100)):
+            worker._scan_segments(monitor["id"], session_id)
+        period_id = self._period_id(session_id, "p2")
+        self.assertIn("时长未知", self.live.period_split_plan(period_id)["mapping_error"])
+        with (patch("app.media.processing.probe", return_value=fake_video_info(20_000_000)) as probe,
+              patch("app.live_monitoring.service.time.monotonic", return_value=161)):
+            worker._scan_segments(monitor["id"], session_id)
+        self.assertEqual(self.live.period_split_plan(period_id)["mapping_error"], "")
+        probe.assert_called_once()
+        with self.store.connection() as conn:
+            row = conn.execute("SELECT status,duration_us FROM live_segments WHERE id=?", (first,)).fetchone()
+            active = conn.execute("SELECT status,duration_us FROM live_segments WHERE id=?", (second,)).fetchone()
+        self.assertEqual(tuple(row), ("completed", 20_000_000))
+        self.assertEqual(tuple(active), ("recording", None))
+
+    def test_worker_repairs_unknown_duration_in_ended_session(self):
+        monitor, session_id, (first, _second) = self._two_segment_session("period-duration-repair")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET status='failed',duration_us=NULL WHERE id=?", (first,))
+        worker = LiveMonitorWorker(self.settings, resolver=object())
+        period_id = self._period_id(session_id, "p2")
+        self.assertIn("时长未知", self.live.period_split_plan(period_id)["mapping_error"])
+        with (patch("app.media.processing.probe", return_value=fake_video_info(20_000_000)) as probe,
+              patch.object(worker, "_resolve", new_callable=AsyncMock, return_value={"is_live": False})):
+            worker.run_once()
+        probe.assert_called_once()
+        self.assertEqual(self.live.period_split_plan(period_id)["mapping_error"], "")
+        self.assertEqual(self.live.request_period_product_clips(period_id, [])["state"], "queued")
+        session = self.live.recording_session(monitor["id"], session_id)
+        self.assertEqual(session["status"], "stopped")
+        self.assertEqual(session["end_time_source"], "observed")
+
+    def test_duration_repair_cooldown_does_not_block_other_unknown_segments(self):
+        _monitor, session_id, (first, second) = self._two_segment_session("duration-repair-cooldown")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET status='failed',duration_us=NULL WHERE session_id=?",
+                         (session_id,))
+            paths = {row["id"]: Path(row["path"]) for row in conn.execute(
+                "SELECT id,path FROM live_segments WHERE session_id=?", (session_id,))}
+        worker = LiveMonitorWorker(self.settings, resolver=object())
+        with (patch("app.media.processing.probe", side_effect=RuntimeError("damaged file")) as probe,
+              patch("app.live_monitoring.service.time.monotonic", return_value=100)):
+            worker._retry_unknown_segment_duration()
+        probe.assert_called_once_with(paths[first], self.settings, timeout=5)
+        with (patch("app.media.processing.probe", return_value=fake_video_info(20_000_000)) as probe,
+              patch("app.live_monitoring.service.time.monotonic", return_value=110)):
+            worker._retry_unknown_segment_duration()
+        probe.assert_called_once_with(paths[second], self.settings, timeout=5)
+        with (patch("app.media.processing.probe") as probe,
+              patch("app.live_monitoring.service.time.monotonic", return_value=159)):
+            worker._retry_unknown_segment_duration()
+        probe.assert_not_called()
+        with (patch("app.media.processing.probe", return_value=fake_video_info(20_000_000)) as probe,
+              patch("app.live_monitoring.service.time.monotonic", return_value=160)):
+            worker._retry_unknown_segment_duration()
+        probe.assert_called_once_with(paths[first], self.settings, timeout=5)
+        self.assertEqual(self.live.period_split_plan(self._period_id(session_id, "p2"))["mapping_error"], "")
+
+    def test_duration_repair_preserves_import_state_references_and_end_times(self):
+        _monitor, session_id, (first, second) = self._two_segment_session("duration-repair-imported")
+        with self.store.connection() as conn:
+            for segment_id, status in ((first, "imported"), (second, "importing")):
+                conn.execute("UPDATE live_segments SET status=?,duration_us=NULL,asset_id=?,import_job_id=? WHERE id=?",
+                             (status, "asset-" + segment_id, "job-" + segment_id, segment_id))
+            before = [dict(row) for row in conn.execute(
+                "SELECT * FROM live_segments WHERE session_id=? ORDER BY segment_index", (session_id,))]
+            session_before = dict(conn.execute("SELECT * FROM live_sessions WHERE id=?", (session_id,)).fetchone())
+        worker = LiveMonitorWorker(self.settings, resolver=object())
+        with patch("app.media.processing.probe", return_value=fake_video_info(20_000_000)):
+            worker._retry_unknown_segment_duration()
+            worker._retry_unknown_segment_duration()
+        with self.store.connection() as conn:
+            after = [dict(row) for row in conn.execute(
+                "SELECT * FROM live_segments WHERE session_id=? ORDER BY segment_index", (session_id,))]
+            session_after = dict(conn.execute("SELECT * FROM live_sessions WHERE id=?", (session_id,)).fetchone())
+        self.assertEqual(after, [dict(row, duration_us=20_000_000) for row in before])
+        self.assertEqual(session_after, session_before)
+
+    def test_final_segment_scan_retries_immediately_despite_probe_cooldown(self):
+        monitor, session_id, _segments = self._two_segment_session("duration-final-retry")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET status='recording',duration_us=NULL WHERE session_id=?",
+                         (session_id,))
+        worker = LiveMonitorWorker(self.settings, resolver=object())
+        with (patch("app.media.processing.probe", side_effect=RuntimeError("temporary failure")),
+              patch("app.live_monitoring.service.time.monotonic", return_value=100)):
+            worker._scan_segments(monitor["id"], session_id)
+        with (patch("app.media.processing.probe", return_value=fake_video_info(20_000_000)) as probe,
+              patch("app.live_monitoring.service.time.monotonic", return_value=101)):
+            worker._scan_segments(monitor["id"], session_id, final=True)
+        self.assertEqual(probe.call_count, 2)
+        self.assertEqual(self.live.period_split_plan(self._period_id(session_id, "p2"))["mapping_error"], "")
+
+    def test_duration_repair_skips_deleted_missing_and_outside_recording_files(self):
+        _monitor, session_id, (first, second) = self._two_segment_session("duration-repair-missing")
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_segments SET status='deleted',duration_us=NULL WHERE id=?", (first,))
+            conn.execute("UPDATE live_segments SET duration_us=NULL WHERE id=?", (second,))
+            Path(conn.execute("SELECT path FROM live_segments WHERE id=?", (second,)).fetchone()[0]).unlink()
+        worker = LiveMonitorWorker(self.settings, resolver=object())
+        with patch("app.media.processing.probe") as probe:
+            worker._retry_unknown_segment_duration()
+            outside = Path(self.temp.name) / "outside.ts"
+            outside.write_bytes(b"not-a-recording-source")
+            with self.store.connection() as conn:
+                conn.execute("UPDATE live_segments SET path=? WHERE id=?", (str(outside.resolve()), second))
+            worker._retry_unknown_segment_duration()
+        probe.assert_not_called()
+        with self.store.connection() as conn:
+            rows = conn.execute("SELECT status,duration_us FROM live_segments WHERE session_id=? ORDER BY segment_index",
+                                (session_id,)).fetchall()
+        self.assertEqual([tuple(row) for row in rows], [("deleted", None), ("completed", None)])
 
     def test_segment_scanner_preserves_filename_indices_after_deleting_earlier_source(self):
         monitor, session_id, (first, second) = self._two_segment_session("period-scan")

@@ -26,6 +26,7 @@ from .catalog import ProductCatalogRefresher
 
 SEGMENT_SECONDS = 1200
 POLL_SECONDS = 20
+SEGMENT_PROBE_RETRY_SECONDS = 60
 # A connected listener that receives nothing is indistinguishable from a working one
 # unless it says so; this is how long it stays quiet before the badge explains itself.
 LISTENER_SILENCE_SECONDS = 180
@@ -1339,6 +1340,7 @@ class LiveMonitorWorker:
         self.product_catalogs: dict[str, ProductCatalogRefresher] = {}
         self.last_check: dict[str, float] = {}
         self.seen_controls: dict[str, float] = {}
+        self.segment_probe_retry_at: dict[str, float] = {}
         # Rooms already announced for the current broadcast; cleared when a room is seen offline.
         self.notified_live: set[str] = set()
         self._recover_interrupted_sessions()
@@ -1594,6 +1596,47 @@ class LiveMonitorWorker:
             if stop_event.is_set() and not failed:
                 self._mark_listener_stopped(session_id, monitor_id)
 
+    def _probe_sealed_segment(self, session_id: str, path: Path, index: int, size: int, *,
+                              timeout: int = 60, force: bool = False):
+        key = str(path.resolve())
+        if not force and time.monotonic() < self.segment_probe_retry_at.get(key, 0):
+            return
+        duration_us = None
+        try:
+            from ..media.processing import probe
+            duration_us = probe(path, self.settings, timeout=timeout)["duration_us"]
+        except Exception as exc:
+            self.segment_probe_retry_at[key] = time.monotonic() + SEGMENT_PROBE_RETRY_SECONDS
+            logging.getLogger("douyincut.live-monitor").warning(
+                "录制媒体块时长探测失败，将重试：session=%s segment=%s %s: %s",
+                session_id, index, type(exc).__name__, str(exc)[:300])
+        else:
+            self.segment_probe_retry_at.pop(key, None)
+        self.live.upsert_segment(session_id, path, index,
+                                 "completed" if duration_us is not None else "failed", size, duration_us)
+
+    def _retry_unknown_segment_duration(self):
+        # Repair current recording metadata in the worker, never during a GET.
+        # At most one sealed file per idle cycle; bad files cannot starve later files.
+        with self.store.connection() as conn:
+            rows = conn.execute(
+                "SELECT g.session_id,g.path,g.segment_index FROM live_segments g "
+                "JOIN live_sessions s ON s.id=g.session_id "
+                "WHERE s.status!='recording' AND g.status IN ('completed','failed','importing','imported') "
+                "AND g.duration_us IS NULL ORDER BY s.started DESC,g.segment_index").fetchall()
+        root = (self.settings.data_dir / "recordings" / "live").resolve()
+        for row in rows:
+            path = Path(row["path"]).resolve()
+            if not path.is_relative_to(root) or time.monotonic() < self.segment_probe_retry_at.get(str(path), 0):
+                continue
+            try:
+                if not path.is_file() or not (size := path.stat().st_size):
+                    continue
+            except OSError:
+                continue
+            self._probe_sealed_segment(row["session_id"], path, row["segment_index"], size, timeout=5)
+            break
+
     def _scan_segments(self, monitor_id: str, session_id: str, final: bool = False):
         directory = self.settings.data_dir / "recordings" / "live" / monitor_id / session_id
         files = sorted(path for path in directory.glob("*.ts")
@@ -1605,19 +1648,15 @@ class LiveMonitorWorker:
             known = self.live.segment_status(path)
             if known and known["status"] == "deleted":
                 continue
-            if not active and known and known["status"] in {"completed", "importing", "imported", "failed"}:
+            if (not active and known and known["duration_us"] is not None
+                    and known["status"] in {"completed", "importing", "imported", "failed"}):
                 self.live.upsert_segment(session_id, path, index + 1, known["status"], size,
                                          known["duration_us"])
                 continue
-            status = "recording" if active else "completed"
-            duration_us = None
-            if not active:
-                try:
-                    from ..media.processing import probe
-                    duration_us = probe(path, self.settings)["duration_us"]
-                except Exception:
-                    status = "failed"
-            self.live.upsert_segment(session_id, path, index + 1, status, size, duration_us)
+            if active:
+                self.live.upsert_segment(session_id, path, index + 1, "recording", size)
+            else:
+                self._probe_sealed_segment(session_id, path, index + 1, size, force=final)
 
     @staticmethod
     def _stop_process(process: subprocess.Popen):
@@ -1757,6 +1796,9 @@ class LiveMonitorWorker:
             except Exception as exc:
                 self.live.set_liveness(monitor_id, None)
                 self.live.set_monitor_state(monitor_id, "error", f"{type(exc).__name__}: {exc}")
+
+        if not self.processes and not (stop and stop.is_set()):
+            self._retry_unknown_segment_duration()
 
     def run(self, stop=None):
         stop = stop if stop is not None else threading.Event()

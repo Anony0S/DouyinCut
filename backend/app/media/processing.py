@@ -16,13 +16,14 @@ class MediaError(RuntimeError):
 
 def run_process(args: list[str], checkpoint: Callable | None = None, timeout: int = 3600,
                 log_path: Path | None = None) -> str:
-    """No shell interpolation. Drain output to disk to avoid pipe deadlocks."""
+    """Return stdout; retain both streams in logs without pipe deadlocks."""
     import tempfile
-    with tempfile.TemporaryFile(mode="w+b") as output:
+    with (tempfile.TemporaryFile(mode="w+b") as output,
+          tempfile.TemporaryFile(mode="w+b") as errors):
         try:
             # The desktop host uses stdin for its control protocol; media tools
             # must not compete with that pipe for input.
-            process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+            process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output, stderr=errors,
                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except FileNotFoundError as exc:
             raise MediaError(f"找不到程序 {Path(args[0]).name}，请安装或设置其路径") from exc
@@ -45,9 +46,11 @@ def run_process(args: list[str], checkpoint: Callable | None = None, timeout: in
         output.seek(0)
         text = output.read().decode("utf-8", errors="replace")
         if log_path:
-            if text.strip():
+            errors.seek(0)
+            diagnostics = text + errors.read().decode("utf-8", errors="replace")
+            if diagnostics.strip():
                 log_path.parent.mkdir(parents=True, exist_ok=True)
-                log_path.write_text(text, encoding="utf-8")
+                log_path.write_text(diagnostics, encoding="utf-8")
             else:
                 # Most runs print nothing; an empty file per run only buries the useful logs.
                 log_path.unlink(missing_ok=True)
@@ -56,8 +59,8 @@ def run_process(args: list[str], checkpoint: Callable | None = None, timeout: in
         return text
 
 
-def probe(path: Path, settings: Settings) -> dict:
-    result = run_process([settings.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)], timeout=60)
+def probe(path: Path, settings: Settings, *, timeout: int = 60) -> dict:
+    result = run_process([settings.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)], timeout=timeout)
     data = json.loads(result)
     streams = data.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)

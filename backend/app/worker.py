@@ -1,6 +1,8 @@
 import argparse
 import json
 import logging
+import mimetypes
+import os
 import threading
 import time
 from pathlib import Path
@@ -96,6 +98,39 @@ class Worker:
             from .live_monitoring.service import generate_period_product_clips
             result = generate_period_product_clips(store, settings, payload,
                                                     checkpoint=ctx.checkpoint, progress=ctx.progress)
+        elif job["kind"] == "cover":
+            from .ai.image_generation import MAX_IMAGE_BYTES
+            from .ai.providers import CloudConfig, ProviderError, interruptible_network_call
+            from .core.credentials import read_secret
+            config = CloudConfig.model_validate(payload["config"])
+            config.require_image_connection()
+            api_key = read_secret("image_generation_api_key")
+            if not api_key:
+                raise ProviderError("请在云端设置的封面生图卡片配置 API Key")
+            plan = Plan.model_validate(store.get("plan", payload["plan_id"], payload["revision"]))
+            if payload["asset_id"] != plan.clips[0].source_asset_id:
+                raise ValueError("封面任务的视频项目与方案不匹配")
+            ratio = plan.canvas.width / plan.canvas.height
+            size = "1536x1024" if ratio > 1.15 else "1024x1536" if ratio < 0.87 else "1024x1024"
+            ctx.progress(0.05)
+            image_bytes, content_type = interruptible_network_call(
+                "image_generation",
+                (config.model_dump(), api_key, payload["reference_path"], payload["prompt"], size),
+                checkpoint=ctx.checkpoint,
+                deadline_seconds=config.image_timeout_seconds,
+            )
+            if len(image_bytes) > MAX_IMAGE_BYTES:
+                raise ProviderError("封面生图服务返回的图片文件过大")
+            extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[content_type]
+            output_dir = settings.data_dir / "covers" / payload["asset_id"]
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{job['id']}{extension}"
+            temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
+            temporary_path.write_bytes(image_bytes)
+            os.replace(temporary_path, output_path)
+            result = {"cover_id": job["id"], "path": str(output_path.resolve()),
+                      "content_type": content_type, "plan_id": plan.id,
+                      "revision": plan.revision, "size": size}
         elif job["kind"] == "jianying":
             from .integrations.jianying.service import create_jianying_draft
             plan = Plan.model_validate(store.get("plan", payload["plan_id"], payload["revision"]))
@@ -106,7 +141,8 @@ class Worker:
             product = Product.model_validate(store.get("product", plan.product_id))
             validate_plan(plan, product, candidates, assets)
             result = create_jianying_draft(plan, assets, settings, job["id"],
-                                           checkpoint=ctx.checkpoint, progress=ctx.progress)
+                                           checkpoint=ctx.checkpoint, progress=ctx.progress,
+                                           cover_image_path=Path(payload["cover_path"]) if payload.get("cover_path") else None)
         elif job["kind"] == "analyze":
             from .ai.providers import CloudConfig, transcribe
             from .ai.roughcut import (RoughcutRequest, TimeSelection, candidates_from_intervals,

@@ -196,6 +196,29 @@ class ProductPlatformService:
             self._save_config({**config, "last_validated_at": time.time()})
             return {"added": True}
 
+    def product_images(self, platform_product_id: str):
+        with self._lock:
+            config = self._config()
+            token = read_secret(TOKEN_KEY)
+            if not token or not config.get("logged_in"):
+                raise ProductPlatformAuthRequired()
+            client = ProductPlatformClient(token)
+            try:
+                urls = client.product_images(platform_product_id)
+            except ProductPlatformError as exc:
+                if exc.code == "PRODUCT_PLATFORM_AUTH_REQUIRED":
+                    self._save_config({"id": CONFIG_ID, "logged_in": False})
+                    try:
+                        self._write_token("")
+                    except ProductPlatformError:
+                        pass
+                    raise ProductPlatformAuthRequired() from None
+                raise
+            finally:
+                client.close()
+            self._save_config({**config, "last_validated_at": time.time()})
+            return urls
+
     @staticmethod
     def _product(item):
         # Only the fields shown by the product card cross the local API boundary.
@@ -205,6 +228,6 @@ class ProductPlatformService:
             "real_time_sales": "realTimeSaleRange", "month_sales": "day30SaleRange",
             "total_sales": "preciseSaleRange", "commission_ratio": "activityCosRatio",
             "has_live": "hasLive", "has_ai_live": "hasAiLive",
-            "promotion_start": "promotionStartTime", "promotion_end": "promotionEndTime",
+            "listing_time": "createTime",
         }
         return {key: item.get(source) for key, source in fields.items()}

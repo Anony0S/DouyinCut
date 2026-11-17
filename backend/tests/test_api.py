@@ -360,6 +360,7 @@ class ApiTests(unittest.TestCase):
                 self.assertNotIn(value, response.text)
             response = self.client.get('/api/v1/settings/cloud', headers=self.headers)
             expected = {name: secret_preview(value) for name, value in values.items()}
+            expected['image_generation_api_key'] = ''
             expected['douyin_cookie'] = ''
             self.assertEqual(response.json()['secret_previews'], expected)
             self.assertTrue(all(response.json()['secrets'][name] for name in values))

@@ -109,9 +109,9 @@ async function loadTranscript() { await session.act(async()=>{
   const loaded=await projectsApi.transcript(job.id)
   if(assetId.value===currentAsset) { transcript.value=loaded;transcriptVisible.value=true }
 }) }
-async function createJianyingDraft(plan: Plan) { await session.act(async()=>{
+async function createJianyingDraft(plan: Plan, coverId?: string) { await session.act(async()=>{
   if(planDirty.value) throw new Error('请先保存片段调整，再生成剪映草稿')
-  const task=await projectsApi.createJianyingDraft(plan.id,plan.revision)
+  const task=await projectsApi.createJianyingDraft(plan.id,plan.revision,coverId)
   await refresh();session.message='剪映草稿生成任务已排队，完成后会显示草稿目录'
   return task
 }) }

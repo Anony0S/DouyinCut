@@ -12,6 +12,7 @@ const session = useSessionStore();
 const { busy, connected, error } = storeToRefs(session);
 const cloudSections = [
   { id: "text", label: "文本剪辑模型" },
+  { id: "cover", label: "封面生图" },
   { id: "asr", label: "语音识别模型" },
   { id: "oss", label: "OSS 存储" },
   { id: "douyin", label: "抖音登录" },
@@ -46,6 +47,9 @@ const config = ref<CloudConfig>({
   region: "cn",
   base_url: "",
   planner_model: "",
+  image_base_url: "",
+  image_model: "",
+  image_timeout_seconds: 240,
   asr_base_url: "",
   asr_model: "",
   asr_timeout_seconds: 300,
@@ -80,6 +84,9 @@ const secretDrafts = ref<Record<ServiceSecretName, string>>({
 });
 const modelKey = ref("");
 const asrKey = ref("");
+const imageKey = ref("");
+const imageKeyConfigured = computed(() => Boolean(secrets.value.image_generation_api_key));
+const imageKeyPreview = computed(() => imageKeyConfigured.value ? secretPreviews.value.image_generation_api_key || "" : "");
 const asrKeyConfigured = computed(() => Boolean(secrets.value.asr_api_key));
 const asrKeyPreview = computed(() =>
   asrKeyConfigured.value ? secretPreviews.value.asr_api_key || "" : "",
@@ -123,6 +130,7 @@ const hasUnsavedChanges = computed(
     ) ||
     Boolean(
       modelKey.value.trim() ||
+      imageKey.value.trim() ||
       asrKey.value.trim() ||
       douyinCookie.value.trim() ||
       Object.values(secretDrafts.value).some((value) => value.trim()),
@@ -263,6 +271,18 @@ async function saveAsrConnection() {
     session.message = "语音识别模型已保存；新分析和失败任务重试使用此设置";
   });
 }
+async function saveImageConnection() {
+  await session.act(async () => {
+    await saveConfigFields(["image_base_url", "image_model", "image_timeout_seconds"]);
+    if (imageKey.value.trim()) {
+      const result = await cloudApi.saveSecret("image_generation_api_key", imageKey.value.trim());
+      secretPreviews.value.image_generation_api_key = result.preview;
+      imageKey.value = "";
+      secrets.value.image_generation_api_key = true;
+    }
+    session.message = "封面生图服务配置已保存；密钥保存在 Windows 凭据管理器";
+  });
+}
 async function saveDouyinCookie() {
   await session.act(async () => {
     const value = douyinCookie.value.trim();
@@ -285,6 +305,7 @@ onUnmounted(() => {
   disposed = true;
   modelKey.value = "";
   asrKey.value = "";
+  imageKey.value = "";
   douyinCookie.value = "";
   secretDrafts.value = { oss_access_key_id: "", oss_access_key_secret: "" };
 });
@@ -390,6 +411,32 @@ onUnmounted(() => {
               {{ modelTestResult.message }} · {{ modelTestResult.model }} ·
               {{ (modelTestResult.elapsed_ms / 1000).toFixed(2) }} 秒
             </span>
+          </div>
+        </form>
+      </section>
+      <section
+        id="settings-panel-cover"
+        v-show="activeCloudSection === 'cover'"
+        role="tabpanel"
+        aria-labelledby="settings-tab-cover"
+        class="card card-border bg-base-100 settings-card settings-model-card">
+        <form @submit.prevent="saveImageConnection">
+          <label for="image-base-url">Base URL</label>
+          <input id="image-base-url" v-model="config.image_base_url" type="url" required
+            placeholder="https://api.example.com/v1" />
+          <p class="hint">使用 OpenAI Images 编辑接口兼容服务，不含 /images/edits。请求会上传选中的商品参考图。</p>
+          <label for="image-api-key">API Key · {{ imageKeyConfigured ? "已配置" : "未配置" }}</label>
+          <SecretInput id="image-api-key" v-model="imageKey" :saved="imageKeyConfigured"
+            secret-name="image_generation_api_key" :preview="imageKeyPreview" :disabled="busy"
+            placeholder="填写独立生图服务的 API Key" />
+          <p class="hint">密钥单独保存到 Windows 凭据管理器，不与文本剪辑模型共用。</p>
+          <label for="image-model">模型 API ID</label>
+          <input id="image-model" v-model="config.image_model" required maxlength="100" />
+          <label for="image-timeout">请求等待时间 / 秒</label>
+          <input id="image-timeout" v-model.number="config.image_timeout_seconds" type="number" min="30" max="900" required />
+          <p class="hint">封面使用当前方案画布方向。图片生成会产生服务调用费用，任务可在后台查看状态。</p>
+          <div class="settings-actions">
+            <button class="btn btn-primary" :disabled="busy || !connected">保存封面生图</button>
           </div>
         </form>
       </section>

@@ -125,11 +125,15 @@ async function verifyLectureButton() {
 
 async function verifySearch() {
   const firstProduct = { title: '测试商品', price: 0, stock: '0', commission_ratio: 0, platform_product_id: 'p1', has_live: false, has_ai_live: false,
+    listing_time: '2026-11-16 15:27:24',
     cover: 'javascript:alert(1)' }
   respond = () => ({ product: firstProduct, scope_name: '店铺 A' })
   let mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: ' 测试商品 ' })
   try {
     assert.ok(text(body).includes('测试商品'))
+    assert.ok(text(body).includes('上架时间'))
+    assert.ok(text(body).includes('2026-11-16 15:27:24'), 'Listing timestamp retains seconds')
+    assert.ok(!text(body).includes('活动时间'))
     assert.ok(text(body).includes('¥0.00'), 'Zero prices are displayed without treating them as missing')
     assert.ok(text(body).includes('0%'))
     assert.equal(all(body, el => el.type === 'img').length, 0, 'Unsafe image scheme is rejected')

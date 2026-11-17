@@ -26,8 +26,7 @@ export type XingdouProduct = {
   shop_name: string | null
   has_live: boolean | null
   has_ai_live: boolean | null
-  promotion_start: string | null
-  promotion_end: string | null
+  listing_time: string | null
 }
 
 export const productPlatformApi = {
@@ -37,6 +36,7 @@ export const productPlatformApi = {
   logout: () => api<ProductPlatformStatus>('/product-platform/logout', 'POST'),
   selectScope: (mainIpId: string) => api<ProductPlatformStatus>('/product-platform/scope', 'POST', {main_ip_id: mainIpId}),
   search: (keyword: string) => api<{product: XingdouProduct | null; scope_name: string}>('/product-platform/products/search', 'POST', {keyword}),
+  images: (assetId:string, platformProductId: string) => api<{images:{id:string;url:string}[]}>('/product-platform/products/images', 'POST', {asset_id:assetId,platform_product_id:platformProductId}),
   addToShowcase: (platformProductId: string) => api<{added: boolean}>('/product-platform/products/add-to-showcase', 'POST', {platform_product_id: platformProductId}),
 }
 

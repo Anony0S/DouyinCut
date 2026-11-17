@@ -329,7 +329,7 @@ class Store:
     def pause_for_shutdown(self):
         """Persist queued work as paused and ask current owners to stop at a checkpoint."""
         now = time.time()
-        local_kinds = ("import", "preview", "export", "jianying", "live_product_clips")
+        local_kinds = ("import", "preview", "export", "jianying", "cover", "live_product_clips")
         kinds = ",".join("?" for _ in local_kinds)
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")

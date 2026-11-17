@@ -577,6 +577,23 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
 .preview-warnings .hint { margin: 6px 0; }
 .source-preview, .joined-preview { min-width: 0; margin: 0; }
 .source-preview .video-stage { height: var(--roughcut-player-height); }
+.cover-workflow { display: grid; gap: 9px; min-width: 0; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--app-border); }
+.cover-workflow-heading, .cover-product-controls, .cover-generate-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cover-workflow-heading { justify-content: space-between; }
+.cover-workflow-heading h3 { margin: 0; font-size: 14px; }
+.cover-workflow-heading > span { color: var(--color-success); font-size: 11px; }
+.cover-product-title { margin: 0; color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.cover-reference-list { display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 2px 2px 6px; }
+.cover-reference { flex: 0 0 64px; width: 64px; aspect-ratio: 3 / 4; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: 6px; background: var(--surface-soft); box-shadow: none; }
+.cover-reference:hover, .cover-reference.is-selected { border-color: var(--color-primary); }
+.cover-reference img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.cover-workflow > label { margin: 0; font-size: 12px; }
+.cover-workflow > .textarea { min-height: 66px; padding: 8px 10px; font-size: 12px; line-height: 1.5; resize: vertical; }
+.cover-generate-row .hint { margin: 0; }
+.cover-generated-preview { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 11px; }
+.cover-generated-preview img, .cover-generated-preview .skeleton { width: 96px; height: 144px; flex: none; border-radius: 6px; background: var(--surface-soft); object-fit: contain; }
+.cover-pending { min-height: 144px; }
+.cover-generated-preview.cover-pending { align-items: center; }
 .saved-plans summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .saved-plans { flex: none; margin-top: 14px; }
 .saved-plan-list { display: grid; gap: 6px; margin-top: 8px; }

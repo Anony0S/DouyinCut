@@ -40,6 +40,19 @@ class ClientTests(unittest.TestCase):
             return httpx.Response(200, json={"success": True, "data": {"data": [{"id": "first"}]}})
         self.assertEqual(self.client(handle).search("测试商品", "scope-a"), [{"id": "first"}])
 
+    def test_product_images_reads_encoded_images_from_product_detail(self):
+        source = "https://p3-aio.ecombdimg.com/item-a.jpg?signature=fixture"
+        def handle(request):
+            self.assertEqual(request.url.path, "/prod/qiongqi/xd/frontend/product/detail/v2")
+            self.assertEqual(request.url.params["xdBizId"], "biz-a")
+            self.assertEqual(request.url.params["access-token"], "fixture-token")
+            return httpx.Response(200, json={"success": True, "data": {
+                "images": json.dumps({"img": [source, "https://p9-aio.ecombdimg.com/item-b.jpg"]}),
+            }})
+        self.assertEqual(self.client(handle).product_images("biz-a"), [
+            source, "https://p9-aio.ecombdimg.com/item-b.jpg",
+        ])
+
     def test_add_to_showcase_accepts_success_with_empty_results(self):
         def handle(request):
             self.assertEqual(request.url.path, "/prod/qiongqi/xd/frontend/product/talentStoreProductAdd")
@@ -192,13 +205,20 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self.post("scope", {"main_ip_id": "unknown"}).status_code, 422)
         self.assertEqual(self.post("scope", {"main_ip_id": "22"}).status_code, 200)
         self.remote.return_value.search.return_value = [
-            {"id": "first", "title": "测试商品", "price": 0, "productStock": "0", "unshown": "discard"},
+            {"id": "first", "title": "测试商品", "price": 0, "productStock": "0",
+             "createTime": "2026-11-16 15:27:24", "lastExplainTime": "2026-11-15 16:45:44",
+             "promotionStartTime": "2026-11-16 00:00:00", "promotionEndTime": "2029-11-16 00:00:00",
+             "unshown": "discard"},
             {"id": "second"},
         ]
         result = self.post("products/search", {"keyword": " 测试商品 "}).json()
         self.remote.return_value.search.assert_called_once_with("测试商品", "22")
         self.assertEqual(result["product"]["id"], "first")
         self.assertEqual(result["product"]["price"], 0)
+        self.assertEqual(result["product"]["listing_time"], "2026-11-16 15:27:24")
+        self.assertNotIn("lastExplainTime", result["product"])
+        self.assertNotIn("promotion_start", result["product"])
+        self.assertNotIn("promotion_end", result["product"])
         self.assertNotIn("unshown", result["product"])
         self.assertEqual(result["scope_name"], "店铺 B")
         self.remote.return_value.search.return_value = []

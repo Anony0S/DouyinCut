@@ -101,3 +101,57 @@ Topics: [.trellis/spec/project/index.md](../../spec/project/index.md), [.trellis
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: 商品查询显示平台上架时间
+<!-- trellis-session: v=2 fp=769beba317f23f68 -->
+
+**Date**: 2026-11-17
+**Task**: 商品查询显示平台上架时间
+**Branch**: `master`
+
+### Summary
+
+经授权对目标商品做一次额外只读查询，确认 createTime=2026-11-16 15:27:24 为秒级上架时间、lastExplainTime=2026-11-15 16:45:44 为最近讲解时间，promotionStartTime/EndTime 为活动区间。后端映射 createTime 为 listing_time，弹窗只显示上架时间并原样保留精度；更新设置规格。后端 21 项测试、商品查询 UI 验证、TypeScript 检查和 Vite 生产构建通过。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 5: 新增商品封面与剪映草稿封面
+<!-- trellis-session: v=2 fp=32cde3eb34eb858f -->
+
+**Date**: 2026-11-17
+**Task**: 新增商品封面与剪映草稿封面
+**Branch**: `master`
+
+### Summary
+
+完成素材与粗剪页的商品封面生成流程：按星斗 data.images 下载本地参考图，使用独立 OpenAI Images 兼容服务生成封面，并以生成新版剪映草稿的方式写入草稿列表封面字段；保留旧草稿。后端 367 项测试和封面定向测试通过；前端 vue-tsc 通过，但完整 Vite 构建在当前受限环境被 esbuild 读取目录权限阻断。已在研究笔记记录放弃直接修改旧草稿、未验证的真实服务与剪映显示范围。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- backend/app/ai/image_generation.py; backend/app/api.py; backend/app/worker.py; backend/app/integrations/jianying/service.py; desktop/src/views/WorkspaceView.vue; desktop/src/views/SettingsView.vue; .trellis/spec/project/workspace.md; .trellis/spec/project/api.md; .trellis/spec/project/settings.md; .trellis/research/cover-draft-generation.md
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] uv run pytest backend/tests --ignore=backend/tests/test_desktop_runtime.py：367 passed；uv run pytest backend/tests/test_image_generation.py backend/tests/test_product_platform.py backend/tests/test_jianying.py：29 passed；pnpm exec vue-tsc --noEmit：通过；git diff --check：通过；pnpm build：受限环境 esbuild 读取目录权限失败
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 填写真实生图服务 Base URL、模型 ID 和 API Key；用真实星斗账号获取 data.images；在目标剪映版本确认草稿列表读取两个封面字段

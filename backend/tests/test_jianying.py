@@ -97,6 +97,23 @@ class JianyingDraftTests(unittest.TestCase):
                                       "job_cancelled", checkpoint=stop_after_first_clip)
         self.assertEqual(list(output_root.iterdir()), [])
 
+    def test_cover_is_copied_and_written_to_both_draft_metadata_files(self):
+        output_root = self.root / "jianying-projects-with-cover"
+        cover = self.root / "generated-cover.png"
+        cover.write_bytes(b"\x89PNG\r\n\x1a\ncover-fixture")
+        with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root), "PATH": ""}), \
+                patch("app._vendor.pyJianYingDraft.local_materials.pymediainfo", None):
+            result = create_jianying_draft(self.plan, {self.asset.id: self.asset}, self.settings,
+                                           "job_cover_test", cover_image_path=cover)
+        draft_path = Path(result["draft_path"])
+        cover_copy = draft_path / "Resources" / "DouyinCut_cover.png"
+        content = json.loads((draft_path / "draft_info.json").read_text(encoding="utf-8"))
+        metadata = json.loads((draft_path / "draft_meta_info.json").read_text(encoding="utf-8"))
+        self.assertTrue(cover_copy.is_file())
+        self.assertEqual(cover_copy.read_bytes(), cover.read_bytes())
+        self.assertEqual(content["static_cover_image_path"], str(cover_copy.resolve()))
+        self.assertEqual(metadata["draft_cover"], str(cover_copy.resolve()))
+
     def test_override_directory_is_created(self):
         output_root = self.root / "configured" / "drafts"
         with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root)}):

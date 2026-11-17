@@ -73,7 +73,7 @@ WITH latest AS (
 ), related_jobs AS (
  SELECT j.*,COALESCE(json_extract(j.payload,'$.asset_id'),p.asset_id) asset_id FROM jobs j
  LEFT JOIN source_plans p ON p.id=json_extract(j.payload,'$.plan_id')
- WHERE j.kind IN ('analyze','preview','export','jianying')
+ WHERE j.kind IN ('analyze','preview','export','jianying','cover')
 )
 """
 
@@ -201,7 +201,7 @@ def delete_plan(store, plan_id, data_dir):
             raise KeyError(plan_id)
         plan_bodies = [json.loads(row[0]) for row in revisions]
         asset_id = plan_bodies[-1]["clips"][0]["source_asset_id"]
-        active = conn.execute("SELECT 1 FROM jobs WHERE kind IN ('preview','export','jianying') "
+        active = conn.execute("SELECT 1 FROM jobs WHERE kind IN ('preview','export','jianying','cover') "
                               "AND json_extract(payload,'$.plan_id')=? "
                               "AND state IN ('queued','running','pause_requested','paused','cancel_requested') LIMIT 1",
                               (plan_id,)).fetchone()
@@ -210,9 +210,14 @@ def delete_plan(store, plan_id, data_dir):
         exports = conn.execute("SELECT body FROM objects WHERE kind='export' "
                                "AND json_extract(body,'$.plan_id')=?", (plan_id,)).fetchall()
         paths.extend(json.loads(row[0])["path"] for row in exports)
-        jobs = conn.execute("SELECT id FROM jobs WHERE kind IN ('preview','export','jianying') "
+        jobs = conn.execute("SELECT id,result FROM jobs WHERE kind IN ('preview','export','jianying','cover') "
                             "AND json_extract(payload,'$.plan_id')=?", (plan_id,)).fetchall()
         job_ids = [row[0] for row in jobs]
+        for job in jobs:
+            if job[1]:
+                result = json.loads(job[1])
+                if result.get("path"):
+                    paths.append(result["path"])
         candidate_ids = {clip["candidate_id"] for body in plan_bodies for clip in body["clips"]}
         product_ids = {body["product_id"] for body in plan_bodies}
         shared_candidates = set()
@@ -240,7 +245,8 @@ def delete_plan(store, plan_id, data_dir):
                 conn.execute("DELETE FROM cache WHERE key IN (?,?,?)",
                              (f"job-result:{job_id}", f"roughcut-timestamps-v1:{job_id}",
                               f"roughcut-transcript:{job_id}"))
-    cleanup_pending = _delete_paths(paths, [Path(data_dir) / "previews", Path(data_dir) / "exports"])
+        cleanup_pending = _delete_paths(paths, [Path(data_dir) / "previews", Path(data_dir) / "exports",
+                                                Path(data_dir) / "covers"])
     return {"deleted_plan_id": plan_id, "source_asset_id": asset_id,
             "cleanup_pending": cleanup_pending}
 
@@ -261,7 +267,7 @@ def delete_project(store, asset_id, data_dir):
                    "(kind='import' AND json_extract(result,'$.asset_id')=?)"]
         args = [asset_id, asset_id]
         if plan_ids:
-            clauses.append(f"(kind IN ('preview','export','jianying') AND json_extract(payload,'$.plan_id') IN ({_ids_sql(plan_ids)}))")
+            clauses.append(f"(kind IN ('preview','export','jianying','cover') AND json_extract(payload,'$.plan_id') IN ({_ids_sql(plan_ids)}))")
             args.extend(plan_ids)
         related = " OR ".join(clauses)
         active = conn.execute("SELECT 1 FROM jobs WHERE (" + related + ") AND state IN "
@@ -282,7 +288,7 @@ def delete_project(store, asset_id, data_dir):
             for job_id in job_ids:
                 conn.execute("DELETE FROM attempts WHERE job_id=?", (job_id,))
                 conn.execute("DELETE FROM cache WHERE key IN (?,?,?)",
-                             (f"job-result:{job_id}", f"roughcut-timestamps-v1:{job_id}",
+                              (f"job-result:{job_id}", f"roughcut-timestamps-v1:{job_id}",
                               f"roughcut-transcript:{job_id}"))
             conn.execute(f"DELETE FROM jobs WHERE id IN ({_ids_sql(job_ids)})", job_ids)
         conn.execute("DELETE FROM objects WHERE kind IN ('asset','project','transcript') AND "
@@ -319,8 +325,9 @@ def delete_project(store, asset_id, data_dir):
                                  (asset_id, asset["sha256"])).fetchone()
         if not duplicate:
             conn.execute("DELETE FROM cache WHERE key LIKE ?", (f"qwen-audio-v1:{asset['sha256']}:%",))
+    paths.append(data_dir / "covers" / asset_id)
     cleanup_pending = _delete_paths(paths, [data_dir / "recordings" / "imports", data_dir / "analysis",
-                                            data_dir / "previews", data_dir / "exports"])
+                                            data_dir / "previews", data_dir / "exports", data_dir / "covers"])
     return {"deleted_asset_id": asset_id, "deleted_plans": len(plan_ids),
             "oss_audio_retained": True, "cleanup_pending": cleanup_pending}
 

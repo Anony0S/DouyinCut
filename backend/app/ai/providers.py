@@ -27,6 +27,9 @@ class CloudConfig(Model):
     # Empty fields mean unconfigured; saving one card must not require the others.
     base_url: str = Field(default="", max_length=500)
     planner_model: str = Field(default="", max_length=100)
+    image_base_url: str = Field(default="", max_length=500)
+    image_model: str = Field(default="", max_length=100)
+    image_timeout_seconds: int = Field(default=240, ge=30, le=900)
     asr_base_url: str = Field(default="", max_length=500)
     asr_model: str = Field(default="", max_length=100,
                            pattern=r"^(?:[A-Za-z0-9][A-Za-z0-9._-]*)?$")
@@ -35,7 +38,7 @@ class CloudConfig(Model):
     chat_timeout_seconds: int = Field(default=300, ge=30, le=900)
     asr_timeout_seconds: int = Field(default=300, ge=30, le=900)
 
-    @field_validator("planner_model", "asr_model", mode="before")
+    @field_validator("planner_model", "image_model", "asr_model", mode="before")
     @classmethod
     def normalize_model_id(cls, value):
         if not isinstance(value, str):
@@ -43,7 +46,7 @@ class CloudConfig(Model):
         value = value.strip()
         return value
 
-    @field_validator("base_url", "asr_base_url")
+    @field_validator("base_url", "image_base_url", "asr_base_url")
     @classmethod
     def valid_base_url(cls, value):
         value = value.strip()
@@ -54,8 +57,8 @@ class CloudConfig(Model):
         if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
                 or parsed.query or parsed.fragment or any(c.isspace() for c in value)):
             raise ValueError("模型 Base URL 必须是无用户名、密码或查询参数的 HTTPS 地址")
-        if parsed.path.endswith("/chat/completions"):
-            raise ValueError("Base URL 不要包含 /chat/completions")
+        if parsed.path.endswith(("/chat/completions", "/images/edits", "/images/generations")):
+            raise ValueError("Base URL 不要包含具体模型接口路径")
         if parsed.path.endswith("/api/v1/services/aigc/multimodal-generation/generation"):
             raise ValueError("Base URL 不要包含语音识别接口路径")
         return value
@@ -68,6 +71,10 @@ class CloudConfig(Model):
         if not self.asr_base_url or not self.asr_model:
             raise ProviderError("请在语音识别模型卡片填写 Base URL 和模型 ID")
 
+    def require_image_connection(self):
+        if not self.image_base_url or not self.image_model:
+            raise ProviderError("请在封面生图设置填写 Base URL 和模型 ID")
+
     @property
     def asr_url(self):
         return f"{self.asr_base_url}/api/v1/services/aigc/multimodal-generation/generation"
@@ -75,6 +82,10 @@ class CloudConfig(Model):
     @property
     def chat_url(self):
         return f"{self.base_url}/chat/completions"
+
+    @property
+    def image_edits_url(self):
+        return f"{self.image_base_url}/images/edits"
 
 
 def model_api_key(config):
@@ -125,6 +136,9 @@ def _network_child(pipe, kind, args, kwargs):
     try:
         if kind in {"asr", "planner", "model_test"}:
             result = cloud_json(*args, **kwargs)
+        elif kind == "image_generation":
+            from .image_generation import request_image
+            result = request_image(*args, **kwargs)
         elif kind == "oss_test":
             result = _test_oss_request(*args, **kwargs)
         else:

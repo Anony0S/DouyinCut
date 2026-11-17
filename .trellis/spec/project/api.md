@@ -19,7 +19,11 @@
 | `GET /plans`、`PATCH /plans/{id}`、`DELETE /plans/{id}` | 方案查询、保存新版本 / 自动排队预览、删除单个方案及其本地产物 |
 | `POST /plans/{id}/approve` | 审核保存版本；当前界面不调用 |
 | `POST /plans/{id}/exports` | 只接受 format=mp4，默认 mp4；当前界面不调用 |
-| `POST /plans/{id}/jianying-drafts` | body 包含 revision；后台生成该已保存修订的剪映工程草稿并返回任务 |
+| `POST /plans/{id}/jianying-drafts` | body 包含 revision 和可选 cover_id；后台生成该已保存修订的剪映工程草稿。cover_id 必须属于同一视频项目、方案和修订，带封面时创建新的草稿目录并返回任务 |
+| `POST /product-platform/products/images` | body 包含 asset_id、platform_product_id；从当前星斗商品详情的 `data.images` 下载允许的 HTTPS 商品图片到该项目封面参考目录，返回本地图片 ID 和接口地址；不持久化带签名的原始图片 URL |
+| `GET /assets/{asset_id}/cover-references/{image_id}` | 读取当前项目已下载的商品参考图 |
+| `POST /assets/{asset_id}/covers` | body 包含 plan_id、revision、reference_id、prompt；校验当前已保存方案修订后排队 `cover` 任务，使用独立 OpenAI Images 兼容服务生成草稿列表封面 |
+| `GET /assets/{asset_id}/covers/{cover_id}/media` | 读取成功封面任务的本地图片结果；封面与方案修订及视频项目绑定 |
 | `GET /exports`、`GET /exports/{id}/media` | 产物历史与播放 |
 | `GET/POST /live/monitors`、`PATCH/DELETE /live/monitors/{id}` | 抖音监控项列表、添加、修改设置（auto_record / notify_live / notify_offline / notify_split_complete）、移除；活动录制期间拒绝删除 |
 | `GET /live/monitors?window_start=…&window_end=…&include_end_recording=…` | 两个 Unix 秒时间戳须成对提供且开始早于结束；不提供范围时使用服务端最近 24 小时。按窗口返回每个直播间所有相交场次，不限 20 场。已结束场次要求 started < window_end 且 ended > window_start；录制中默认要求 started < window_end。include_end_recording=true 时额外包含恰好在 window_end 开始录制的场次；前端今天及历史日期窗口均发送 false，排除恰好次日 00:00 开始的录制。省略范围时采用服务端最近窗口语义。无效或非有限范围返回 422。列表内的场次只返回摘要：id、status、started、ended、end_time_source 与 product_error（该场次存在商品列表获取错误，或商品消息连接状态为 error），不含分段、讲解区间、商品片段等详情；详情按场次标识读取 |
@@ -43,7 +47,7 @@
 | `GET /jobs/{id}/error-detail` | 完整脱敏错误详情 |
 | `GET /events` | fetch SSE，jobs 事件发送任务汇总变化信号；共用认证、退避重连与卸载取消 |
 | `GET/PUT /settings/editing-defaults` | 认证读取 / 保存本机默认剪辑要求 instructions（最多4000字符，空白重置为内置要求），不创建分析或调用云端；项目草稿与全局默认要求分别持久化 |
-| `GET/PATCH /settings/cloud`、`POST /settings/secrets` | 文本字段 base_url、planner_model、chat_timeout_seconds 与语音字段 asr_base_url、asr_model、asr_timeout_seconds 分开保存；密钥名 llm_api_key、asr_api_key 分别使用系统凭据存储，配置加载仅返回各自状态及缩略值 |
+| `GET/PATCH /settings/cloud`、`POST /settings/secrets` | 文本字段 base_url、planner_model、chat_timeout_seconds、封面字段 image_base_url、image_model、image_timeout_seconds 与语音字段 asr_base_url、asr_model、asr_timeout_seconds 分开保存；密钥名 llm_api_key、image_generation_api_key、asr_api_key 分别使用系统凭据存储，配置加载仅返回各自状态及缩略值 |
 | `POST /settings/cloud/test-model` | 本地认证后按 body.config 中的 Base URL、planner_model、chat_timeout_seconds 与可选 api_key 测试文本生成；空密钥使用已保存 llm_api_key。只发一次请求，成功与可预期测试失败返回 ok、model、elapsed_ms、message，不保存设置或密钥；非法配置返回 422，未授权返回 401 |
 | `POST /settings/cloud/test-oss` | 本地认证后按 body.config 的 oss_endpoint、oss_bucket 与可选 access_key_id / access_key_secret 测试小对象上传；两项空密钥分别使用已保存凭据。返回 ok、elapsed_ms、message，不保存表单或创建任务；总等待不超过 30 秒及进程清理时间，未授权返回 401 |
 | `POST /settings/secrets/{name}/reveal` | 显式获取完整密钥，禁止缓存 |

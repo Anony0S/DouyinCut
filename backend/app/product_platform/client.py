@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 from typing import Any
@@ -132,6 +133,30 @@ class ProductPlatformClient:
         if not isinstance(products, list) or any(not isinstance(item, dict) for item in products):
             raise ProductPlatformError("星斗商品平台搜索结果格式无效，请重试", status=502)
         return products
+
+    def product_images(self, xd_biz_id: str) -> list[str]:
+        body = self._request("/xd/frontend/product/detail/v2", values={"xdBizId": xd_biz_id},
+                             authenticated=True)
+        data = body.get("data")
+        if not isinstance(data, dict):
+            raise ProductPlatformError("星斗商品详情格式无效，请重试", status=502)
+        images = data.get("images")
+        if isinstance(images, str):
+            try:
+                images = json.loads(images)
+            except (json.JSONDecodeError, TypeError):
+                raise ProductPlatformError("星斗商品图片列表格式无效，请重试", status=502) from None
+        sources = images.get("img") if isinstance(images, dict) else images
+        if not isinstance(sources, list):
+            raise ProductPlatformError("星斗商品没有可用图片", status=404)
+        urls = []
+        for source in sources:
+            url = source.get("url") if isinstance(source, dict) else source
+            if isinstance(url, str) and url.startswith("https://"):
+                urls.append(url)
+        if not urls:
+            raise ProductPlatformError("星斗商品没有可用图片", status=404)
+        return urls[:12]
 
     def add_to_showcase(self, ip_id: str, platform_product_id: str, member_talent_id: str) -> None:
         try:

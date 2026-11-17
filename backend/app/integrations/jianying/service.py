@@ -53,7 +53,8 @@ def _draft_name(name: str, plan: Plan, job_id: str) -> str:
 
 
 def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settings,
-                          job_id: str, checkpoint=None, progress=None) -> dict:
+                          job_id: str, checkpoint=None, progress=None,
+                          cover_image_path: Path | None = None) -> dict:
     root = draft_root()
     name = _draft_name(assets[plan.clips[0].source_asset_id].name, plan, job_id)
     draft_path = root / name
@@ -79,6 +80,17 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         resources = draft_path / "Resources"
         resources.mkdir()
+        cover_resource = None
+        if cover_image_path is not None:
+            source_cover = Path(cover_image_path).resolve()
+            if not source_cover.is_file():
+                raise MediaError("所选封面文件已移动或删除")
+            suffix = source_cover.suffix.lower()
+            if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+                raise MediaError("所选封面格式不受支持")
+            cover_resource = resources / f"DouyinCut_cover{suffix}"
+            shutil.copy2(source_cover, cover_resource)
+            script.content["static_cover_image_path"] = str(cover_resource.resolve())
         script.add_track(TrackType.video, "DouyinCut 视频")
         timeline_cursor = 0
         clip_timeline = []
@@ -170,6 +182,8 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
                          "draft_root_path": str(root), "draft_fold_path": str(root),
                          "tm_duration": plan.duration_us / 1_000_000,
                          "tm_draft_cloud_modified": int(time.time())})
+        if cover_resource is not None:
+            metadata["draft_cover"] = str(cover_resource.resolve())
         meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         settings_path = draft_path / "draft_settings"
         settings_text = settings_path.read_text(encoding="utf-8")

@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import ipaddress
+import mimetypes
+from pathlib import Path
+from urllib.parse import urlparse
+
+import httpx
+
+from .providers import ProviderError
+
+
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+PRODUCT_IMAGE_HOSTS = {"p3-aio.ecombdimg.com", "p9-aio.ecombdimg.com"}
+
+
+def fetch_product_image(url: str) -> tuple[bytes, str]:
+    parsed = urlparse(url)
+    if (parsed.scheme != "https" or parsed.hostname not in PRODUCT_IMAGE_HOSTS
+            or parsed.username or parsed.password or parsed.port not in (None, 443)):
+        raise ValueError("星斗商品图片地址无效")
+    try:
+        with httpx.Client(timeout=20, follow_redirects=False, trust_env=False) as client:
+            response = client.get(url)
+            response.raise_for_status()
+    except httpx.HTTPError:
+        raise ValueError("下载星斗商品图片失败，请稍后重试") from None
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+    data = response.content
+    if not content_type.startswith("image/") or not data or len(data) > MAX_IMAGE_BYTES:
+        raise ValueError("星斗商品图片格式无效或文件过大")
+    return data, content_type
+
+
+def _safe_result_url(url: str, base_url: str) -> bool:
+    parsed, base = urlparse(url), urlparse(base_url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        return False
+    if parsed.port not in (None, 443):
+        return False
+    try:
+        if ipaddress.ip_address(parsed.hostname).is_global is False:
+            return False
+    except ValueError:
+        pass
+    return parsed.hostname == base.hostname
+
+
+def request_image(config: dict, api_key: str, source_path: str, prompt: str, size: str) -> tuple[bytes, str]:
+    base_url = config["image_base_url"].rstrip("/")
+    model = config["image_model"]
+    url = f"{base_url}/images/edits"
+    timeout = config["image_timeout_seconds"]
+    headers = {"Authorization": f"Bearer {api_key}"}
+    source = Path(source_path)
+    mime = mimetypes.guess_type(source.name)[0] or "image/jpeg"
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+            with source.open("rb") as image_file:
+                response = client.post(
+                    url,
+                    headers=headers,
+                    data={"model": model, "prompt": prompt, "size": size, "n": "1"},
+                    files={"image": (source.name, image_file, mime)},
+                )
+    except httpx.HTTPError:
+        raise ProviderError("封面生图服务连接失败，请检查地址和网络") from None
+    if response.status_code < 200 or response.status_code >= 300:
+        raise ProviderError(f"封面生图服务请求失败（HTTP {response.status_code}）")
+    if len(response.content) > MAX_IMAGE_BYTES * 2:
+        raise ProviderError("封面生图服务返回内容过大")
+    try:
+        body = response.json()
+        image = body["data"][0]
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise ProviderError("封面生图服务未返回可识别的图片") from None
+    if not isinstance(image, dict):
+        raise ProviderError("封面生图服务未返回可识别的图片")
+    encoded = image.get("b64_json")
+    if isinstance(encoded, str):
+        try:
+            result = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            raise ProviderError("封面生图服务返回了无效的图片数据") from None
+        content_type = "image/png"
+    else:
+        result_url = image.get("url")
+        if not isinstance(result_url, str) or not _safe_result_url(result_url, base_url):
+            raise ProviderError("封面生图服务需返回 b64_json，或返回同域 HTTPS 图片地址")
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+                result_response = client.get(result_url)
+                result_response.raise_for_status()
+        except httpx.HTTPError:
+            raise ProviderError("无法下载封面生图服务返回的图片") from None
+        result = result_response.content
+        content_type = result_response.headers.get("content-type", "").split(";", 1)[0].lower()
+    if not result or len(result) > MAX_IMAGE_BYTES or not content_type.startswith("image/"):
+        raise ProviderError("封面生图服务返回的图片格式无效或文件过大")
+    if not (result.startswith(b"\x89PNG\r\n\x1a\n") or result.startswith(b"\xff\xd8\xff")
+            or (len(result) >= 12 and result[:4] == b"RIFF" and result[8:12] == b"WEBP")):
+        raise ProviderError("封面生图服务返回内容不是有效的 PNG、JPEG 或 WebP 图片")
+    return result, content_type

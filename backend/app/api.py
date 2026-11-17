@@ -39,6 +39,19 @@ class ExportRequest(Model):
 
 class JianyingDraftRequest(Model):
     revision: int = Field(ge=1)
+    cover_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class CoverGenerationRequest(Model):
+    plan_id: str = Field(min_length=1, max_length=100)
+    revision: int = Field(ge=1)
+    reference_id: str = Field(min_length=1, max_length=100)
+    prompt: str = Field(min_length=1, max_length=4000)
+
+
+class ProductImagesRequest(Model):
+    asset_id: str = Field(min_length=1, max_length=100)
+    platform_product_id: str = Field(min_length=1, max_length=100)
 
 
 class LogLocation(Model):
@@ -47,7 +60,7 @@ class LogLocation(Model):
 
 
 class SecretRequest(Model):
-    name: Literal["llm_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]
+    name: Literal["llm_api_key", "image_generation_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]
     value: str = Field(max_length=20000)
 
 
@@ -192,6 +205,42 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.post("/api/v1/product-platform/products/search")
     def product_platform_search(body: SearchRequest):
         return app.state.product_platform.search(body.keyword)
+
+    @app.post("/api/v1/product-platform/products/images")
+    def product_platform_product_images(body: ProductImagesRequest):
+        from .ai.image_generation import fetch_product_image
+        from .core.domain import new_id
+        if not body.asset_id.startswith("asset_") or not body.asset_id[6:].isalnum():
+            raise HTTPException(422, "项目标识无效")
+        store.get("asset", body.asset_id)
+        urls = app.state.product_platform.product_images(body.platform_product_id)
+        references = settings.data_dir / "covers" / body.asset_id / "references"
+        references.mkdir(parents=True, exist_ok=True)
+        result = []
+        for url in urls:
+            data, content_type = fetch_product_image(url)
+            extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(content_type)
+            if extension is None:
+                continue
+            image_id = new_id("coverref")
+            path = references / f"{image_id}{extension}"
+            path.write_bytes(data)
+            result.append({"id": image_id, "url": f"/api/v1/assets/{body.asset_id}/cover-references/{image_id}"})
+        if not result:
+            raise HTTPException(404, "星斗商品没有可用图片")
+        return {"images": result}
+
+    @app.get("/api/v1/assets/{asset_id}/cover-references/{image_id}")
+    def product_platform_product_image(asset_id: str, image_id: str):
+        if not asset_id.startswith("asset_") or not asset_id[6:].isalnum():
+            raise HTTPException(404, "找不到图片")
+        if not image_id.startswith("coverref_") or not image_id[9:].isalnum():
+            raise HTTPException(404, "找不到图片")
+        references = (settings.data_dir / "covers" / asset_id / "references").resolve()
+        matches = [path for path in references.glob(f"{image_id}.*") if path.is_file()]
+        if len(matches) != 1 or not matches[0].resolve().is_relative_to(references):
+            raise HTTPException(404, "找不到图片")
+        return FileResponse(matches[0])
 
     @app.post("/api/v1/product-platform/products/add-to-showcase")
     def product_platform_add_to_showcase(body: AddToShowcaseRequest):
@@ -547,7 +596,44 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                                   (plan_id, body.revision)).fetchone()
         if active:
             raise HTTPException(409, "该方案修订已有剪映草稿生成任务")
-        return store.enqueue("jianying", {"plan_id": plan_id, "revision": body.revision})
+        payload = {"plan_id": plan_id, "revision": body.revision}
+        if body.cover_id:
+            cover = store.job(body.cover_id)
+            if (cover["kind"] != "cover" or cover["state"] != "succeeded"
+                    or cover["payload"].get("plan_id") != plan_id
+                    or cover["payload"].get("revision") != body.revision
+                    or cover["payload"].get("asset_id") != plan.clips[0].source_asset_id):
+                raise HTTPException(422, "所选封面不属于当前方案修订")
+            cover_path = Path(cover["result"]["path"]).resolve()
+            covers_root = (settings.data_dir / "covers").resolve()
+            if not cover_path.is_file() or not cover_path.is_relative_to(covers_root):
+                raise HTTPException(410, "所选封面文件已移动或删除")
+            payload["cover_path"] = str(cover_path)
+        return store.enqueue("jianying", payload)
+
+    @app.post("/api/v1/assets/{asset_id}/covers", status_code=202)
+    def generate_cover(asset_id: str, body: CoverGenerationRequest):
+        from .ai.providers import ProviderError
+        asset = Asset.model_validate(store.get("asset", asset_id))
+        plan = Plan.model_validate(store.get("plan", body.plan_id, body.revision))
+        if not plan.clips or any(clip.source_asset_id != asset_id for clip in plan.clips):
+            raise HTTPException(422, "方案不属于当前视频项目")
+        config = cloud_config()
+        config.require_image_connection()
+        if not read_secret("image_generation_api_key"):
+            raise ProviderError("请在云端设置的封面生图卡片配置 API Key")
+        reference_id = body.reference_id
+        if not reference_id.startswith("coverref_") or not reference_id[9:].isalnum():
+            raise HTTPException(422, "参考图片标识无效")
+        reference_root = (settings.data_dir / "covers" / asset_id / "references").resolve()
+        reference_matches = [path for path in reference_root.glob(f"{reference_id}.*") if path.is_file()]
+        if len(reference_matches) != 1 or not reference_matches[0].resolve().is_relative_to(reference_root):
+            raise HTTPException(410, "参考图片已移动或删除，请重新获取商品图片")
+        return store.enqueue("cover", {
+            "asset_id": asset.id, "plan_id": plan.id, "revision": plan.revision,
+            "reference_path": str(reference_matches[0].resolve()), "prompt": body.prompt.strip(),
+            "config": config.model_dump(),
+        })
 
     @app.get("/api/v1/exports")
     def exports():
@@ -560,6 +646,17 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if not any(path.is_relative_to(settings.data_dir / root) for root in ("exports", "previews")) or not path.is_file():
             raise HTTPException(410, "导出文件已移动或删除")
         return FileResponse(path, media_type="video/mp4")
+
+    @app.get("/api/v1/assets/{asset_id}/covers/{cover_id}/media")
+    def generated_cover_media(asset_id: str, cover_id: str):
+        job = store.job(cover_id)
+        if job["kind"] != "cover" or job["state"] != "succeeded" or job["payload"].get("asset_id") != asset_id:
+            raise HTTPException(404, "找不到封面")
+        path = Path(job["result"]["path"]).resolve()
+        root = (settings.data_dir / "covers" / asset_id).resolve()
+        if not path.is_file() or not path.is_relative_to(root):
+            raise HTTPException(410, "封面文件已移动或删除")
+        return FileResponse(path, media_type=job["result"].get("content_type", "image/png"))
 
     def cloud_config():
         try:
@@ -586,7 +683,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.get("/api/v1/settings/cloud")
     def get_cloud_config():
         values = {name: read_secret(name) for name in
-                  ["llm_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret"]}
+                  ["llm_api_key", "image_generation_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret"]}
         try:
             values["douyin_cookie"] = store.get("config", "douyin_cookie")["value"]
         except KeyError:
@@ -630,7 +727,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         return {"saved": True, "preview": secret_preview(body.value)}
 
     @app.post("/api/v1/settings/secrets/{name}/reveal")
-    def reveal_secret(name: Literal["llm_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]):
+    def reveal_secret(name: Literal["llm_api_key", "image_generation_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]):
         if name == "douyin_cookie":
             try:
                 value = store.get("config", "douyin_cookie")["value"]

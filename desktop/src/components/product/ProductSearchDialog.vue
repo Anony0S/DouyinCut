@@ -120,8 +120,8 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
                 </div>
               </dl>
               <div class="border-t border-base-300 pt-4 text-sm">
-                <p class="text-xs text-base-content/60">活动时间</p>
-                <p class="mt-1">{{ product.promotion_start || '—' }} 至 {{ product.promotion_end || '—' }}</p>
+                <p class="text-xs text-base-content/60">上架时间</p>
+                <p class="mt-1">{{ product.listing_time || '—' }}</p>
               </div>
             </div>
           </article>

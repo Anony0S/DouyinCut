@@ -11,7 +11,9 @@ export const projectsApi = {
   analyze: (id: string, draft: ProjectDraft, refreshAsr: boolean) => api<Job>(`/assets/${encodeURIComponent(id)}/analyze`, 'POST', {...draft,refresh_asr:refreshAsr}),
   savePlan: (plan: Plan) => api<Plan>(`/plans/${encodeURIComponent(plan.id)}`, 'PATCH', plan),
   deletePlan: (id: string) => api<{deleted_plan_id:string;source_asset_id:string;cleanup_pending:string[]}>(`/plans/${encodeURIComponent(id)}`, 'DELETE'),
-  createJianyingDraft: (id: string, revision: number) => api<Job>(`/plans/${encodeURIComponent(id)}/jianying-drafts`, 'POST', {revision}),
+  createJianyingDraft: (id: string, revision: number, coverId?: string) => api<Job>(`/plans/${encodeURIComponent(id)}/jianying-drafts`, 'POST', {revision, ...(coverId ? {cover_id:coverId} : {})}),
+  generateCover: (assetId:string, planId:string, revision:number, referenceId:string, prompt:string) =>
+    api<Job>(`/assets/${encodeURIComponent(assetId)}/covers`, 'POST', {plan_id:planId, revision, reference_id:referenceId, prompt}),
   transcript: (id: string) => api<TranscriptResult>(`/jobs/${encodeURIComponent(id)}/transcript`),
 }
 export type TranscriptResult = { ready: boolean; sentences: {start_us:number;end_us:number;text:string}[] }

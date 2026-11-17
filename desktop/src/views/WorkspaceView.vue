@@ -14,6 +14,7 @@ import JobErrorDetails from '../components/JobErrorDetails.vue'
 import ConfirmPopover from '../components/ConfirmPopover.vue'
 import { projectsApi } from '../services/projects'
 import { productPlatformApi, isProductPlatformAuthError, type XingdouProduct } from '../services/productPlatform'
+import { cloudApi } from '../services/cloud'
 const project=useProjectStore(),session=useSessionStore(),workspace=useWorkspace(),route=useRoute(),router=useRouter()
 const {busy,connected,pendingImportId}=storeToRefs(session)
 const {assetId,activeAsset,productName,instructions,targetSeconds,toleranceSeconds,refreshAsr,analyzingAsset,
@@ -26,6 +27,8 @@ const productImages=ref<{id:string;url:string}[]>([]), selectedReferenceId=ref('
 const platformProduct=ref<XingdouProduct|null>(null), platformScopeName=ref('')
 const coverPrompt=ref('以参考图片中的商品为主体，保留商品的真实款式、颜色、材质和细节，生成适合短视频草稿列表展示的商品封面。背景简洁有层次，商品清晰突出，不添加文字、商标、水印或额外商品。')
 const coverError=ref(''), coverBusy=ref(false), searchingCoverProduct=ref(false), loadingCoverImages=ref(false)
+const shortProductName=ref(''), shortNameBusy=ref(false), coverDialog=ref<HTMLDialogElement|null>(null)
+const coverPromptBase='以参考图片中的商品为主体，保留商品的真实款式、颜色、材质和细节，生成适合短视频草稿列表展示的商品封面。背景简洁有层次，商品清晰突出，不添加文字、商标、水印或额外商品。'
 const matchingCoverJobs=computed(()=>assetJobs.value.filter(job=>job.kind==='cover'&&job.payload?.plan_id===selectedPlan.value?.id&&job.payload?.revision===selectedPlan.value?.revision).sort((a,b)=>b.created-a.created))
 const successfulCoverJobs=computed(()=>matchingCoverJobs.value.filter(job=>job.state==='succeeded'&&typeof job.result?.cover_id==='string'))
 const selectedCoverJob=computed(()=>successfulCoverJobs.value[0]||null)
@@ -34,19 +37,30 @@ function coverMediaUrl(jobId:string) { return `/api/v1/assets/${encodeURICompone
 async function handleCoverPlatformError(error:unknown) {
   if(isProductPlatformAuthError(error)) await router.push({path:'/settings',query:{cloudTab:'product-platform'}})
 }
-async function searchCoverProduct() {
-  if(!productName.value.trim()) { coverError.value='请先填写商品名称'; return }
-  coverError.value=''; platformProduct.value=null; productImages.value=[]; selectedReferenceId.value=''
-  searchingCoverProduct.value=true
-  try {
-    const result=await productPlatformApi.search(productName.value.trim())
-    platformProduct.value=result.product; platformScopeName.value=result.scope_name
-    if(!result.product) coverError.value='星斗未查询到匹配商品'
-  } catch(error) {
-    coverError.value=error instanceof Error?error.message:'商品查询失败，请重试'
-    await handleCoverPlatformError(error)
-  } finally { searchingCoverProduct.value=false }
+function setCoverPrompt() {
+  const original=productName.value.trim()
+  const short=shortProductName.value.trim()
+  coverPrompt.value=`${coverPromptBase}\n商品名称：${original}${short?`\n封面短名称：${short}`:''}`
 }
+async function openCoverDraftDialog() {
+  const plan=selectedPlan.value
+  if(!plan||planDirty.value||!activeAsset.value||!connected.value||!productName.value.trim()) return
+  coverError.value=''; platformProduct.value=null; productImages.value=[]; selectedReferenceId.value=''
+  shortProductName.value=''; coverPrompt.value=`${coverPromptBase}\n商品名称：${productName.value.trim()}`; shortNameBusy.value=true
+  await nextTick(); coverDialog.value?.showModal()
+  const shortNameRequest=cloudApi.shortProductName(productName.value.trim()).then(result=>{shortProductName.value=result.name;setCoverPrompt()}).catch(error=>{
+    shortProductName.value=productName.value.trim().slice(0,24); setCoverPrompt()
+    coverError.value=error instanceof Error?`简短商品名生成失败，已使用原商品名：${error.message}`:'简短商品名生成失败，已使用原商品名'
+  }).finally(()=>{shortNameBusy.value=false})
+  searchingCoverProduct.value=true
+  const productRequest=productPlatformApi.search(productName.value.trim()).then(async result=>{
+    platformProduct.value=result.product; platformScopeName.value=result.scope_name
+    if(!result.product) {coverError.value='星斗未查询到匹配商品'; return}
+    await loadCoverImages()
+  }).catch(async error=>{coverError.value=error instanceof Error?error.message:'商品查询失败，请重试';await handleCoverPlatformError(error)}).finally(()=>{searchingCoverProduct.value=false})
+  await Promise.allSettled([shortNameRequest,productRequest])
+}
+function closeCoverDraftDialog() { if(coverBusy.value) return; coverDialog.value?.close() }
 async function loadCoverImages() {
   const id=platformProduct.value?.platform_product_id||platformProduct.value?.id
   if(!id) { coverError.value='商品缺少平台商品 ID'; return }
@@ -71,6 +85,12 @@ async function generateCover() {
     await project.refresh()
   } catch(error) { coverError.value=error instanceof Error?error.message:'封面任务提交失败，请重试' }
   finally { coverBusy.value=false }
+}
+async function createCoveredDraft() {
+  const plan=selectedPlan.value
+  if(!plan||!selectedCoverJob.value||planDirty.value) return
+  await createJianyingDraft(plan,selectedCoverJob.value.id)
+  closeCoverDraftDialog()
 }
 const video=ref<HTMLVideoElement|null>(null),mediaUrl=ref('')
 let cleanupPlayback: (()=>void) | undefined
@@ -240,25 +260,6 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
                 </div>
                 <section class="cover-workflow" aria-label="剪映草稿封面">
                   <div class="cover-workflow-heading"><h3>剪映草稿封面</h3><span v-if="selectedCoverJob">已生成</span></div>
-                  <div class="cover-product-controls">
-                    <button type="button" class="btn btn-sm" :disabled="searchingCoverProduct||loadingCoverImages||!connected||!productName.trim()" @click="searchCoverProduct">{{ searchingCoverProduct?'正在查询…':'按商品名称查询星斗' }}</button>
-                    <span v-if="platformScopeName" class="hint">{{ platformScopeName }}</span>
-                  </div>
-                  <p v-if="platformProduct" class="cover-product-title">{{ platformProduct.title }}<span v-if="platformProduct.shop_name"> · {{ platformProduct.shop_name }}</span></p>
-                  <button v-if="platformProduct&&!productImages.length" type="button" class="btn btn-sm" :disabled="loadingCoverImages" @click="loadCoverImages">{{ loadingCoverImages?'正在获取图片…':'获取商品图片' }}</button>
-                  <div v-if="productImages.length" class="cover-reference-list" role="group" aria-label="选择商品参考图">
-                    <button v-for="image in productImages" :key="image.id" type="button" class="cover-reference" :class="{'is-selected':selectedReferenceId===image.id}" :aria-pressed="selectedReferenceId===image.id" :title="selectedReferenceId===image.id?'已选择参考图':'选择参考图'" @click="selectedReferenceId=image.id">
-                      <img :src="image.url" alt="商品参考图" loading="lazy" />
-                    </button>
-                  </div>
-                  <label for="cover-prompt">生成要求</label>
-                  <textarea id="cover-prompt" v-model="coverPrompt" class="textarea textarea-sm w-full" maxlength="4000" rows="3" :disabled="Boolean(activeCoverJob)||coverBusy" />
-                  <div class="cover-generate-row">
-                    <button type="button" class="btn btn-sm btn-primary" :disabled="!selectedPlan||!selectedReferenceId||planDirty||Boolean(activeCoverJob)||coverBusy" @click="generateCover">{{ activeCoverJob?'封面生成中…':coverBusy?'正在提交…':'生成封面' }}</button>
-                    <span v-if="planDirty" class="hint">先保存片段调整，再生成封面</span>
-                    <span v-else-if="activeCoverJob" class="hint">{{ stateLabels[activeCoverJob.state] }} · {{ Math.round(activeCoverJob.progress*100) }}%</span>
-                  </div>
-                  <p v-if="coverError" class="error-text" role="alert">{{ coverError }}</p>
                   <div v-if="selectedCoverJob" class="cover-generated-preview">
                     <img :src="coverMediaUrl(selectedCoverJob.id)" alt="生成的剪映草稿封面预览" />
                     <span>将随新版剪映草稿一并创建</span>
@@ -266,6 +267,7 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
                   <div v-else-if="activeCoverJob" class="cover-generated-preview cover-pending">
                     <div class="skeleton h-36 w-full"></div><span>封面生成完成后会显示预览</span>
                   </div>
+                  <p v-if="planDirty" class="hint">先保存片段调整，再生成封面</p>
                 </section>
                 <div v-if="selectedPlan?.warnings.length" class="preview-warnings"><p v-for="warning in selectedPlan.warnings" :key="warning" class="hint">{{ warning }}</p></div>
                 <details v-if="orderedPlans.length" class="saved-plans" open><summary>粗剪方案 · {{ orderedPlans.length }}</summary><div class="saved-plan-list"><div v-for="(plan,index) in orderedPlans" :key="plan.id" class="saved-plan-row"><button class="secondary saved-plan" :class="{'saved-plan-selected':plan.id===selectedPlan?.id}" :aria-pressed="plan.id===selectedPlan?.id" :disabled="busy" @click="selectPlan(plan)">方案 {{ index+1 }} · {{ seconds(plan.clips.reduce((sum,c)=>sum+c.source_end_us-c.source_start_us,0)) }} 秒 · 修订 {{ plan.revision }}</button><ConfirmPopover :title="planDeleteTitle(plan)" :message="planDeleteMessage(plan)" :confirm-action="() => deletePlan(plan.id)" :disabled="busy" v-slot="{ open, expanded, popoverId }"><button class="danger-button saved-plan-delete" :aria-label="`删除方案 ${index+1}`" title="删除方案" :disabled="busy" :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog" @click="open">删除</button></ConfirmPopover></div></div></details>
@@ -281,7 +283,7 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
                       <div class="clip-edit-row"><div class="clip-time-fields"><label :for="`clip-start-${clip.candidate_id}`" title="开始时间，单位：秒">开始<input :id="`clip-start-${clip.candidate_id}`" :value="clip.source_start_us/1e6" type="number" step="0.1" @change="clip.source_start_us=Math.round(Number(($event.target as HTMLInputElement).value)*1e6)"/></label><label :for="`clip-end-${clip.candidate_id}`" title="结束时间，单位：秒">结束<input :id="`clip-end-${clip.candidate_id}`" :value="clip.source_end_us/1e6" type="number" step="0.1" @change="clip.source_end_us=Math.round(Number(($event.target as HTMLInputElement).value)*1e6)"/></label></div><div class="roughcut-clip-actions"><button class="secondary" :disabled="index===0" :aria-label="`上移片段 ${index+1}`" title="上移" @click="moveClip(index,-1)">↑</button><button class="secondary" :disabled="index===selectedPlan.clips.length-1" :aria-label="`下移片段 ${index+1}`" title="下移" @click="moveClip(index,1)">↓</button><ConfirmPopover :title="`移除片段 ${index+1}？`" :message="clipRemoveMessage(index)" confirm-label="确定移除" :confirm-action="() => removeClip(index)" :disabled="busy || selectedPlan.clips.length===1" v-slot="{ open, expanded, popoverId }"><button class="secondary clip-remove" :disabled="busy || selectedPlan.clips.length===1" :aria-label="`移除片段 ${index+1}`" :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog" @click="open">移除</button></ConfirmPopover></div></div>
                     </article>
                   </div>
-                  <div class="roughcut-editor-footer"><p class="hint" :class="{'unsaved-hint':planDirty}">{{ planDirty?'有未保存的调整，保存后会重新生成预览。':'可调整切点、顺序，或移除不需要的片段。' }}</p><div class="roughcut-save-actions"><button class="secondary" :disabled="busy||!selectedPlan.clips.length" @click="savePlan">保存并重新预览</button><button class="primary" :disabled="busy||planDirty||!selectedPlan.clips.length" @click="createJianyingDraft(selectedPlan,selectedCoverJob?.id)">{{ selectedCoverJob?'生成带封面的新版草稿':'生成剪映草稿' }}</button><button v-if="selectedCoverJob" class="secondary" :disabled="busy||planDirty||!selectedPlan.clips.length" @click="createJianyingDraft(selectedPlan)">不带封面</button></div></div>
+                  <div class="roughcut-editor-footer"><p class="hint" :class="{'unsaved-hint':planDirty}">{{ planDirty?'有未保存的调整，保存后会重新生成预览。':'可调整切点、顺序，或移除不需要的片段。' }}</p><div class="roughcut-save-actions"><button class="secondary" :disabled="busy||!selectedPlan.clips.length" @click="savePlan">保存并重新预览</button><button class="primary" :disabled="busy||planDirty||!selectedPlan.clips.length" @click="createJianyingDraft(selectedPlan)">生成剪映草稿</button><button class="secondary" :disabled="busy||planDirty||!selectedPlan.clips.length||!connected||!productName.trim()" @click="openCoverDraftDialog">生成带封面剪映草稿</button></div></div>
                 </template>
                 <div v-else class="empty editor-empty">填写商品资料和剪辑要求<br/>分析完成后，入选片段会显示在这里</div>
               </div>
@@ -291,4 +293,37 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
         </WorkspaceSplit>
       </template>
 <section v-else class="panel empty">项目暂未加载，请刷新状态或返回视频项目。<button class="secondary" @click="workspace.goProjects()">返回视频项目</button></section>
+
+<dialog ref="coverDialog" class="modal" aria-labelledby="cover-dialog-title" @cancel.prevent="closeCoverDraftDialog">
+  <div class="modal-box cover-dialog-box">
+    <h3 id="cover-dialog-title">生成带封面剪映草稿</h3>
+    <p class="hint">先选择商品参考图，再生成草稿列表封面。</p>
+    <div class="cover-dialog-product">
+      <strong>商品：{{ productName }}</strong>
+      <span v-if="platformProduct?.title">星斗匹配：{{ platformProduct.title }}</span>
+      <span v-if="platformScopeName" class="hint">{{ platformScopeName }}</span>
+    </div>
+    <div v-if="searchingCoverProduct||loadingCoverImages" class="cover-dialog-loading" aria-live="polite">
+      <span class="loading loading-spinner loading-sm"></span> 正在获取商品图片…
+    </div>
+    <div v-else-if="productImages.length" class="cover-dialog-images" role="group" aria-label="选择商品参考图">
+      <button v-for="image in productImages" :key="image.id" type="button" class="cover-reference" :class="{'is-selected':selectedReferenceId===image.id}" :aria-pressed="selectedReferenceId===image.id" @click="selectedReferenceId=image.id">
+        <img :src="image.url" alt="商品参考图" loading="lazy" />
+        <span v-if="selectedReferenceId===image.id">已选择</span>
+      </button>
+    </div>
+    <p v-else class="hint">暂未获取到商品图片，请检查星斗登录状态或商品名称。</p>
+    <label for="cover-prompt-dialog">生成要求</label>
+    <textarea id="cover-prompt-dialog" v-model="coverPrompt" class="textarea textarea-sm w-full" maxlength="4000" rows="5" :disabled="Boolean(activeCoverJob)||coverBusy" />
+    <p v-if="shortNameBusy" class="hint">正在让文本模型生成简短商品名称…</p>
+    <p v-else-if="shortProductName" class="cover-short-name">封面短名称：{{ shortProductName }}</p>
+    <p v-if="coverError" class="error-text" role="alert">{{ coverError }}</p>
+    <div class="modal-action">
+      <button type="button" class="btn" :disabled="coverBusy" @click="closeCoverDraftDialog">关闭</button>
+      <button type="button" class="btn btn-primary" :disabled="!selectedPlan||!selectedReferenceId||planDirty||Boolean(activeCoverJob)||coverBusy||shortNameBusy" @click="generateCover">{{ activeCoverJob?'封面生成中…':coverBusy?'正在提交…':'生成封面' }}</button>
+      <button v-if="selectedCoverJob" type="button" class="btn btn-success" :disabled="busy||planDirty" @click="createCoveredDraft">创建带封面草稿</button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop" @submit.prevent="closeCoverDraftDialog"><button>关闭</button></form>
+</dialog>
 </template>

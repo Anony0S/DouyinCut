@@ -594,6 +594,14 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
 .cover-generated-preview img, .cover-generated-preview .skeleton { width: 96px; height: 144px; flex: none; border-radius: 6px; background: var(--surface-soft); object-fit: contain; }
 .cover-pending { min-height: 144px; }
 .cover-generated-preview.cover-pending { align-items: center; }
+.cover-dialog-box { width: min(760px, calc(100vw - 2rem)); max-width: 760px; }
+.cover-dialog-box h3 { margin: 0; font-size: 18px; }
+.cover-dialog-product { display: grid; gap: 3px; margin: 14px 0 10px; color: var(--text-secondary); font-size: 13px; }
+.cover-dialog-loading { display: flex; align-items: center; gap: 8px; min-height: 100px; color: var(--text-muted); }
+.cover-dialog-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 9px; max-height: 300px; overflow: auto; padding: 2px; }
+.cover-dialog-images .cover-reference { position: relative; width: 100%; aspect-ratio: 3 / 4; }
+.cover-dialog-images .cover-reference span { position: absolute; right: 3px; bottom: 3px; left: 3px; padding: 3px; border-radius: 4px; background: color-mix(in srgb, var(--color-primary) 85%, transparent); color: white; font-size: 10px; }
+.cover-short-name { margin: 7px 0 0; color: var(--text-secondary); font-size: 12px; }
 .saved-plans summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .saved-plans { flex: none; margin-top: 14px; }
 .saved-plan-list { display: grid; gap: 6px; margin-top: 8px; }

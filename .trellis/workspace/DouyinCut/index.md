@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-11-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~157 | Active |
+| `journal-1.md` | ~194 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-11-17 | 新增带封面剪映草稿弹窗流程 | - | `master` |
 | 5 | 2026-11-17 | 新增商品封面与剪映草稿封面 | - | `master` |
 | 4 | 2026-11-17 | 商品查询显示平台上架时间 | - | `master` |
 | 3 | 2026-11-15 | 迁出并删除根目录规格 | - | `master` |

@@ -155,3 +155,40 @@ Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft
 ### Next Steps
 
 - 填写真实生图服务 Base URL、模型 ID 和 API Key；用真实星斗账号获取 data.images；在目标剪映版本确认草稿列表读取两个封面字段
+
+
+## Session 6: 新增带封面剪映草稿弹窗流程
+<!-- trellis-session: v=2 fp=a80973dc38d509ef -->
+
+**Date**: 2026-11-17
+**Task**: 新增带封面剪映草稿弹窗流程
+**Branch**: `master`
+
+### Summary
+
+完成素材与粗剪页的带封面剪映草稿流程：弹窗自动查询星斗商品并下载 data.images 全部图片，选择参考图，调用文本模型生成简短商品名称并写入可编辑生成要求，生成封面后创建保留旧草稿的新版剪映草稿。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md), [.trellis/spec/project/workspace.md](../../spec/project/workspace.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Main Changes
+
+- 新增短商品名称接口和弹窗式封面生成流程，保留原生成剪映草稿入口。
+- 更新工作台、API 规格和封面研究记录，记录放弃直接修改旧草稿的原因。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端 pytest：368 passed，2 warnings。
+- [OK] pnpm exec vue-tsc --noEmit：通过。
+- [OK] pnpm build：通过。
+- [OK] git diff --check：通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 使用真实星斗账号、独立生图服务和目标剪映版本完成外部兼容验收。

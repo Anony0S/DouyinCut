@@ -21,7 +21,8 @@ from .media.editing import make_batches, remap_subtitles, validate_plan
 from .media.processing import diagnostics, probe_stream_timing
 from .media.thumbnails import PreviewBusy, ThumbnailCache
 from .ai.providers import CloudConfig, ProviderError, asr_api_key, model_api_key
-from .ai.connection import ModelConnectionTestRequest, check_model_connection, OssConnectionTestRequest, check_oss_connection
+from .ai.connection import (ModelConnectionTestRequest, check_model_connection, OssConnectionTestRequest,
+                            check_oss_connection, generate_short_product_name)
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
 from .core.storage import SessionStopping, Store
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, WorkspaceLayout,
@@ -47,6 +48,10 @@ class CoverGenerationRequest(Model):
     revision: int = Field(ge=1)
     reference_id: str = Field(min_length=1, max_length=100)
     prompt: str = Field(min_length=1, max_length=4000)
+
+
+class ShortProductNameRequest(Model):
+    product_name: str = Field(min_length=1, max_length=200)
 
 
 class ProductImagesRequest(Model):
@@ -695,6 +700,13 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.post("/api/v1/settings/cloud/test-model")
     def test_cloud_model(body: ModelConnectionTestRequest):
         return check_model_connection(body)
+
+    @app.post("/api/v1/settings/cloud/short-product-name")
+    def short_product_name(body: ShortProductNameRequest):
+        try:
+            return {"name": generate_short_product_name(body.product_name, cloud_config())}
+        except ProviderError as exc:
+            raise HTTPException(422, str(exc)) from None
 
     @app.post("/api/v1/settings/cloud/test-oss")
     def test_cloud_oss(body: OssConnectionTestRequest):

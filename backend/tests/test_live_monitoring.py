@@ -596,6 +596,78 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertIn(monitor["id"], worker.processes, "retrying product events must not stop recording")
         self.assertEqual(self.live.take_product_listener_retries(), [])
 
+    def test_automatic_product_retry_backoff_and_stable_reset(self):
+        from types import SimpleNamespace
+        monitor = self.live.create_monitor("https://live.douyin.com/automatic-retry", "room")
+        session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "automatic-retry")
+        with patch.object(LiveMonitorWorker, "_recover_interrupted_sessions"):
+            worker = LiveMonitorWorker(self.settings, resolver=object())
+        monitor_id = monitor["id"]
+        dead_thread = SimpleNamespace(is_alive=lambda: False)
+        worker.product_threads[monitor_id] = (dead_thread, None, session_id)
+        with patch("app.live_monitoring.service.time.monotonic", return_value=100), \
+             patch("app.live_monitoring.service.random.uniform", return_value=1), \
+             patch.object(worker, "_start_python_product_listener") as restart:
+            worker._process_automatic_product_retry(monitor, session_id)
+            restart.assert_called_once_with(monitor, session_id)
+            worker.product_threads[monitor_id] = (SimpleNamespace(is_alive=lambda: False), None, session_id)
+            worker._process_automatic_product_retry(monitor, session_id)
+            self.assertEqual(worker.product_retry_state[monitor_id]["due"], 105)
+            self.assertIn("间隔约 5 秒", self._session_details()[0]["product_listener"]["detail"])
+            worker._process_automatic_product_retry(monitor, session_id)
+            self.assertEqual(restart.call_count, 1)
+        with patch("app.live_monitoring.service.time.monotonic", return_value=105), \
+             patch.object(worker, "_start_python_product_listener") as restart:
+            worker._process_automatic_product_retry(monitor, session_id)
+            restart.assert_called_once_with(monitor, session_id)
+        worker.product_threads[monitor_id] = (SimpleNamespace(is_alive=lambda: True), None, session_id)
+        with patch("app.live_monitoring.service.time.time", return_value=100):
+            self.live.set_product_listener_state(session_id, "listening")
+        with patch("app.live_monitoring.service.time.time", return_value=160):
+            worker._process_automatic_product_retry(monitor, session_id)
+        self.assertEqual(worker.product_retry_state[monitor_id]["failures"], 0)
+
+    def test_automatic_product_retry_delays_are_bounded_and_start_failures_retry(self):
+        monitor = self.live.create_monitor("https://live.douyin.com/retry-failures", "room")
+        session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "retry-failures")
+        with patch.object(LiveMonitorWorker, "_recover_interrupted_sessions"):
+            worker = LiveMonitorWorker(self.settings, resolver=object())
+        with patch("app.live_monitoring.service.time.monotonic", return_value=100), \
+             patch("app.live_monitoring.service.random.uniform", return_value=1), \
+             patch.object(worker, "_start_python_product_listener", side_effect=RuntimeError):
+            worker._process_automatic_product_retry(monitor, session_id)
+            for expected in (5, 10, 20, 40, 60, 60):
+                worker._process_automatic_product_retry(monitor, session_id)
+                self.assertEqual(worker.product_retry_state[monitor["id"]]["due"], 100 + expected)
+                worker.product_retry_state[monitor["id"]]["due"] = 100
+                worker._process_automatic_product_retry(monitor, session_id)
+
+    def test_stopped_worker_does_not_process_product_retries(self):
+        import threading
+
+        with patch.object(LiveMonitorWorker, "_recover_interrupted_sessions"):
+            worker = LiveMonitorWorker(self.settings, resolver=object())
+        stop = threading.Event()
+        stop.set()
+        with patch.object(worker, "_process_product_listener_retries") as retry:
+            worker.run_once(stop=stop)
+        retry.assert_not_called()
+
+    def test_manual_product_retry_cancels_pending_automatic_retry(self):
+        from types import SimpleNamespace
+        monitor = self.live.create_monitor("https://live.douyin.com/manual-retry", "room")
+        session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "manual-retry")
+        self.live.set_product_listener_state(session_id, "error", "等待自动重试")
+        with patch.object(LiveMonitorWorker, "_recover_interrupted_sessions"):
+            worker = LiveMonitorWorker(self.settings, resolver=object())
+        worker.product_threads[monitor["id"]] = (SimpleNamespace(is_alive=lambda: False), None, session_id)
+        worker.product_retry_state[monitor["id"]] = {"session_id": session_id, "failures": 2, "thread": None, "due": 999}
+        self.live.request_product_listener_retry(monitor["id"], session_id)
+        with patch.object(worker, "_start_python_product_listener") as restart:
+            worker._process_product_listener_retries()
+        restart.assert_called_once()
+        self.assertIsNone(worker.product_retry_state[monitor["id"]]["due"])
+
     def test_current_product_snapshot_is_listed_and_name_lookup_updates_it(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-current-product", "room")
         session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "current-product")

@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import subprocess
 import tempfile
@@ -30,6 +31,8 @@ SEGMENT_PROBE_RETRY_SECONDS = 60
 # A connected listener that receives nothing is indistinguishable from a working one
 # unless it says so; this is how long it stays quiet before the badge explains itself.
 LISTENER_SILENCE_SECONDS = 180
+PRODUCT_RETRY_STABLE_SECONDS = 60
+PRODUCT_RETRY_DELAYS = (5, 10, 20, 40, 60)
 PRODUCT_CLIP_JOB = "live_product_clips"
 ACTIVE_JOB_STATES = ("queued", "running", "pause_requested", "paused", "cancel_requested")
 
@@ -1338,6 +1341,7 @@ class LiveMonitorWorker:
         self.product_threads: dict[str, tuple[threading.Thread, threading.Event, str]] = {}
         self.product_clients: dict[str, object] = {}
         self.product_catalogs: dict[str, ProductCatalogRefresher] = {}
+        self.product_retry_state: dict[str, dict] = {}
         self.last_check: dict[str, float] = {}
         self.seen_controls: dict[str, float] = {}
         self.segment_probe_retry_at: dict[str, float] = {}
@@ -1458,6 +1462,8 @@ class LiveMonitorWorker:
             session_id = request["session_id"]
             if monitor["current_session_id"] != session_id:
                 continue
+            if monitor["record_held"]:
+                continue
             with self.store.connection() as conn:
                 active = conn.execute(
                     "SELECT 1 FROM live_sessions WHERE id=? AND monitor_id=? AND status='recording'",
@@ -1470,12 +1476,50 @@ class LiveMonitorWorker:
                 if not request["reconnect"] and catalog is not None:
                     catalog.request_refresh(requested_at=request["requested"])
                 else:
+                    retry = self.product_retry_state.get(monitor["id"])
+                    if retry is not None:
+                        retry["due"] = None
                     self._start_python_product_listener(
                         monitor, session_id, refresh_catalog=bool(request["refresh_catalog"])
                     )
             except Exception as exc:
                 detail = f"商品监听重试失败：{type(exc).__name__}"
                 self.live.set_product_listener_state(session_id, "error", detail)
+
+    def _process_automatic_product_retry(self, monitor: dict, session_id: str):
+        monitor_id = monitor["id"]
+        managed = self.product_threads.get(monitor_id)
+        if managed is not None and managed[2] != session_id:
+            return
+        thread = managed[0] if managed is not None else None
+        now = time.monotonic()
+        retry = self.product_retry_state.get(monitor_id)
+        if retry is None or retry["session_id"] != session_id:
+            retry = {"session_id": session_id, "failures": 0, "thread": object(), "due": None}
+            self.product_retry_state[monitor_id] = retry
+        if thread is not None and thread.is_alive():
+            with self.store.connection() as conn:
+                listener = conn.execute(
+                    "SELECT status,updated FROM live_product_listener_state WHERE session_id=?", (session_id,)
+                ).fetchone()
+            if listener and listener["status"] == "listening" and time.time() - listener["updated"] >= PRODUCT_RETRY_STABLE_SECONDS:
+                retry["failures"] = 0
+            return
+        if retry["thread"] is not thread:
+            retry["thread"] = thread
+            failures = retry["failures"]
+            delay = 0 if failures == 0 else random.uniform(0.8, 1.0) * PRODUCT_RETRY_DELAYS[min(failures - 1, len(PRODUCT_RETRY_DELAYS) - 1)]
+            retry["failures"] = failures + 1
+            retry["due"] = now + delay
+            detail = "商品连接中断，正在自动重试" if not delay else f"商品连接中断，自动重试等待中（间隔约 {math.ceil(delay)} 秒）"
+            self.live.set_product_listener_state(session_id, "error", detail)
+        if retry["due"] is not None and now >= retry["due"]:
+            retry["due"] = None
+            try:
+                self._start_python_product_listener(monitor, session_id)
+            except Exception as exc:
+                retry["thread"] = object()
+                self.live.set_product_listener_state(session_id, "error", f"商品监听重试失败：{type(exc).__name__}")
 
     def _run_python_product_listener(self, monitor_id: str, session_id: str,
                                      room_url: str, stop_event: threading.Event, *, refresh_catalog: bool = False):
@@ -1702,6 +1746,7 @@ class LiveMonitorWorker:
         if not managed:
             return
         process, session_id = managed
+        self.product_retry_state.pop(monitor["id"], None)
         returncode = process.poll()
         self._stop_product_listener(monitor["id"])
         self._stop_process(process)
@@ -1730,6 +1775,8 @@ class LiveMonitorWorker:
         show_toast(f"{monitor['name'] or '抖音直播间'} 已下播", "本场直播录制已结束并完成收尾")
 
     def run_once(self, now: float | None = None, stop: threading.Event | None = None):
+        if stop and stop.is_set():
+            return
         now = now or time.time()
         self._process_product_listener_retries()
         for monitor in self.live.all_monitors():
@@ -1748,6 +1795,8 @@ class LiveMonitorWorker:
                     self._end_recorder(monitor, "offline")
                     self.live.set_monitor_state(monitor_id, "live")
                     continue
+                else:
+                    self._process_automatic_product_retry(monitor, session_id)
             # A settings change or start / stop request is checked right away instead of waiting for the poll.
             requested = monitor["updated_controls"] != self.seen_controls.get(monitor_id)
             if not requested and now - self.last_check.get(monitor_id, 0) < self.poll_seconds:

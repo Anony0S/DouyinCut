@@ -51,8 +51,16 @@
 .live-room-filters { display: flex; margin: 14px 16px 10px; }
 .live-room-filters > .btn { flex: 1; }
 .live-room-items { flex: 1; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 4px 9px 10px; }
-.live-room-item { position: relative; display: block; width: 100%; margin-bottom: 7px; padding: 15px 12px; border: 1px solid transparent; border-radius: 9px; background: var(--color-base-100); color: var(--live-ink); text-align: left; cursor: pointer; }
+.live-room-item { position: relative; display: block; width: 100%; margin-bottom: 7px; padding: 15px 12px 15px 45px; border: 1px solid transparent; border-radius: 9px; background: var(--color-base-100); color: var(--live-ink); text-align: left; cursor: pointer; }
 .live-room-item:focus-visible { outline: 2px solid var(--live-blue); outline-offset: 2px; }
+.live-room-drag-handle { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 20px; height: calc(100% - 20px); padding: 0; border: 0; border-radius: 4px; color: var(--text-muted); background: transparent; cursor: grab; touch-action: none; }
+.live-room-drag-handle:hover { background: var(--live-soft); color: var(--live-ink); }
+.live-room-drag-handle:active { cursor: grabbing; }
+.live-room-drag-handle:disabled { opacity: .4; cursor: default; }
+.live-room-item.is-dragging { opacity: .5; }
+.live-room-item.drop-before::before, .live-room-item.drop-after::after { content: ""; position: absolute; left: 4px; right: 4px; height: 3px; border-radius: 2px; background: var(--color-primary); }
+.live-room-item.drop-before::before { top: -5px; }
+.live-room-item.drop-after::after { bottom: -5px; }
 .live-room-settings-trigger { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .live-room-settings-trigger:hover, .live-room-settings-trigger[aria-expanded="true"] { background: var(--accent-soft); color: var(--text-secondary); }
 .live-room-settings-trigger .live-icon { width: 15px; height: 15px; }
@@ -286,6 +294,9 @@
   .live-segment-list { flex: none; min-height: 175px; max-height: 330px; }
   .live-room-items { display: flex; gap: 10px; min-height: 0; max-height: 260px; padding: 5px 13px 12px; overflow-x: auto; }
   .live-room-item { flex: 0 0 235px; margin: 0; }
+  .live-room-item.drop-before::before, .live-room-item.drop-after::after { top: 4px; bottom: 4px; width: 3px; height: auto; }
+  .live-room-item.drop-before::before { left: -7px; right: auto; }
+  .live-room-item.drop-after::after { right: -7px; left: auto; }
   .live-room-list-heading { padding: 15px 17px 12px; }
   .live-room-filters { width: 230px; margin-top: 10px; }
   .live-room-list-foot { display: none; }

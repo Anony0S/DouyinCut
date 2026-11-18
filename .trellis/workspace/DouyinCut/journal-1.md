@@ -873,3 +873,77 @@ Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft
 ### Status
 
 [OK] **Completed**
+
+
+## Session 33: 本地清理七天前未使用文件
+<!-- trellis-session: v=2 fp=b04dc121436e1bce -->
+
+**Date**: 2026-11-18
+**Task**: 本地清理七天前未使用文件
+
+### Summary
+
+本地设置新增确认式清理入口；仅清除超过七天且无项目 / 任务引用的受管生成产物与已知临时文件，用户数据和有效产物受保护。实现及清理边界已写入设置、接口、数据与验收规格。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md), [.trellis/spec/project/api.md](../../spec/project/api.md), [.trellis/spec/project/data-media.md](../../spec/project/data-media.md), [.trellis/spec/project/acceptance.md](../../spec/project/acceptance.md)
+
+### Main Changes
+
+- 新增清理服务、认证 API、本地设置按钮与二次确认；删除失败时按实际成功结果统计释放空间。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端 397 项通过（1 条既有并发线程告警）；桌面 pnpm build 通过；清理模块最终 7 项定向测试通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 等待用户手动验证清理结果后再按请求提交 Git。
+
+
+## Session 34: 调整封面生成尺寸与裁剪
+<!-- trellis-session: v=2 fp=d33508ef545ca915 -->
+
+**Date**: 2026-11-18
+**Task**: 调整封面生成尺寸与裁剪
+**Branch**: `master`
+
+### Summary
+
+封面生图请求不指定像素尺寸；返回图按比例保留短边并居中裁切，已有 3:4 不裁切，像素取整后重复处理保持画面。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 35: 封面原图查看
+<!-- trellis-session: v=2 fp=0f05aaa6d5613cf4 -->
+
+**Date**: 2026-11-18
+**Task**: 封面原图查看
+**Branch**: `master`
+
+### Summary
+
+成功封面保留生图服务返回的原图，预览弹窗可查看；草稿继续使用处理后的 3:4 JPG。后端测试和前端构建通过，真实云端及剪映验收待进行。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

@@ -62,6 +62,36 @@ async function openWorkDirectory() {
     openDialog({ title: "无法打开工作目录", message: String(error), kind: "error" });
   }
 }
+
+type CleanupResult = {
+  deleted_files: number;
+  deleted_directories: number;
+  retained_files: number;
+  bytes_reclaimed: number;
+};
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function confirmCleanup() {
+  openDialog({
+    title: "清理七天前未使用的文件",
+    message: "将清理应用生成目录中超过七天且已无项目或任务引用的文件，以及超期的未完成临时文件。原始视频、直播录制、仍被引用的导出和封面、日志、数据库与设置都会保留。此操作无法撤销。",
+    kind: "confirm",
+    action: async () => {
+      const result = await api<CleanupResult>("/settings/cleanup-unused-files", "POST");
+      return {
+        title: "清理完成",
+        message: `已删除 ${result.deleted_files} 个文件和 ${result.deleted_directories} 个目录，释放 ${formatBytes(result.bytes_reclaimed)}。${result.retained_files ? `另有 ${result.retained_files} 个文件因占用或权限原因保留。` : ""}`,
+        kind: "info",
+      };
+    },
+  });
+}
 </script>
 
 <template>
@@ -69,7 +99,7 @@ async function openWorkDirectory() {
     <div class="page-heading">
       <div>
         <h1>本地设置</h1>
-        <p>管理本机工作目录和应用版本。</p>
+        <p>管理本机工作目录、清理未使用文件和应用版本。</p>
       </div>
     </div>
 
@@ -82,6 +112,16 @@ async function openWorkDirectory() {
         <div class="local-setting-actions">
           <button class="btn btn-outline" type="button" @click="openWorkDirectory">打开目录</button>
           <button class="btn btn-outline" type="button" @click="changeWorkDirectory">更换目录</button>
+        </div>
+      </li>
+
+      <li class="list-row">
+        <div class="local-setting-copy">
+          <h2>清理未使用文件</h2>
+          <p>清理应用生成目录中超过七天且没有项目或任务引用的文件，释放本机空间。</p>
+        </div>
+        <div class="local-setting-actions">
+          <button class="btn btn-outline" type="button" @click="confirmCleanup">清理文件</button>
         </div>
       </li>
 

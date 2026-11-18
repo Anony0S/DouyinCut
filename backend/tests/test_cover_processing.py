@@ -14,7 +14,7 @@ class CoverProcessingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             settings = Settings(data_dir=root, ffmpeg=shutil.which("ffmpeg"), ffprobe=shutil.which("ffprobe"))
-            for width, height, expected in [(300, 400, (300, 400)), (320, 480, (318, 424)), (500, 400, (300, 400))]:
+            for width, height, expected in [(300, 400, (300, 400)), (320, 480, (320, 427)), (500, 400, (300, 400))]:
                 with self.subTest(width=width, height=height):
                     source = root / f"{width}-{height}.jpg"
                     target = root / f"{width}-{height}-out.jpg"
@@ -26,3 +26,6 @@ class CoverProcessingTests(unittest.TestCase):
                     self.assertEqual((data["streams"][0]["width"], data["streams"][0]["height"]), expected)
                     if width * 4 == height * 3:
                         self.assertEqual(source.read_bytes(), target.read_bytes())
+                    second_target = root / f"{width}-{height}-second.jpg"
+                    self.assertEqual(prepare_cover_jpeg(target, second_target, settings), expected)
+                    self.assertEqual(target.read_bytes(), second_target.read_bytes())

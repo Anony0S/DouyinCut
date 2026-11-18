@@ -60,7 +60,7 @@ def run_process(args: list[str], checkpoint: Callable | None = None, timeout: in
 
 
 def prepare_cover_jpeg(source: Path, target: Path, settings: Settings, checkpoint: Callable | None = None) -> tuple[int, int]:
-    """Keep the largest centered 3:4 rectangle and avoid resizing the image."""
+    """Crop around the center to 3:4 without resizing or trimming the shorter dimension."""
     info = json.loads(run_process([
         settings.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
         "stream=width,height,codec_name", "-of", "json", str(source),
@@ -69,10 +69,14 @@ def prepare_cover_jpeg(source: Path, target: Path, settings: Settings, checkpoin
     if not streams:
         raise MediaError("无法读取封面图片尺寸")
     width, height = int(streams[0]["width"]), int(streams[0]["height"])
-    factor = min(width // 3, height // 4)
-    if factor < 1:
+    if width < 1 or height < 1:
         raise MediaError("封面图片尺寸过小")
-    out_width, out_height = factor * 3, factor * 4
+    if width * 4 < height * 3:
+        out_width, out_height = width, (width * 4 + 1) // 3
+    else:
+        out_width, out_height = (height * 3 + 2) // 4, height
+    if out_width < 1 or out_height < 1:
+        raise MediaError("封面图片尺寸过小")
     if (width, height) == (out_width, out_height) and streams[0].get("codec_name") == "mjpeg":
         shutil.copyfile(source, target)
     else:

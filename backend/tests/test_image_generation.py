@@ -2,7 +2,8 @@ import base64
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 import httpx
 
@@ -14,6 +15,33 @@ PNG = b"\x89PNG\r\n\x1a\nfixture"
 
 
 class ImageGenerationTests(unittest.TestCase):
+    def test_cover_worker_retains_original_bytes(self):
+        from app.core.config import Settings
+        from app.worker import Worker
+
+        with tempfile.TemporaryDirectory() as temp:
+            worker = Worker(Settings(Path(temp)))
+            worker.store = Mock()
+            worker.store.cached.return_value = None
+            plan = SimpleNamespace(id='plan', revision=1, clips=[SimpleNamespace(source_asset_id='asset')])
+            context = Mock()
+            job = {'id': 'job_test', 'kind': 'cover', 'payload': {
+                'asset_id': 'asset', 'plan_id': 'plan', 'revision': 1,
+                'config': {'image_base_url': 'https://images.example/v1', 'image_model': 'model'},
+                'reference_path': 'reference.jpg', 'prompt': 'cover'}}
+            def convert(source, target, settings, checkpoint):
+                target.write_bytes(b'converted')
+                return 300, 400
+            with patch('app.worker.Plan.model_validate', return_value=plan), \
+                 patch('app.core.credentials.read_secret', return_value='key'), \
+                 patch('app.ai.providers.interruptible_network_call', return_value=(PNG, 'image/png')), \
+                 patch('app.media.processing.prepare_cover_jpeg', side_effect=convert):
+                result = worker.execute(job, context)
+            self.assertEqual(Path(result['original_path']).read_bytes(), PNG)
+            self.assertEqual(result['original_content_type'], 'image/png')
+            self.assertEqual(Path(result['path']).read_bytes(), b'converted')
+            self.assertFalse(Path(temp, 'covers', 'asset', 'job_test.source.png').exists())
+
     def test_cloud_config_validates_and_builds_images_edit_endpoint(self):
         config = CloudConfig(image_base_url="https://images.example/v1", image_model="cover-model")
         config.require_image_connection()
@@ -35,8 +63,7 @@ class ImageGenerationTests(unittest.TestCase):
                 self.assertIn(b'cover-model', body)
                 self.assertIn(b'name="prompt"', body)
                 self.assertIn(b'keep the garment', body)
-                self.assertIn(b'name="size"', body)
-                self.assertIn(b'1024x1536', body)
+                self.assertIn(b'name="size"\r\n\r\nauto\r\n', body)
                 self.assertIn(b'name="image"; filename="reference.jpg"', body)
                 self.assertIn(b"reference-image", body)
                 return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(PNG).decode()}]})
@@ -46,7 +73,7 @@ class ImageGenerationTests(unittest.TestCase):
                 result, content_type = request_image({
                     "image_base_url": "https://images.example/v1", "image_model": "cover-model",
                     "image_timeout_seconds": 30,
-                }, "image-fixture-key", str(source), "keep the garment", "1024x1536")
+                }, "image-fixture-key", str(source), "keep the garment")
             self.assertEqual(result, PNG)
             self.assertEqual(content_type, "image/png")
 
@@ -62,7 +89,7 @@ class ImageGenerationTests(unittest.TestCase):
                     request_image({
                         "image_base_url": "https://images.example/v1", "image_model": "cover-model",
                         "image_timeout_seconds": 30,
-                    }, "image-fixture-key", str(source), "make a cover", "1024x1536")
+                    }, "image-fixture-key", str(source), "make a cover")
 
     def test_product_image_download_requires_expected_https_host(self):
         for url in ("http://p3-aio.ecombdimg.com/image.jpg", "https://example.com/image.jpg",

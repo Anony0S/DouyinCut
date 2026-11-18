@@ -17,6 +17,7 @@ from pydantic import Field
 from .core.config import Settings
 from .core.logs import LogLibrary, configure_logging
 from .core.credentials import read_secret, secret_preview, storage_status, write_secret
+from .cleanup import cleanup_unused_files
 from .core.domain import Asset, Candidate, Model, Plan, Product, Transcript
 from .media.editing import make_batches, remap_subtitles, validate_plan
 from .media.processing import diagnostics, probe_stream_timing
@@ -165,6 +166,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         except OSError as exc:
             raise HTTPException(409, f"打开工作目录失败：{exc}") from None
         return {"opened": True}
+
+    @app.post("/api/v1/settings/cleanup-unused-files")
+    def cleanup_old_unused_files():
+        return cleanup_unused_files(store, settings.data_dir)
 
     @app.get("/api/v1/logs")
     def list_logs():
@@ -689,6 +694,20 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if not path.is_file() or not path.is_relative_to(root):
             raise HTTPException(410, "封面文件已移动或删除")
         return FileResponse(path, media_type=job["result"].get("content_type", "image/png"))
+
+    @app.get("/api/v1/assets/{asset_id}/covers/{cover_id}/original")
+    def generated_cover_original(asset_id: str, cover_id: str):
+        job = store.job(cover_id)
+        if job["kind"] != "cover" or job["state"] != "succeeded" or job["payload"].get("asset_id") != asset_id:
+            raise HTTPException(404, "找不到封面")
+        original = job["result"].get("original_path")
+        if not isinstance(original, str) or not original:
+            raise HTTPException(410, "原图不可用，请重新生成封面")
+        path = Path(original).resolve()
+        root = (settings.data_dir / "covers" / asset_id).resolve()
+        if not path.is_file() or not path.is_relative_to(root):
+            raise HTTPException(410, "原图已移动或删除，请重新生成封面")
+        return FileResponse(path, media_type=job["result"].get("original_content_type", "application/octet-stream"))
 
     def cloud_config():
         try:

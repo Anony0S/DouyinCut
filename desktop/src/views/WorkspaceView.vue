@@ -28,6 +28,9 @@ const platformProduct=ref<XingdouProduct|null>(null), platformScopeName=ref('')
 const coverPrompt=ref('')
 const coverError=ref(''), coverBusy=ref(false), searchingCoverProduct=ref(false), loadingCoverImages=ref(false)
 const coverDialog=ref<HTMLDialogElement|null>(null)
+const originalDialog=ref<HTMLDialogElement|null>(null)
+const originalState=ref<'loading'|'loaded'|'error'>('loading')
+const originalJobId=ref('')
 const coverPreviewState=ref<'loading'|'loaded'|'error'>('loading')
 const coverPromptBase='生成一张用于抖音商品短视频的竖版封面，画面比例严格为3:4。请从商品名称中提炼一个简短、准确、易读的中文标题。封面必须同时展示人物上身效果图和商品单品图：人物穿着商品作为主要视觉主体，清楚呈现真实上身效果；将同款未上身的单品图以较小尺寸放在人物旁边，作为辅助对照，不能省略或用文字代替。两种商品展示需款式、颜色和细节一致；单品图可用平铺或电商静物形式，不要再添加其他人物或商品。标题与人物主体清晰醒目、互不遮挡，商品单品图保持可辨识但视觉权重低于上身图。若参考图包含人物，尽量忠实保留人物穿着商品的效果；若参考图仅为单品图，则以它还原同款商品并生成自然可信的上身效果，同时保留较小的单品展示。采用简洁、有质感且衬托商品的背景，标题、人物和单品图避开边缘并留出安全空间。标题精炼，不添加价格、折扣、功效或名称之外的营销承诺。不要添加水印、平台标识、无关文字、额外商品或与参考商品不符的细节。'
 const matchingCoverJobs=computed(()=>assetJobs.value.filter(job=>job.kind==='cover'&&job.payload?.plan_id===selectedPlan.value?.id&&job.payload?.revision===selectedPlan.value?.revision).sort((a,b)=>b.created-a.created))
@@ -36,6 +39,9 @@ const selectedCoverJob=computed(()=>successfulCoverJobs.value[0]||null)
 const activeCoverJob=computed(()=>matchingCoverJobs.value.find(job=>['queued','running','pause_requested','paused','cancel_requested'].includes(job.state))||null)
 watch(()=>selectedCoverJob.value?.id,()=>{coverPreviewState.value='loading'})
 function coverMediaUrl(jobId:string) { return `/api/v1/assets/${encodeURIComponent(assetId.value)}/covers/${encodeURIComponent(jobId)}/media` }
+function originalMediaUrl(jobId:string) { return `/api/v1/assets/${encodeURIComponent(assetId.value)}/covers/${encodeURIComponent(jobId)}/original` }
+async function openOriginal() { originalState.value='loading'; originalJobId.value=selectedCoverJob.value?.id||''; await nextTick(); originalDialog.value?.showModal() }
+function closeOriginal() { originalDialog.value?.close(); originalJobId.value='' }
 function markCoverPreviewLoaded() { coverPreviewState.value='loaded' }
 function markCoverPreviewFailed() { coverPreviewState.value='error' }
 async function handleCoverPlatformError(error:unknown) {
@@ -325,7 +331,10 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
         <textarea id="cover-prompt-dialog" v-model="coverPrompt" class="textarea textarea-sm w-full" maxlength="4000" rows="14" :disabled="Boolean(activeCoverJob)||coverBusy" />
       </section>
       <section class="cover-dialog-preview" aria-label="生成的封面预览">
-        <span class="cover-dialog-preview-label">生成封面</span>
+        <div class="cover-preview-heading">
+          <span class="cover-dialog-preview-label">生成封面</span>
+          <button v-if="selectedCoverJob" type="button" class="btn btn-ghost btn-xs" @click="openOriginal">查看原图</button>
+        </div>
         <div class="cover-preview-frame" :aria-busy="Boolean(activeCoverJob)||Boolean(selectedCoverJob&&coverPreviewState==='loading')">
           <template v-if="selectedCoverJob">
             <div v-if="coverPreviewState==='loading'" class="cover-preview-skeleton"><div class="skeleton"></div></div>
@@ -345,5 +354,16 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
     </div>
   </div>
   <form method="dialog" class="modal-backdrop" @submit.prevent="closeCoverDraftDialog"><button>关闭</button></form>
+</dialog>
+<dialog ref="originalDialog" class="modal" aria-labelledby="original-dialog-title" @cancel.prevent="closeOriginal">
+  <div class="modal-box cover-original-box">
+    <div class="cover-original-heading"><h3 id="original-dialog-title">封面原图</h3><button type="button" class="btn btn-sm" @click="closeOriginal">关闭</button></div>
+    <div class="cover-original-content" :aria-busy="originalState==='loading'">
+      <p v-if="originalState==='loading'" class="hint">原图加载中…</p>
+      <p v-else-if="originalState==='error'" class="error-text" role="alert">原图不可用，请重新生成封面。</p>
+      <img v-if="originalJobId" v-show="originalState==='loaded'" :src="originalMediaUrl(originalJobId)" alt="生图服务返回的完整原图" @load="originalState='loaded'" @error="originalState='error'" />
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop" @submit.prevent="closeOriginal"><button>关闭</button></form>
 </dialog>
 </template>

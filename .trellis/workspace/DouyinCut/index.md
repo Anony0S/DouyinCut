@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 32
+- **Total Sessions**: 35
 - **Last Active**: 2026-11-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~875 | Active |
+| `journal-1.md` | ~949 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 35 | 2026-11-18 | 封面原图查看 | - | `master` |
+| 34 | 2026-11-18 | 调整封面生成尺寸与裁剪 | - | `master` |
+| 33 | 2026-11-18 | 本地清理七天前未使用文件 | - | `-` |
 | 32 | 2026-11-18 | 封面保留原始分辨率 | - | `-` |
 | 31 | 2026-11-18 | 剪映封面自动补图与3比4输出 | - | `-` |
 | 30 | 2026-11-18 | 验证剪映时间线封面文件 | - | `-` |

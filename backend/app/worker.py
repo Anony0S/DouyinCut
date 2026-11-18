@@ -110,11 +110,10 @@ class Worker:
             plan = Plan.model_validate(store.get("plan", payload["plan_id"], payload["revision"]))
             if payload["asset_id"] != plan.clips[0].source_asset_id:
                 raise ValueError("封面任务的视频项目与方案不匹配")
-            size = "1024x1536"
             ctx.progress(0.05)
             image_bytes, content_type = interruptible_network_call(
                 "image_generation",
-                (config.model_dump(), api_key, payload["reference_path"], payload["prompt"], size),
+                (config.model_dump(), api_key, payload["reference_path"], payload["prompt"]),
                 checkpoint=ctx.checkpoint,
                 deadline_seconds=config.image_timeout_seconds,
             )
@@ -125,6 +124,7 @@ class Worker:
             output_dir.mkdir(parents=True, exist_ok=True)
             from .media.processing import prepare_cover_jpeg
             source_path = output_dir / f"{job['id']}.source{extension}"
+            original_path = output_dir / f"{job['id']}.original{extension}"
             output_path = output_dir / f"{job['id']}.jpg"
             temporary_path = output_dir / f"{job['id']}.tmp.jpg"
             source_path.write_bytes(image_bytes)
@@ -132,10 +132,11 @@ class Worker:
             if not temporary_path.is_file() or temporary_path.stat().st_size > MAX_IMAGE_BYTES:
                 raise ProviderError("3:4 封面转换失败或结果文件过大")
             os.replace(temporary_path, output_path)
-            source_path.unlink(missing_ok=True)
+            os.replace(source_path, original_path)
             result = {"cover_id": job["id"], "path": str(output_path.resolve()),
                       "content_type": "image/jpeg", "plan_id": plan.id,
-                      "revision": plan.revision, "size": f"{width}x{height}"}
+                      "revision": plan.revision, "size": f"{width}x{height}",
+                      "original_path": str(original_path.resolve()), "original_content_type": content_type}
         elif job["kind"] == "jianying":
             from .integrations.jianying.service import create_jianying_draft
             plan = Plan.model_validate(store.get("plan", payload["plan_id"], payload["revision"]))

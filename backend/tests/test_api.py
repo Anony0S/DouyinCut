@@ -26,6 +26,36 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/assets',headers={**self.headers,'Origin':'https://untrusted.example'}).status_code,401)
         self.assertEqual(self.client.get('/api/v1/assets/unknown/media',headers=self.headers).status_code,404)
 
+    def test_cover_original_checks_ownership_and_file_location(self):
+        store = self.app.state.store
+        root = self.app.state.settings.data_dir / 'covers' / 'asset-one'
+        root.mkdir(parents=True)
+        original = root / 'original.webp'
+        original.write_bytes(b'original-image')
+        job = store.enqueue('cover', {'asset_id': 'asset-one'})
+        store.claim('test-worker')
+        store.finish(job['id'], 'test-worker', 'succeeded', result={
+            'original_path': str(original), 'original_content_type': 'image/webp'})
+        url = f"/api/v1/assets/asset-one/covers/{job['id']}/original"
+        response = self.client.get(url, headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'original-image')
+        self.assertEqual(response.headers['content-type'], 'image/webp')
+        self.assertEqual(self.client.get(url.replace('asset-one', 'asset-two'), headers=self.headers).status_code, 404)
+        original.unlink()
+        self.assertEqual(self.client.get(url, headers=self.headers).status_code, 410)
+
+        outside = Path(self.temp.name) / 'outside.png'
+        outside.write_bytes(b'outside')
+        other = store.enqueue('cover', {'asset_id': 'asset-one'})
+        store.claim('test-worker')
+        store.finish(other['id'], 'test-worker', 'succeeded', result={'original_path': str(outside)})
+        self.assertEqual(self.client.get(f"/api/v1/assets/asset-one/covers/{other['id']}/original", headers=self.headers).status_code, 410)
+        missing = store.enqueue('cover', {'asset_id': 'asset-one'})
+        store.claim('test-worker')
+        store.finish(missing['id'], 'test-worker', 'succeeded', result={})
+        self.assertEqual(self.client.get(f"/api/v1/assets/asset-one/covers/{missing['id']}/original", headers=self.headers).status_code, 410)
+
     def test_shutdown_keeps_status_readable_but_rejects_mutations(self):
         store = self.app.state.store
         job = store.enqueue('import', {'path': 'queued.mp4'})

@@ -48,7 +48,7 @@ def _safe_result_url(url: str, base_url: str) -> bool:
     return parsed.hostname == base.hostname
 
 
-def request_image(config: dict, api_key: str, source_path: str, prompt: str, size: str) -> tuple[bytes, str]:
+def request_image(config: dict, api_key: str, source_path: str, prompt: str) -> tuple[bytes, str]:
     base_url = config["image_base_url"].rstrip("/")
     model = config["image_model"]
     url = f"{base_url}/images/edits"
@@ -62,7 +62,7 @@ def request_image(config: dict, api_key: str, source_path: str, prompt: str, siz
                 response = client.post(
                     url,
                     headers=headers,
-                    data={"model": model, "prompt": prompt, "size": size, "n": "1"},
+                    data={"model": model, "prompt": prompt, "n": "1", "size": "auto"},
                     files={"image": (source.name, image_file, mime)},
                 )
     except httpx.HTTPError:

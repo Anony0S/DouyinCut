@@ -14,6 +14,7 @@ import {
 } from "../services/liveMonitoring";
 import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
+import { readRoomOrder, sortRooms } from "../components/live/roomOrder";
 import LiveSessionPanel from "../components/live/LiveSessionPanel.vue";
 import LiveRecordingTimeline from "../components/live/LiveRecordingTimeline.vue";
 import LiveProductTimeline from "../components/live/LiveProductTimeline.vue";
@@ -78,8 +79,7 @@ async function changeDate(date: string) {
 const selectedMonitor = computed(
   () =>
     monitors.value.find((item) => item.id === selectedId.value) ??
-    monitors.value.find((item) => item.live_state === "recording") ??
-    monitors.value[0],
+    sortRooms(monitors.value, readRoomOrder())[0],
 );
 const sessions = computed(() =>
   [...(selectedMonitor.value?.sessions ?? [])].sort(recordingFirst),
@@ -161,7 +161,7 @@ async function refresh() {
     const result = await liveMonitoringApi.list(range);
     if (disposed || version !== refreshVersion) return;
     const nextMonitor = result.find(item => item.id === selectedId.value)
-      ?? result.find(item => item.live_state === "recording") ?? result[0];
+      ?? sortRooms(result, readRoomOrder())[0];
     const items = nextMonitor?.sessions ?? [];
     const current = !chooseRoomDefault && previousMonitor === nextMonitor?.id ? selectedSession.value : undefined;
     // A start request is acknowledged before the recording worker creates its

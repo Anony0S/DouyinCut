@@ -24,6 +24,7 @@
 | `GET /assets/{asset_id}/cover-references/{image_id}` | 读取当前项目已下载的商品参考图 |
 | `POST /assets/{asset_id}/covers` | body 包含 plan_id、revision、reference_id、prompt；校验当前已保存方案修订后排队 `cover` 任务，使用独立 OpenAI Images 兼容服务生成草稿列表封面 |
 | `GET /assets/{asset_id}/covers/{cover_id}/media` | 读取成功封面任务的本地图片结果；封面与方案修订及视频项目绑定 |
+| `GET /assets/{asset_id}/covers/{cover_id}/original` | 读取同项目成功封面任务的生图服务原图；不存在或已删除时返回 410 |
 | `GET /exports`、`GET /exports/{id}/media` | 产物历史与播放 |
 | `GET/POST /live/monitors`、`PATCH/DELETE /live/monitors/{id}` | 抖音监控项列表、添加、修改设置（auto_record / notify_live / notify_offline / notify_split_complete）、移除；活动录制期间拒绝删除 |
 | `GET /live/monitors?window_start=…&window_end=…&include_end_recording=…` | 两个 Unix 秒时间戳须成对提供且开始早于结束；不提供范围时使用服务端最近 24 小时。按窗口返回每个直播间所有相交场次，不限 20 场。已结束场次要求 started < window_end 且 ended > window_start；录制中默认要求 started < window_end。include_end_recording=true 时额外包含恰好在 window_end 开始录制的场次；前端今天及历史日期窗口均发送 false，排除恰好次日 00:00 开始的录制。省略范围时采用服务端最近窗口语义。无效或非有限范围返回 422。列表内的场次只返回摘要：id、status、started、ended、end_time_source 与 product_error（该场次存在商品列表获取错误，或商品消息连接状态为 error），不含分段、讲解区间、商品片段等详情；详情按场次标识读取 |
@@ -57,6 +58,7 @@
 | `POST /product-platform/products/search` | body.keyword 为非空商品名称；返回 product（第一条安全字段或 null）与 scope_name；登录失效返回 401 + detail.code=PRODUCT_PLATFORM_AUTH_REQUIRED，缺少合作范围返回 409 |
 | `POST /product-platform/products/add-to-showcase` | body.platform_product_id 为非空星斗商品 ID；后端从当前合作范围读取 `ipId` 与 `memberTalentId` 并执行单商品添加；返回 `{added: true}`，登录失效返回 401，缺少范围或达人关联返回 409 |
 | `GET/PUT /settings/workspace-layout` | 素材与粗剪页的布局偏好：left_width 为左侧卡片宽度（像素，230–10000）或 null（默认宽度）；随工作目录保存，只保留最新值 |
+| `POST /settings/cleanup-unused-files` | 用户确认后清理超过七天且未被项目 / 任务记录引用的应用生成产物，以及已知的过期导出 staging / 封面转换临时文件；保护活动任务、已引用产物和用户数据，跳过符号链接。返回 deleted_files、deleted_directories、retained_files、bytes_reclaimed、cutoff_timestamp |
 | `GET /health`（无前缀）、`GET /diagnostics` | 服务存活检查与本机环境诊断 |
 | `GET /logs` | 返回 files（非空日志文件：category=runtime / task、name、size、modified，任务日志另含 group、group_type=job / product_clip、job_kind、product_name）与 runtime_available；应用运行日志在前，任务日志按修改时间倒序 |
 | `GET /logs/{category}/{name}?after=…` | 读取日志内容。不带 after 时返回末尾最多 512 KB 并从整行开始；带 after（字节偏移）时返回其后的新增内容。返回 text、start、next（下次读取的偏移）、size、truncated、reset（文件短于 after，已改为返回新内容末尾）。只接受两处日志目录内的 `.log` 文件名，运行日志仅限当前与上一份；名称无效返回 422，文件不存在返回 404 |
@@ -77,7 +79,7 @@
 | `#/jobs` | 后台任务 | 全局任务状态和控制 |
 | `#/appearance` | 外观 | 主题、窗口位置记忆及启动窗口大小 |
 | `#/settings` | 云端设置 | 文本模型、语音模型、OSS 存储、直播登录与星斗商品平台独立管理；cloudTab=product-platform 直接定位星斗登录，表单草稿仅在当前页面生命周期内存在 |
-| `#/local-settings` | 本地设置 | 工作目录管理和版本更新以列表行排列 |
+| `#/local-settings` | 本地设置 | 工作目录管理、清理未使用文件和版本更新以列表行排列 |
 | `#/logs` | 运行日志 | 查看、搜索、跟随和清理应用运行日志与任务日志 |
 
 进入受保护页面先建立本地会话；路由切换会保存当前商品资料草稿。当前项目存在未保存片段调整时，切换到其他项目或新建视频会被阻止；保存失败时地址和编辑内容保持不变。导航中的异步项目加载使用序号校验，旧请求不能覆盖较新的页面。直接打开不存在的项目保留地址并显示可重试错误，不触发分析或其他付费请求。刷新页面只恢复已保存资料和方案，未保存片段不写入浏览器存储。

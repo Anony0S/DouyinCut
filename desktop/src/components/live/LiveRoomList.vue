@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { LiveMonitor, LiveMonitorSettings } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
+import { readRoomOrder, roomOrderKey, sortRooms } from "./roomOrder";
 import {
   formatLiveTime,
   isRecording,
@@ -31,8 +32,22 @@ const filters = [
   { id: "recording", name: "录制中" },
   { id: "attention", name: "异常" },
 ];
+const roomOrder = ref<string[]>(readRoomOrder());
+function saveOrder() {
+  try { localStorage.setItem(roomOrderKey, JSON.stringify(roomOrder.value)); } catch { }
+}
+const ordered = computed(() => sortRooms(props.monitors, roomOrder.value));
+watch(() => props.monitors, (monitors) => {
+  if (!monitors.length) return;
+  const ids = new Set(monitors.map((item) => item.id));
+  const existing = roomOrder.value.filter((id) => ids.has(id));
+  const known = new Set(existing);
+  const added = ordered.value.filter((item) => !known.has(item.id)).map((item) => item.id);
+  roomOrder.value = [...existing, ...added];
+  saveOrder();
+}, { immediate: true });
 const filtered = computed(() =>
-  props.monitors
+  ordered.value
     .filter((item) => {
       const query = search.value.trim().toLocaleLowerCase();
       const matches = {
@@ -46,13 +61,63 @@ const filtered = computed(() =>
           `${item.name} ${item.url}`.toLocaleLowerCase().includes(query)) &&
         matches
       );
-    })
-    .sort(
-      (a, b) =>
-        Number(b.is_live === true) - Number(a.is_live === true) ||
-        a.name.localeCompare(b.name, "zh-CN"),
-    ),
+    }),
 );
+const roomItems = ref<HTMLElement>();
+const draggingId = ref<string | null>(null);
+const dropSlot = ref<number | null>(null);
+let activePointer: number | null = null;
+
+function moveRoom(id: string, slot: number) {
+  const visible = filtered.value.map((item) => item.id);
+  const source = visible.indexOf(id);
+  if (source < 0) return;
+  visible.splice(source, 1);
+  visible.splice(slot > source ? slot - 1 : slot, 0, id);
+  const visibleIds = new Set(visible);
+  let index = 0;
+  roomOrder.value = ordered.value.map((item) => visibleIds.has(item.id) ? visible[index++] : item.id);
+  saveOrder();
+}
+function startDrag(id: string, event: PointerEvent) {
+  if (event.button !== 0 || props.busy || filtered.value.length < 2) return;
+  event.preventDefault();
+  activePointer = event.pointerId;
+  draggingId.value = id;
+  dropSlot.value = null;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+}
+function updateDrag(event: PointerEvent) {
+  if (event.pointerId !== activePointer || !roomItems.value) return;
+  const bounds = roomItems.value.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+    dropSlot.value = null;
+    return;
+  }
+  const horizontal = window.matchMedia("(max-width: 850px)").matches;
+  const coordinate = horizontal ? event.clientX : event.clientY;
+  const cards = Array.from(roomItems.value.querySelectorAll<HTMLElement>(".live-room-item"));
+  const slot = cards.findIndex((card) => {
+    const rect = card.getBoundingClientRect();
+    return coordinate < (horizontal ? (rect.left + rect.right) / 2 : (rect.top + rect.bottom) / 2);
+  });
+  dropSlot.value = slot < 0 ? cards.length : slot;
+}
+function endDrag(event: PointerEvent, canceled = false) {
+  if (event.pointerId !== activePointer) return;
+  if (!canceled && draggingId.value && dropSlot.value !== null) moveRoom(draggingId.value, dropSlot.value);
+  activePointer = null;
+  draggingId.value = null;
+  dropSlot.value = null;
+}
+function moveRoomByKey(id: string, event: KeyboardEvent) {
+  const direction = event.key === "ArrowUp" || event.key === "ArrowLeft" ? -1 : event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : 0;
+  if (!direction || props.busy) return;
+  event.preventDefault();
+  const index = filtered.value.findIndex((item) => item.id === id);
+  if (index < 0 || index + direction < 0 || index + direction >= filtered.value.length) return;
+  moveRoom(id, direction < 0 ? index - 1 : index + 2);
+}
 const selected = computed(() =>
   props.monitors.find((item) => item.id === props.selectedId),
 );
@@ -189,12 +254,12 @@ onUnmounted(closeSettings);
         {{ item.name }}
       </button>
     </div>
-    <div class="live-room-items">
+    <div ref="roomItems" class="live-room-items">
       <div
-        v-for="monitor in filtered"
+        v-for="(monitor, index) in filtered"
         :key="monitor.id"
         class="live-room-item"
-        :class="{ selected: selectedId === monitor.id }"
+        :class="{ selected: selectedId === monitor.id, 'is-dragging': draggingId === monitor.id, 'drop-before': dropSlot === index, 'drop-after': dropSlot === filtered.length && index === filtered.length - 1 }"
         role="button"
         tabindex="0"
         :aria-pressed="selectedId === monitor.id"
@@ -202,6 +267,21 @@ onUnmounted(closeSettings);
         @keydown.enter="selectMonitor(monitor, $event)"
         @keydown.space="selectMonitor(monitor, $event)">
         <div class="live-room-item-top">
+          <button
+            class="live-room-drag-handle"
+            type="button"
+            :disabled="busy || filtered.length < 2"
+            :aria-label="`排序 ${monitor.name || '抖音直播间'}`"
+            title="拖动排序，或使用方向键移动"
+            @click.stop
+            @keydown.stop="moveRoomByKey(monitor.id, $event)"
+            @pointerdown.stop="startDrag(monitor.id, $event)"
+            @pointermove="updateDrag"
+            @pointerup="endDrag($event)"
+            @pointercancel="endDrag($event, true)"
+            @lostpointercapture="endDrag($event, true)">
+            <LiveIcon name="grip" />
+          </button>
           <span class="live-room-initial">
             {{ (monitor.name || "抖音")[0] }}
           </span>

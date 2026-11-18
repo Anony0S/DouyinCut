@@ -123,6 +123,7 @@ async function mount() {
   return { root, app }
 }
 async function verify() {
+  global.localStorage = { getItem: () => JSON.stringify(['一', '二']), setItem() {} }
   const workbenchCapability = JSON.parse(fs.readFileSync(path.join(__dirname, '../src-tauri/capabilities/workbench.json'), 'utf8'))
   assert.ok(workbenchCapability.windows.includes('main'), 'the development workbench window can open approved external URLs')
   assert.ok(workbenchCapability.windows.includes('workbench'), 'the production workbench window can open approved external URLs')
@@ -442,6 +443,33 @@ async function verify() {
     assert.ok(text(racing.root).includes('讲解-新房正在录制'))
   } finally { racing.app.unmount(); detailResponse = null }
 }
+async function verifyDefaultRoomSelection() {
+  const storage = new Map([['douyincut.live-room-order', JSON.stringify(['首项', '录制'])]])
+  global.localStorage = {
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  }
+  response = [
+    { ...monitor('录制', [session('录制场次', now - 100, null, 1)]), live_state: 'recording', is_live: true },
+    monitor('首项', [session('首项场次', now - 200, now - 100, 2)]),
+  ]
+  const { root, app } = await mount()
+  try {
+    const rooms = () => all(root, el => el.props.role === 'button' && el.props.class?.includes('live-room-item'))
+    assert.ok(text(rooms()[0]).includes('直播间-首项'), 'saved order determines the first room')
+    assert.equal(rooms()[0].props['aria-pressed'], true, 'first room is selected instead of recording room')
+    assert.ok(text(root).includes('讲解-首项场次'), 'initial details belong to the selected first room')
+    await click(rooms()[1])
+    assert.ok(text(root).includes('讲解-录制场次'), 'manually selected room loads its details')
+    for (const poll of polls) poll()
+    await settle()
+    assert.equal(rooms()[1].props['aria-pressed'], true, 'polling preserves manual room selection')
+    assert.ok(text(root).includes('讲解-录制场次'))
+  } finally {
+    app.unmount()
+    delete global.localStorage
+  }
+}
 async function verifyRecordingStartSelection() {
   for (const mode of ['immediate', 'delayed', 'cancelled']) {
     const delayed = mode !== 'immediate'
@@ -552,7 +580,7 @@ async function verifyLocalCalendarDay() {
     assert.ok(text(root).includes('当天无录制'))
   } finally { app.unmount() }
 }
-(checkDst || checkMidnightDst ? verifyLocalCalendarDay() : verify().then(verifyRecordingStartSelection).then(verifyDenseSessions)).then(() => {
+(checkDst || checkMidnightDst ? verifyLocalCalendarDay() : verify().then(verifyDefaultRoomSelection).then(verifyRecordingStartSelection).then(verifyDenseSessions)).then(() => {
   console.log(checkDst || checkMidnightDst ? `historical calendar checks passed (${process.env.TZ})` : 'live recording timeline page checks passed')
   if (!checkDst && !checkMidnightDst) {
     for (const option of ['--dst', '--midnight-dst']) require('node:child_process').execFileSync(process.execPath, [__filename, option], { stdio: 'inherit' })

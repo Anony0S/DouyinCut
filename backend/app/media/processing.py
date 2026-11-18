@@ -59,6 +59,34 @@ def run_process(args: list[str], checkpoint: Callable | None = None, timeout: in
         return text
 
 
+def prepare_cover_jpeg(source: Path, target: Path, settings: Settings, checkpoint: Callable | None = None) -> tuple[int, int]:
+    """Keep the largest centered 3:4 rectangle and avoid resizing the image."""
+    info = json.loads(run_process([
+        settings.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
+        "stream=width,height,codec_name", "-of", "json", str(source),
+    ], checkpoint=checkpoint, timeout=60))
+    streams = info.get("streams", [])
+    if not streams:
+        raise MediaError("无法读取封面图片尺寸")
+    width, height = int(streams[0]["width"]), int(streams[0]["height"])
+    factor = min(width // 3, height // 4)
+    if factor < 1:
+        raise MediaError("封面图片尺寸过小")
+    out_width, out_height = factor * 3, factor * 4
+    if (width, height) == (out_width, out_height) and streams[0].get("codec_name") == "mjpeg":
+        shutil.copyfile(source, target)
+    else:
+        filters = []
+        if (width, height) != (out_width, out_height):
+            filters.append(f"crop={out_width}:{out_height}:(iw-ow)/2:(ih-oh)/2:exact=1")
+        filters.append("setsar=1")
+        run_process([
+            settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+            "-vf", ",".join(filters), "-frames:v", "1", "-pix_fmt", "yuvj444p", "-q:v", "2", str(target),
+        ], checkpoint=checkpoint, timeout=120)
+    return out_width, out_height
+
+
 def probe(path: Path, settings: Settings, *, timeout: int = 60) -> dict:
     result = run_process([settings.ffprobe, "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)], timeout=timeout)
     data = json.loads(result)

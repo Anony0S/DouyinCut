@@ -192,3 +192,684 @@ Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft
 ### Next Steps
 
 - 使用真实星斗账号、独立生图服务和目标剪映版本完成外部兼容验收。
+
+
+## Session 7: 确认功能完成后等待用户提交
+<!-- trellis-session: v=2 fp=e213e62ba0d976d2 -->
+
+**Date**: 2026-11-17
+**Task**: 确认功能完成后等待用户提交
+**Branch**: `master`
+
+### Summary
+
+已将项目提交时机写入 AGENTS.md 和 mini-trellis 使用指南：功能开发与自动验证完成后保留未提交变更，交由用户手动验证；仅在用户明确要求时创建 Git commit。
+Topics: [docs/agents/mini-trellis.md](../../../docs/agents/mini-trellis.md)
+
+### Main Changes
+
+- 更新根目录开发约定与 mini-trellis 指南中的 Git 提交规则。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] git diff --check：通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 后续功能完成后等待用户手动验证与明确提交指令。
+
+
+## Session 8: 调整抖音封面提示词与 3:4 比例
+<!-- trellis-session: v=2 fp=a901971381196100 -->
+
+**Date**: 2026-11-17
+**Task**: 调整抖音封面提示词与 3:4 比例
+
+### Summary
+
+移除封面短名称独立文本模型调用及其本地接口；商品原名直接进入抖音封面生图 Prompt，由生图模型提炼标题。固定请求标准竖版图片并用 FFmpeg 居中裁切为精确 3:4 PNG。后端测试 23 项和 10 个子测试通过，桌面端 vue-tsc/Vite build 通过；真实生图服务和剪映展示仍待手动验证。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 9: 诊断封面生图 HTTP 404
+<!-- trellis-session: v=2 fp=c9c0e8f8c8d222f4 -->
+
+**Date**: 2026-11-17
+**Task**: 诊断封面生图 HTTP 404
+
+### Summary
+
+从失败任务保存配置确认 image_base_url 为 https://api.hualong-ai.com，当前拼接后调用 /images/edits；未确认服务方要求的 API 前缀或编辑接口支持情况，缺少版本路径是待服务文档确认的首要推断。更新 404 错误提示以保留路径线索，更新设置说明；封面接口测试 5 项和 vue-tsc 通过。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 10: 完善商品参考图缓存与加载占位
+<!-- trellis-session: v=2 fp=f41640ba0e2d790d -->
+
+**Date**: 2026-11-17
+**Task**: 完善商品参考图缓存与加载占位
+
+### Summary
+
+按确认要求让封面标题与未上身的商品单品图并列呈现，不用品类文字代替商品图；补充单张缩略图加载及失败占位。商品图本地缓存、显式重新获取和封面流程已同步规格；真实星斗、生图与剪映效果仍待手动验收。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- 修改 desktop/src/views/WorkspaceView.vue 与 desktop/src/style.css，单图加载前显示骨架，加载失败时禁用选择并保留占位。
+- 更新 .trellis/spec/project/workspace.md、.trellis/spec/project/api.md 与 .trellis/research/cover-draft-generation.md，记录缓存和封面要求及已放弃方案。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 桌面 pnpm build、vue-tsc --noEmit、test:product-platform 通过。
+- [OK] pytest backend/tests/test_product_platform.py：24 passed。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 11: 调整封面弹窗双栏与图片骨架范围
+<!-- trellis-session: v=2 fp=d25327d79472af2c -->
+
+**Date**: 2026-11-17
+**Task**: 调整封面弹窗双栏与图片骨架范围
+
+### Summary
+
+按用户澄清将封面生成要求与封面预览左右布局；骨架屏只出现在商品参考图和封面图各自的固定比例图片框，生成前预览使用普通空状态，加载失败显示错误占位。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- 更新 desktop/src/views/WorkspaceView.vue 与 desktop/src/style.css。
+- 同步 .trellis/spec/project/workspace.md 和 .trellis/research/cover-draft-generation.md。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] pnpm --dir desktop build 通过；pnpm --dir desktop test:product-platform 通过；相关文件 git diff --check 通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 12: 调整封面同时展示上身图与单品图
+<!-- trellis-session: v=2 fp=f59d68dd3efe66a2 -->
+
+**Date**: 2026-11-17
+**Task**: 调整封面同时展示上身图与单品图
+
+### Summary
+
+按用户澄清，抖音封面必须同时出现人物上身效果和同款单品图：人物图为主，单品图缩小放旁边；仅有一种参考图时提示模型补全另一种。移除旧版禁止人物的提示词并同步当前规格，研究记录保留更正脉络。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- 更新 desktop/src/views/WorkspaceView.vue 生图提示词。
+- 更新 .trellis/spec/project/workspace.md 与 .trellis/research/cover-draft-generation.md。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 桌面 pnpm build 通过；检查当前提示词及规格无旧版禁止人物措辞。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 13: 排查剪映草稿封面打开后消失
+<!-- trellis-session: v=2 fp=c1a82efd5f28f121 -->
+
+**Date**: 2026-11-17
+**Task**: 排查剪映草稿封面打开后消失
+
+### Summary
+
+核对生成器后确认当前只写列表封面路径字段，未创建独立封面 composition 与封面预览文件。该缺项可解释列表缩略图与编辑器封面不一致；关闭后缩略图消失的具体触发仍需目标版本草稿打开前后文件对比。研究记录标注非官方 5.9 格式证据和验证限制。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- 更新 .trellis/research/cover-draft-generation.md 记录代码证据、外部格式参考和未确认部分。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 14: 检查剪映 11.8 手动封面文件变化
+<!-- trellis-session: v=2 fp=d3b8fe7c9907f31b -->
+
+**Date**: 2026-11-17
+**Task**: 检查剪映 11.8 手动封面文件变化
+
+### Summary
+
+对照用户手动设置封面前后的只读文件与备份，确认封面图被复制到草稿根目录及 Resources/cover，剪映更新不透明编码的 draft_content.json / draft_meta_info.json，而生成器当前仍写旧式 draft_info.json；具体编码字段未解，后续需按 11.8 样本或序列化器修复，未提交 Git。研究记录：.trellis/research/cover-draft-generation.md。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 15: 修复剪映生成草稿封面结构
+<!-- trellis-session: v=2 fp=2905cfd211505997 -->
+
+**Date**: 2026-11-17
+**Task**: 修复剪映生成草稿封面结构
+
+### Summary
+
+生成带封面草稿时增加 Resources/cover 图片副本、独立 photo 封面子草稿、cover_enable / cover_draft 关联与根 draft_cover.jpg；更新 workspace 规格和封面研究记录。剪映专项 4 项通过，全后端 387 项及 111 子测试通过，1 条既有线程异常 warning。未在剪映 11.8 实机打开关闭验证，等待用户手动验收；未提交 Git。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 16: 定位新生成剪映封面草稿
+<!-- trellis-session: v=2 fp=1671f0cd4113338d -->
+
+**Date**: 2026-11-17
+**Task**: 定位新生成剪映封面草稿
+
+### Summary
+
+检查用户重新生成的 DC_26445f_5c021a_r1_e112；确认 draft_info.json 中封面开关、子草稿 ID、材料引用、图片轨道与资源路径完整，draft_meta_info.json.draft_cover 指向列表缩略图。打开/关闭后的载入持久性尚未验证；等待对同一目录做剪映 11.8 实机往返检查。jy-draftc 当前 README 仅列 11.6/11.5，暂不用于 11.8 草稿。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] uv run python -m unittest tests.test_jianying (4 passed)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 在剪映 11.8 打开并关闭 DC_26445f_5c021a_r1_e112，随后只读比较 draft_content.json、draft_meta_info.json 与 .backup。
+
+
+## Session 17: 剪映封面编辑器不显示图片排查
+<!-- trellis-session: v=2 fp=b8b16a2492b5cf9c -->
+
+**Date**: 2026-11-18
+**Task**: 剪映封面编辑器不显示图片排查
+
+### Summary
+
+用户确认进入封面编辑器仍无图，列表缩略图可持久；已检查剪映首次加载快照，缺少同版本手动成功样本以定位原因。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 获取新测试草稿手动设置封面前后的快照并对比；不改写既有草稿。
+
+
+## Session 18: 手动封面样本检查
+<!-- trellis-session: v=2 fp=9edd4c0fd255e1fa -->
+
+**Date**: 2026-11-18
+**Task**: 手动封面样本检查
+
+### Summary
+
+已取得 8b11 手动设置成功样本；保存后快照为编码，现有 jy-draftc 不支持本机剪映 11.8，暂未定位渲染差异。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 在不改写原草稿的前提下寻找 11.8 的可用解析方式，再比较手动设置后的结构。
+
+
+## Session 19: 剪映图片封面类型排查
+<!-- trellis-session: v=2 fp=9dbc18866b244180 -->
+
+**Date**: 2026-11-18
+**Task**: 剪映图片封面类型排查
+
+### Summary
+
+对比手动设置封面与生成草稿，显式写入本地图片封面类型；剪映实机验证待完成。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- backend/app/integrations/jianying/service.py、backend/tests/test_jianying.py、.trellis/spec/project/workspace.md
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] test_jianying.py：4 passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启应用生成新草稿，在剪映封面编辑器以及关闭重开后验证。
+
+
+## Session 20: 剪映封面时间线缩略图排查
+<!-- trellis-session: v=2 fp=73bbb3659d0604a5 -->
+
+**Date**: 2026-11-18
+**Task**: 剪映封面时间线缩略图排查
+
+### Summary
+
+对比用户手动设为封面的草稿快照，调整新草稿的封面子片段，实际显示待剪映验收。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- backend/app/integrations/jianying/service.py；backend/tests/test_jianying.py
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] test_jianying.py：4 passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启应用生成新草稿，不点设为封面检查时间线缩略图及关闭重开后的表现。
+
+
+## Session 21: 剪映时间线封面复测
+<!-- trellis-session: v=2 fp=490003072f6ca523 -->
+
+**Date**: 2026-11-18
+**Task**: 剪映时间线封面复测
+
+### Summary
+
+用户复测缩略图仍为空，已保存同一草稿操作前的快照，等待设为封面后的对比。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 剪映实机：缩略图未出现，参数变更不足以解决问题。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 比较 73e6 草稿设为封面前后文件和解密内容。
+
+
+## Session 22: 剪映封面同草稿对比
+<!-- trellis-session: v=2 fp=4aa9f67efb59a933 -->
+
+**Date**: 2026-11-18
+**Task**: 剪映封面同草稿对比
+
+### Summary
+
+对比手动设置封面前后并调整生成字段，自动测试通过，等待剪映实机验证。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 23: 剪映时间线封面资源对比
+<!-- trellis-session: v=2 fp=fc98093fbc4bd972 -->
+
+**Date**: 2026-11-18
+**Task**: 剪映时间线封面资源对比
+
+### Summary
+
+同草稿对比发现时间线封面 JPG，生成器补齐预览；自动测试通过，待剪映实机验收。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 24: 撤回不完整剪映时间线目录
+<!-- trellis-session: v=2 fp=b9bc56e616fdb5dc -->
+
+**Date**: 2026-11-18
+**Task**: 撤回不完整剪映时间线目录
+
+### Summary
+
+撤回可能导致草稿损坏的时间线目录生成；记录实机失败线索和待验证范围。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 剪映草稿测试 4 项通过；实机待复测
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启应用并重新生成草稿，验证打开和关闭重开。
+
+
+## Session 25: 剪映封面草稿复测
+<!-- trellis-session: v=2 fp=45acb29f3e4935c1 -->
+
+**Date**: 2026-11-18
+**Task**: 剪映封面草稿复测
+
+### Summary
+
+用户确认撤回不完整时间线目录后草稿可打开，左侧缩略图仍需手动设置；记录只读检查及未解决范围。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 用户实机：草稿可打开，左侧缩略图未自动出现
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 寻找完整时间线结构的可靠生成方式并以副本验证。
+
+
+## Session 26: 验证剪映封面 JPG 格式
+<!-- trellis-session: v=2 fp=3bff0dad58d11f7d -->
+
+**Date**: 2026-11-18
+**Task**: 验证剪映封面 JPG 格式
+
+### Summary
+
+生成草稿时将封面转为保持尺寸的 JPG，记录剪映样本尺寸及格式仍需实机验证。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] backend/tests/test_jianying.py：4 项通过；剪映实机待验证
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启应用生成新草稿，检查打开后封面与缩略图。
+
+
+## Session 27: 封面统一为 9:16 JPG
+<!-- trellis-session: v=2 fp=e7861039305700fb -->
+
+**Date**: 2026-11-18
+**Task**: 封面统一为 9:16 JPG
+
+### Summary
+
+生图及新剪映草稿封面输出 1080×1920 JPG，等比缩放并补黑边；单独变更 JPG 未解决左侧缩略图，9:16 方案待实机验证。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- 更新 worker、剪映草稿生成、封面界面、测试及 workspace 规格
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端封面及剪映测试 8 项通过；Vue 类型检查通过，Vite runner 构建通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启应用并在剪映测试新草稿的封面显示和重开持久性
+
+
+## Session 28: 9比16封面实机排查
+<!-- trellis-session: v=2 fp=1257b0d7af563281 -->
+
+**Date**: 2026-11-18
+**Task**: 9比16封面实机排查
+
+### Summary
+
+用户反馈 9:16 JPG 仍未自动显示；分析疑似最新草稿打开与手动设置后的备份，发现封面素材标志变化，因缺少打开后设置前快照不能确认因果。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 确认样本并采集同一新草稿打开关闭但未手动设置的中间快照，再设置封面对照。
+
+
+## Session 29: 剪映封面同草稿对照
+<!-- trellis-session: v=2 fp=f5cdd56810f7c0d5 -->
+
+**Date**: 2026-11-18
+**Task**: 剪映封面同草稿对照
+
+### Summary
+
+保存同一草稿手动设置前后快照：时间线封面 JPG 在手动设置后新增，解密内容仅增加贴纸索引；单因素因果仍未验证。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前后文件 SHA-256 与解密 JSON 递归对照
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 设计隔离实验，验证已有完整时间线工程中的封面文件与索引各自影响。
+
+
+## Session 30: 验证剪映时间线封面文件
+<!-- trellis-session: v=2 fp=aca98d338dbfbd11 -->
+
+**Date**: 2026-11-18
+**Task**: 验证剪映时间线封面文件
+
+### Summary
+
+在剪映初始化完整时间线后仅补充 draft_cover.jpg，用户确认左侧缩略图出现；首次打开前的自动化方案及重开持久性待验证。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 31: 剪映封面自动补图与3比4输出
+<!-- trellis-session: v=2 fp=754bb7f9a15ec6fa -->
+
+**Date**: 2026-11-18
+**Task**: 剪映封面自动补图与3比4输出
+
+### Summary
+
+用户确认9:16样本手动补时间线封面后关闭重开仍显示；实现新草稿后台补图与3:4 JPG输出，自动处理组合待剪映实机验证。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- 封面同步、尺寸和规格记录
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端11项及3个子测试通过；前端构建通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启应用并生成新草稿，实机验证自动补图和3:4封面。
+
+
+## Session 32: 封面保留原始分辨率
+<!-- trellis-session: v=2 fp=a46f4ab976dda48e -->
+
+**Date**: 2026-11-18
+**Task**: 封面保留原始分辨率
+
+### Summary
+
+确认自动补图可显示；取消固定分辨率，按最大3:4居中裁剪并保留JPG尺寸，剪映实机验证待进行。
+Topics: [.trellis/research/cover-draft-generation.md](../../research/cover-draft-generation.md)
+
+### Main Changes
+
+- 封面处理、草稿导出、规格和测试
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端12项及6个子测试通过
+
+### Status
+
+[OK] **Completed**

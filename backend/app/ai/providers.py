@@ -134,7 +134,7 @@ def clear_shutdown():
 
 def _network_child(pipe, kind, args, kwargs):
     try:
-        if kind in {"asr", "planner", "model_test", "short_product_name"}:
+        if kind in {"asr", "planner", "model_test"}:
             result = cloud_json(*args, **kwargs)
         elif kind == "image_generation":
             from .image_generation import request_image

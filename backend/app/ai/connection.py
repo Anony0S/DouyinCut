@@ -76,8 +76,6 @@ def check_oss_connection(request: OssConnectionTestRequest) -> dict:
         result.update(message="OSS 测试无法完成，请检查本机凭据服务和运行环境")
     result["elapsed_ms"] = round((time.monotonic() - started) * 1000)
     return result
-
-
 def check_model_connection(request: ModelConnectionTestRequest) -> dict:
     """Probe text generation once without saving settings or sending user media."""
     config = request.config
@@ -115,35 +113,3 @@ def check_model_connection(request: ModelConnectionTestRequest) -> dict:
         result.update(message=str(exc).split("，悬停", 1)[0])
     result["elapsed_ms"] = round((time.monotonic() - started) * 1000)
     return result
-
-
-def generate_short_product_name(product_name: str, config: CloudConfig) -> str:
-    """Ask the configured text model for a concise, recognizable product name."""
-    config.require_text_connection()
-    key = model_api_key(config)
-    prompt = (
-        "请把下面的商品名称改写成适合短视频封面使用的简短商品名称。保留商品核心品类和关键款式，"
-        "只返回名称本身，最多 12 个汉字，不加引号、标点、解释或营销承诺。\n"
-        f"商品名称：{product_name.strip()}"
-    )
-    response = interruptible_network_call(
-        "short_product_name",
-        ("POST", config.chat_url,
-         {"model": config.planner_model, "messages": [{"role": "user", "content": prompt}],
-          "temperature": 0.2, "stream": False, "max_tokens": 64}, key),
-        kwargs={"timeout_seconds": min(config.chat_timeout_seconds, 60), "operation": "short_product_name"},
-        deadline_seconds=min(config.chat_timeout_seconds, 60),
-    )
-    try:
-        content = response["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise ProviderError("文本模型没有返回有效的简短商品名称") from None
-    if not isinstance(content, str):
-        raise ProviderError("文本模型没有返回有效的简短商品名称")
-    name = re.sub(r"^[\s\"'“”‘’`]+|[\s\"'“”‘’`]+$", "", content.strip())
-    name = re.sub(r"[\r\n\t]+", " ", name)
-    name = re.sub(r"^(?:商品名称|名称)\s*[:：]\s*", "", name)
-    name = name.strip(" ，。；;:：!！?？")
-    if not name or len(name) > 24:
-        raise ProviderError("文本模型返回的商品名称为空或过长，请重试")
-    return name

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import hmac
 import json
 import os
@@ -22,7 +23,7 @@ from .media.processing import diagnostics, probe_stream_timing
 from .media.thumbnails import PreviewBusy, ThumbnailCache
 from .ai.providers import CloudConfig, ProviderError, asr_api_key, model_api_key
 from .ai.connection import (ModelConnectionTestRequest, check_model_connection, OssConnectionTestRequest,
-                            check_oss_connection, generate_short_product_name)
+                            check_oss_connection)
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
 from .core.storage import SessionStopping, Store
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, WorkspaceLayout,
@@ -50,13 +51,10 @@ class CoverGenerationRequest(Model):
     prompt: str = Field(min_length=1, max_length=4000)
 
 
-class ShortProductNameRequest(Model):
-    product_name: str = Field(min_length=1, max_length=200)
-
-
 class ProductImagesRequest(Model):
     asset_id: str = Field(min_length=1, max_length=100)
-    platform_product_id: str = Field(min_length=1, max_length=100)
+    product_id: str = Field(min_length=1, max_length=100)
+    refresh: bool = False
 
 
 class LogLocation(Model):
@@ -218,12 +216,36 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if not body.asset_id.startswith("asset_") or not body.asset_id[6:].isalnum():
             raise HTTPException(422, "项目标识无效")
         store.get("asset", body.asset_id)
-        urls = app.state.product_platform.product_images(body.platform_product_id)
         references = settings.data_dir / "covers" / body.asset_id / "references"
         references.mkdir(parents=True, exist_ok=True)
+        cache_path = references / f"{hashlib.sha256(body.product_id.encode('utf-8')).hexdigest()}.json"
+        if not body.refresh and cache_path.is_file():
+            try:
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                cached_images = cached.get("images", []) if cached.get("product_id") == body.product_id else []
+                result = []
+                for item in cached_images:
+                    image_id = item.get("id") if isinstance(item, dict) else None
+                    if not isinstance(image_id, str) or not image_id.startswith("coverref_") or not image_id[9:].isalnum():
+                        result = []
+                        break
+                    matches = [path for path in references.glob(f"{image_id}.*") if path.is_file()]
+                    if len(matches) != 1 or not matches[0].resolve().is_relative_to(references.resolve()):
+                        result = []
+                        break
+                    result.append({"id": image_id, "url": f"/api/v1/assets/{body.asset_id}/cover-references/{image_id}"})
+                if result:
+                    return {"images": result, "cached": True}
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
+        urls = app.state.product_platform.product_images(body.product_id)
         result = []
+        cache_images = []
         for url in urls:
-            data, content_type = fetch_product_image(url)
+            try:
+                data, content_type = fetch_product_image(url)
+            except ValueError as exc:
+                raise HTTPException(502, str(exc)) from None
             extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(content_type)
             if extension is None:
                 continue
@@ -231,9 +253,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             path = references / f"{image_id}{extension}"
             path.write_bytes(data)
             result.append({"id": image_id, "url": f"/api/v1/assets/{body.asset_id}/cover-references/{image_id}"})
+            cache_images.append({"id": image_id})
         if not result:
             raise HTTPException(404, "星斗商品没有可用图片")
-        return {"images": result}
+        temporary_cache_path = cache_path.with_suffix(".json.tmp")
+        temporary_cache_path.write_text(json.dumps({"product_id": body.product_id, "images": cache_images}),
+                                        encoding="utf-8")
+        os.replace(temporary_cache_path, cache_path)
+        return {"images": result, "cached": False}
 
     @app.get("/api/v1/assets/{asset_id}/cover-references/{image_id}")
     def product_platform_product_image(asset_id: str, image_id: str):
@@ -700,13 +727,6 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.post("/api/v1/settings/cloud/test-model")
     def test_cloud_model(body: ModelConnectionTestRequest):
         return check_model_connection(body)
-
-    @app.post("/api/v1/settings/cloud/short-product-name")
-    def short_product_name(body: ShortProductNameRequest):
-        try:
-            return {"name": generate_short_product_name(body.product_name, cloud_config())}
-        except ProviderError as exc:
-            raise HTTPException(422, str(exc)) from None
 
     @app.post("/api/v1/settings/cloud/test-oss")
     def test_cloud_oss(body: OssConnectionTestRequest):

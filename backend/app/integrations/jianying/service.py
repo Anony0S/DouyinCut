@@ -9,10 +9,11 @@ from pathlib import Path
 
 from ...core.config import Settings
 from ...core.domain import Asset, Plan
-from ...media.processing import MediaError, probe, probe_stream_timing, run_process
+from ...media.processing import MediaError, prepare_cover_jpeg, probe, probe_stream_timing, run_process
 from ..._vendor.pyJianYingDraft import (
     ClipSettings,
     DraftFolder,
+    ScriptFile,
     TextBorder,
     TextSegment,
     TextStyle,
@@ -21,6 +22,10 @@ from ..._vendor.pyJianYingDraft import (
     VideoMaterial,
     VideoSegment,
 )
+
+_COVER_PATH_PLACEHOLDER = "##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##"
+_COVER_DURATION_US = 5_000_000
+_COVER_SEGMENT_DURATION_US = 3_000_000
 
 
 def draft_root() -> Path:
@@ -50,6 +55,32 @@ def _draft_name(name: str, plan: Plan, job_id: str) -> str:
     plan_token = re.sub(r"[^A-Za-z0-9]", "", plan.id)[-6:] or "plan"
     job_token = re.sub(r"[^A-Za-z0-9]", "", job_id)[-4:] or "job"
     return f"DC_{asset_token}_{plan_token}_r{plan.revision}_{job_token}"
+
+
+def _build_cover_draft(image_path: Path, settings: Settings, draft_id: str) -> dict:
+    cover_script = ScriptFile(1080, 1440, 30, maintrack_adsorb=True)
+    cover_track = "DouyinCut 封面"
+    cover_script.add_track(TrackType.video, cover_track)
+    image = VideoMaterial(str(image_path), material_name="DouyinCut 封面",
+                          duration=_COVER_DURATION_US, ffprobe=settings.ffprobe)
+    image.material_type = "photo"
+    image.duration = _COVER_DURATION_US
+    image.local_material_id = image_path.stem
+    image.path = f"{_COVER_PATH_PLACEHOLDER}/Resources/cover/{image_path.name}"
+    cover_script.add_segment(VideoSegment(
+        image,
+        Timerange(0, _COVER_DURATION_US),
+        source_timerange=Timerange(0, _COVER_DURATION_US),
+        speed=1.0,
+    ), cover_track)
+    cover_script.content.update({
+        "id": draft_id,
+        "name": "DouyinCut 封面",
+        "create_time": int(time.time()),
+        "update_time": int(time.time()),
+        "duration": _COVER_DURATION_US,
+    })
+    return json.loads(cover_script.dumps())
 
 
 def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settings,
@@ -88,9 +119,27 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
             suffix = source_cover.suffix.lower()
             if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
                 raise MediaError("所选封面格式不受支持")
-            cover_resource = resources / f"DouyinCut_cover{suffix}"
-            shutil.copy2(source_cover, cover_resource)
-            script.content["static_cover_image_path"] = str(cover_resource.resolve())
+            cover_resource = resources / "DouyinCut_cover.jpg"
+            prepare_cover_jpeg(source_cover, cover_resource, settings, checkpoint=checkpoint)
+            script.content.pop("static_cover_image_path", None)
+            cover_resources = resources / "cover"
+            cover_resources.mkdir()
+            cover_resource_copy = cover_resources / f"{uuid.uuid4()}.jpg"
+            shutil.copy2(cover_resource, cover_resource_copy)
+            cover_draft_id = uuid.uuid4().hex.upper()
+            cover_draft = _build_cover_draft(cover_resource_copy, settings, cover_draft_id)
+            script.content["cover_enable"] = True
+            script.content["cover"] = {
+                "type": "image",
+                "sub_type": "local",
+                "cover_draft_id": cover_draft_id,
+                "cover_draft": cover_draft,
+            }
+            script.imported_materials["drafts"] = [{
+                "id": cover_draft_id,
+                "draft": cover_draft,
+            }]
+            shutil.copy2(cover_resource, draft_path / "draft_cover.jpg")
         script.add_track(TrackType.video, "DouyinCut 视频")
         timeline_cursor = 0
         clip_timeline = []
@@ -170,6 +219,17 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
             material_path = Path(material.path).resolve()
             if material_path.parent != resources.resolve() or not material_path.is_file():
                 raise MediaError("剪映草稿素材路径未能正确绑定到工程目录")
+        if cover_resource is not None:
+            # 剪映“设为封面”后的样本将封面片段放在主时间线尾部之后。
+            cover_segment = cover_draft["tracks"][0]["segments"][0]
+            end_frame = (timeline_cursor * plan.canvas.fps + 999_999) // 1_000_000
+            cover_segment["target_timerange"] = {
+                "start": (end_frame + plan.canvas.fps + 1) * 1_000_000 // plan.canvas.fps,
+                "duration": _COVER_SEGMENT_DURATION_US,
+            }
+            cover_segment["render_index"] = 101
+            cover_segment["track_render_index"] = 101
+            cover_draft["materials"]["videos"][0]["check_flag"] = 62978047
         script.content["name"] = name
         script.content["id"] = uuid.uuid4().hex.upper()
         script.content["create_time"] = int(time.time())
@@ -183,7 +243,7 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
                          "tm_duration": plan.duration_us / 1_000_000,
                          "tm_draft_cloud_modified": int(time.time())})
         if cover_resource is not None:
-            metadata["draft_cover"] = str(cover_resource.resolve())
+            metadata["draft_cover"] = "draft_cover.jpg"
         meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         settings_path = draft_path / "draft_settings"
         settings_text = settings_path.read_text(encoding="utf-8")
@@ -193,6 +253,8 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
         marker_path = draft_path / "douyincut_draft.json"
         marker = json.loads(marker_path.read_text(encoding="utf-8"))
         marker["state"] = "complete"
+        if cover_resource is not None:
+            marker["timeline_cover_pending"] = script.content["id"]
         marker_path.write_text(json.dumps(marker, ensure_ascii=False, indent=2), encoding="utf-8")
         if checkpoint:
             checkpoint()

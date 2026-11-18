@@ -7,7 +7,7 @@ from unittest.mock import patch
 import httpx
 
 from app.ai.image_generation import fetch_product_image, request_image
-from app.ai.providers import CloudConfig
+from app.ai.providers import CloudConfig, ProviderError
 
 
 PNG = b"\x89PNG\r\n\x1a\nfixture"
@@ -49,6 +49,20 @@ class ImageGenerationTests(unittest.TestCase):
                 }, "image-fixture-key", str(source), "keep the garment", "1024x1536")
             self.assertEqual(result, PNG)
             self.assertEqual(content_type, "image/png")
+
+    def test_request_image_404_reports_endpoint_and_base_url_guidance(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "reference.jpg"
+            source.write_bytes(b"reference-image")
+            client = httpx.Client(transport=httpx.MockTransport(
+                lambda request: httpx.Response(404, text="not found", request=request)))
+            self.addCleanup(client.close)
+            with patch("app.ai.image_generation.httpx.Client", return_value=client):
+                with self.assertRaisesRegex(ProviderError, r"HTTP 404.*路径 /v1/images/edits.*Base URL"):
+                    request_image({
+                        "image_base_url": "https://images.example/v1", "image_model": "cover-model",
+                        "image_timeout_seconds": 30,
+                    }, "image-fixture-key", str(source), "make a cover", "1024x1536")
 
     def test_product_image_download_requires_expected_https_host(self):
         for url in ("http://p3-aio.ecombdimg.com/image.jpg", "https://example.com/image.jpg",

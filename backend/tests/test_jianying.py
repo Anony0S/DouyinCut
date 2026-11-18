@@ -100,19 +100,57 @@ class JianyingDraftTests(unittest.TestCase):
     def test_cover_is_copied_and_written_to_both_draft_metadata_files(self):
         output_root = self.root / "jianying-projects-with-cover"
         cover = self.root / "generated-cover.png"
-        cover.write_bytes(b"\x89PNG\r\n\x1a\ncover-fixture")
+        run_process([self.settings.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                     "color=c=red:s=300x400", "-frames:v", "1", str(cover)])
         with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root), "PATH": ""}), \
                 patch("app._vendor.pyJianYingDraft.local_materials.pymediainfo", None):
             result = create_jianying_draft(self.plan, {self.asset.id: self.asset}, self.settings,
                                            "job_cover_test", cover_image_path=cover)
         draft_path = Path(result["draft_path"])
-        cover_copy = draft_path / "Resources" / "DouyinCut_cover.png"
+        cover_copy = draft_path / "Resources" / "DouyinCut_cover.jpg"
+        cover_resource = next((draft_path / "Resources" / "cover").glob("*.jpg"))
+        cover_preview = draft_path / "draft_cover.jpg"
         content = json.loads((draft_path / "draft_info.json").read_text(encoding="utf-8"))
         metadata = json.loads((draft_path / "draft_meta_info.json").read_text(encoding="utf-8"))
         self.assertTrue(cover_copy.is_file())
-        self.assertEqual(cover_copy.read_bytes(), cover.read_bytes())
-        self.assertEqual(content["static_cover_image_path"], str(cover_copy.resolve()))
-        self.assertEqual(metadata["draft_cover"], str(cover_copy.resolve()))
+        self.assertEqual(cover_copy.read_bytes()[:2], b"\xff\xd8")
+        image_info = json.loads(subprocess.check_output([
+            self.settings.ffprobe, "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height", "-of", "json", str(cover_resource),
+        ], text=True))["streams"][0]
+        self.assertEqual((image_info["codec_name"], image_info["width"], image_info["height"]),
+                         ("mjpeg", 300, 400))
+        self.assertTrue(cover_preview.is_file())
+        self.assertEqual(cover_preview.read_bytes()[:2], b"\xff\xd8")
+        self.assertEqual(cover_resource.read_bytes(), cover_copy.read_bytes())
+        self.assertEqual(cover_preview.read_bytes(), cover_copy.read_bytes())
+        self.assertTrue(cover.is_file())
+        self.assertNotIn("static_cover_image_path", content)
+        self.assertFalse((draft_path / "Timelines").exists(),
+                         "不能预先生成没有工程结构的时间线目录")
+        self.assertTrue(content["cover_enable"])
+        self.assertEqual(content["cover"]["type"], "image")
+        self.assertEqual(content["cover"]["sub_type"], "local")
+        cover_draft = content["cover"]["cover_draft"]
+        self.assertEqual(content["cover"]["cover_draft_id"], cover_draft["id"])
+        self.assertEqual(len(content["materials"]["drafts"]), 1)
+        self.assertEqual(content["materials"]["drafts"][0]["draft"]["id"], cover_draft["id"])
+        cover_track = cover_draft["tracks"][0]
+        cover_segment = cover_track["segments"][0]
+        end_frame = (content["duration"] * self.plan.canvas.fps + 999_999) // 1_000_000
+        self.assertEqual(cover_segment["target_timerange"], {
+            "start": (end_frame + self.plan.canvas.fps + 1) * 1_000_000 // self.plan.canvas.fps,
+            "duration": 3_000_000,
+        })
+        self.assertEqual(cover_segment["render_index"], 101)
+        self.assertEqual(cover_segment["track_render_index"], 101)
+        self.assertEqual(cover_draft["materials"]["videos"][0]["check_flag"], 62978047)
+        self.assertEqual(cover_track["segments"][0]["material_id"],
+                         cover_draft["materials"]["videos"][0]["id"])
+        self.assertEqual(cover_draft["materials"]["videos"][0]["type"], "photo")
+        self.assertIn("##_draftpath_placeholder_", cover_draft["materials"]["videos"][0]["path"])
+        self.assertTrue(cover_draft["materials"]["videos"][0]["path"].endswith(cover_resource.name))
+        self.assertEqual(metadata["draft_cover"], "draft_cover.jpg")
 
     def test_override_directory_is_created(self):
         output_root = self.root / "configured" / "drafts"

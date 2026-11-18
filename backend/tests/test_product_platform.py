@@ -234,6 +234,53 @@ class IntegrationTests(unittest.TestCase):
         self.assertNotIn(TOKEN_KEY, self.secrets)
         self.assertFalse(self.app.state.product_platform.status()["logged_in"])
 
+    def test_product_images_uses_detail_id_from_search_result(self):
+        self.login()
+        self.app.state.store.put("asset", {
+            "id": "asset_covertest", "path": "source.mp4", "name": "source.mp4",
+            "sha256": "a" * 64, "duration_us": 1_000_000, "width": 1080,
+            "height": 1920, "has_audio": True,
+        })
+        self.remote.return_value.product_images.return_value = [
+            "https://p3-aio.ecombdimg.com/reference.jpg",
+        ]
+        with patch("app.ai.image_generation.fetch_product_image",
+                   return_value=(b"fake-image", "image/jpeg")):
+            result = self.client.post(
+                "/api/v1/product-platform/products/images",
+                headers=self.headers,
+                json={"asset_id": "asset_covertest", "product_id": "2280988"},
+            )
+        self.assertEqual(result.status_code, 200, result.text)
+        self.remote.return_value.product_images.assert_called_once_with("2280988")
+        self.assertEqual(len(result.json()["images"]), 1)
+        self.assertNotIn("platform_product_id", result.request.content.decode())
+
+    def test_product_images_reuses_project_cache_until_explicit_refresh(self):
+        self.login()
+        self.app.state.store.put("asset", {
+            "id": "asset_covertest", "path": "source.mp4", "name": "source.mp4",
+            "sha256": "a" * 64, "duration_us": 1_000_000, "width": 1080,
+            "height": 1920, "has_audio": True,
+        })
+        self.remote.return_value.product_images.return_value = [
+            "https://p3-aio.ecombdimg.com/reference.jpg",
+        ]
+        with patch("app.ai.image_generation.fetch_product_image",
+                   return_value=(b"fake-image", "image/jpeg")) as fetch:
+            payload = {"asset_id": "asset_covertest", "product_id": "2280988"}
+            first = self.post("products/images", payload)
+            cached = self.post("products/images", payload)
+            refreshed = self.post("products/images", {**payload, "refresh": True})
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertFalse(first.json()["cached"])
+        self.assertTrue(cached.json()["cached"])
+        self.assertEqual(cached.json()["images"], first.json()["images"])
+        self.assertFalse(refreshed.json()["cached"])
+        self.assertNotEqual(refreshed.json()["images"], first.json()["images"])
+        self.assertEqual(self.remote.return_value.product_images.call_count, 2)
+        self.assertEqual(fetch.call_count, 2)
+
     def test_add_to_showcase_uses_selected_scope_and_private_member_relation(self):
         self.login()
         self.assertEqual(self.post("scope", {"main_ip_id": "22"}).status_code, 200)

@@ -162,15 +162,6 @@ class ApiTests(unittest.TestCase):
             save.assert_called_once_with('llm_api_key','private-test-key')
             self.assertNotIn('private-test-key',response.text)
 
-    def test_short_product_name_endpoint_returns_model_name(self):
-        from unittest.mock import patch
-        with patch('app.api.generate_short_product_name', return_value='轻薄针织开衫') as generate:
-            response = self.client.post('/api/v1/settings/cloud/short-product-name', headers=self.headers,
-                                        json={'product_name': '2026春季女装新款轻薄显瘦针织开衫外套'})
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json(), {'name': '轻薄针织开衫'})
-        generate.assert_called_once()
-
     def test_asr_model_can_be_manually_saved_and_reloaded(self):
         from unittest.mock import patch
         with patch('app.api.read_secret', return_value=None):

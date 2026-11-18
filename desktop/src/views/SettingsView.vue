@@ -424,7 +424,7 @@ onUnmounted(() => {
           <label for="image-base-url">Base URL</label>
           <input id="image-base-url" v-model="config.image_base_url" type="url" required
             placeholder="https://api.example.com/v1" />
-          <p class="hint">使用 OpenAI Images 编辑接口兼容服务，不含 /images/edits。请求会上传选中的商品参考图。</p>
+          <p class="hint">填写服务要求的 API Base URL（包含版本前缀，例如 /v1，不含 /images/edits）。请求会上传选中的商品参考图。</p>
           <label for="image-api-key">API Key · {{ imageKeyConfigured ? "已配置" : "未配置" }}</label>
           <SecretInput id="image-api-key" v-model="imageKey" :saved="imageKeyConfigured"
             secret-name="image_generation_api_key" :preview="imageKeyPreview" :disabled="busy"
@@ -434,7 +434,7 @@ onUnmounted(() => {
           <input id="image-model" v-model="config.image_model" required maxlength="100" />
           <label for="image-timeout">请求等待时间 / 秒</label>
           <input id="image-timeout" v-model.number="config.image_timeout_seconds" type="number" min="30" max="900" required />
-          <p class="hint">封面使用当前方案画布方向。图片生成会产生服务调用费用，任务可在后台查看状态。</p>
+          <p class="hint">封面固定输出 3:4 竖版图片。图片生成会产生服务调用费用，任务可在后台查看状态。</p>
           <div class="settings-actions">
             <button class="btn btn-primary" :disabled="busy || !connected">保存封面生图</button>
           </div>

@@ -1,6 +1,6 @@
 # DouyinCut 项目规格与文档入口
 
-- 版本：0.2.154
+- 版本：0.2.155
 - 日期：2026-11-15（Asia/Shanghai）
 - 状态：当前开发与验收基线
 - 平台：Windows；Python / uv、FastAPI、Vue 3 / pnpm、Tauri 桌面外壳

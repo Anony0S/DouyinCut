@@ -68,7 +68,15 @@ def request_image(config: dict, api_key: str, source_path: str, prompt: str, siz
     except httpx.HTTPError:
         raise ProviderError("封面生图服务连接失败，请检查地址和网络") from None
     if response.status_code < 200 or response.status_code >= 300:
-        raise ProviderError(f"封面生图服务请求失败（HTTP {response.status_code}）")
+        request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
+        request_suffix = f"，服务请求 ID：{request_id[:120]}" if request_id else ""
+        if response.status_code == 404:
+            path = urlparse(url).path
+            raise ProviderError(
+                f"封面生图服务请求失败（HTTP 404，接口路径 {path}）。请核对 Base URL 是否包含服务要求的 API 版本前缀，"
+                f"并确认服务支持 /images/edits{request_suffix}"
+            )
+        raise ProviderError(f"封面生图服务请求失败（HTTP {response.status_code}）{request_suffix}")
     if len(response.content) > MAX_IMAGE_BYTES * 2:
         raise ProviderError("封面生图服务返回内容过大")
     try:

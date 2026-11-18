@@ -9,7 +9,7 @@
 云端设置以“文本剪辑模型”“语音识别模型”“OSS 存储”“抖音直播登录”“星斗商品平台”页签切换对应配置卡片，不显示步骤编号。切换页签时保留未保存的模型 / OSS 表单与密钥草稿；各卡片独立保存，既不提交其他卡片的未保存内容，也不丢弃其草稿。600px 以下卡片字段单列。工作目录和版本更新位于侧栏“本地设置”页，以列表行排列并在行右侧提供操作；日志在侧栏“运行日志”页查看和清理，本地设置不再提供日志入口。
 
 - 文本剪辑模型：独立配置 Base URL（base_url）、API Key（llm_api_key）、模型 ID（planner_model）和等待时间（chat_timeout_seconds）。
-- 封面生图：独立配置 OpenAI Images API 兼容服务 Base URL（image_base_url，不含 `/images/edits`）、API Key（image_generation_api_key）、模型 ID（image_model）和等待时间（image_timeout_seconds，30–900 秒，默认 240 秒）。该密钥单独保存在 Windows Credential Manager，不与文本或语音密钥回退共用；封面任务使用 multipart `image` 上传本地商品参考图，默认调用 `/images/edits`，只接受 PNG、JPEG 或 WebP 结果。设置完成只代表配置已保存，不代表真实生图服务可用。
+- 封面生图：独立配置 OpenAI Images API 兼容服务 Base URL（image_base_url，包含服务要求的 API 版本前缀但不含 `/images/edits`）、API Key（image_generation_api_key）、模型 ID（image_model）和等待时间（image_timeout_seconds，30–900 秒，默认 240 秒）。该密钥单独保存在 Windows Credential Manager，不与文本或语音密钥回退共用；封面任务使用 multipart `image` 上传本地商品参考图，默认调用 `{image_base_url}/images/edits`，只接受 PNG、JPEG 或 WebP 结果。设置完成只代表配置已保存，不代表真实生图服务可用。
 - 模型 Base URL 和模型 ID 不设默认值，首次使用由用户手动填写。保存配置允许未配置的模型字段留空，非空值仍按协议校验；文本、语音和 OSS 卡片可独立保存，不依赖先配置其他卡片。开始分析前检查文本与语音的地址、模型 ID 和密钥是否齐全；测试模型只检查文本配置，不要求语音或 OSS 已配置。
 - 语音识别模型：独立配置 Base URL（asr_base_url）、API Key（asr_api_key）、模型 ID（asr_model）和等待时间（asr_timeout_seconds，默认 300 秒，30–900 秒）。语音密钥必须单独保存，不自动复制或回退到文本密钥。支持当前 Qwen 原生多模态音频协议；本流程必须执行 ASR，不保存视觉模型、采样参数或 ASR 开关。
 - 文本剪辑模型卡片提供“测试模型”按钮，按当前表单的 Base URL、文本剪辑决策模型、等待时间和替换密钥发起一次简短文本生成请求；替换密钥留空时使用已保存的模型密钥，不回传完整密钥、不保存表单或密钥、不创建业务任务、不上传用户音视频，也不测试 ASR / OSS。界面说明可能产生少量调用费用。仅有效的非空文本回复视为可用，显示所测模型、成功或失败原因及耗时；鉴权、权限、模型 / 接口不存在、限流、云端故障、无效响应和网络错误明确反馈，不返回云端原始响应或凭据。测试等待不超过当前文本等待时间且最多 60 秒，最多输出 128 token，不自动重试；测试中禁用重复点击和文本模型保存，不锁定语音、OSS 或直播登录卡片。模型地址、模型 ID、等待时间或替换密钥变更时清除旧结果，忽略过期结果和页面卸载后的返回。

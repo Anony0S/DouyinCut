@@ -110,8 +110,7 @@ class Worker:
             plan = Plan.model_validate(store.get("plan", payload["plan_id"], payload["revision"]))
             if payload["asset_id"] != plan.clips[0].source_asset_id:
                 raise ValueError("封面任务的视频项目与方案不匹配")
-            ratio = plan.canvas.width / plan.canvas.height
-            size = "1536x1024" if ratio > 1.15 else "1024x1536" if ratio < 0.87 else "1024x1024"
+            size = "1024x1536"
             ctx.progress(0.05)
             image_bytes, content_type = interruptible_network_call(
                 "image_generation",
@@ -124,13 +123,19 @@ class Worker:
             extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[content_type]
             output_dir = settings.data_dir / "covers" / payload["asset_id"]
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"{job['id']}{extension}"
-            temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
-            temporary_path.write_bytes(image_bytes)
+            from .media.processing import prepare_cover_jpeg
+            source_path = output_dir / f"{job['id']}.source{extension}"
+            output_path = output_dir / f"{job['id']}.jpg"
+            temporary_path = output_dir / f"{job['id']}.tmp.jpg"
+            source_path.write_bytes(image_bytes)
+            width, height = prepare_cover_jpeg(source_path, temporary_path, settings, checkpoint=ctx.checkpoint)
+            if not temporary_path.is_file() or temporary_path.stat().st_size > MAX_IMAGE_BYTES:
+                raise ProviderError("3:4 封面转换失败或结果文件过大")
             os.replace(temporary_path, output_path)
+            source_path.unlink(missing_ok=True)
             result = {"cover_id": job["id"], "path": str(output_path.resolve()),
-                      "content_type": content_type, "plan_id": plan.id,
-                      "revision": plan.revision, "size": size}
+                      "content_type": "image/jpeg", "plan_id": plan.id,
+                      "revision": plan.revision, "size": f"{width}x{height}"}
         elif job["kind"] == "jianying":
             from .integrations.jianying.service import create_jianying_draft
             plan = Plan.model_validate(store.get("plan", payload["plan_id"], payload["revision"]))
@@ -278,9 +283,23 @@ class Worker:
 
     def run(self, stop=None):
         stop = stop if stop is not None else threading.Event()
-        while not stop.is_set():
-            if not self.run_once():
-                stop.wait(0.5)
+        def sync_covers():
+            from .integrations.jianying.cover_sync import sync_pending_covers
+            while not stop.wait(2):
+                try:
+                    sync_pending_covers()
+                except Exception:
+                    logger.exception("Failed to synchronize Jianying cover thumbnails")
+
+        cover_thread = threading.Thread(target=sync_covers, daemon=True)
+        cover_thread.start()
+        try:
+            while not stop.is_set():
+                if not self.run_once():
+                    stop.wait(0.5)
+        finally:
+            stop.set()
+            cover_thread.join(timeout=3)
 
 
 def main():

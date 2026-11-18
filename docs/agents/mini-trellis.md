@@ -55,4 +55,4 @@ mini-trellis mem read '<ref>'
 
 记录器只校验主题路径并写日志链接，不修改主题正文。`.trellis/spec/project/` 的实际主题可直接传给 `--topic`。根目录 `AGENTS.md` 不属于 `--topic` 接受的路径；涉及它时，在 summary 中写相对 journal 的 Markdown 链接，并将实际修改的 docs / spec / research 文档作为主题；若仅修改根目录约定，可省略 `--topic`。日志位置见 [.trellis/workspace/index.md](../../.trellis/workspace/index.md)。
 
-当前关闭日志自动提交；完成后按正常代码审查流程决定提交。共享接入时，将项目文档、`.trellis` 的知识与必要配置 / 脚本，以及所用宿主的技能和 hooks 一起审查纳入版本管理；本机开发者身份、运行状态、缓存和凭据按忽略规则留在本机。
+mini-trellis 日志关闭自动提交。功能开发和验证完成后保留未提交的 Git 变更，交由用户手动验证；只有用户明确要求提交后才创建 Git commit。共享接入时，将项目文档、`.trellis` 的知识与必要配置 / 脚本，以及所用宿主的技能和 hooks 一起审查纳入版本管理；本机开发者身份、运行状态、缓存和凭据按忽略规则留在本机。

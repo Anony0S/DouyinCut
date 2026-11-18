@@ -36,7 +36,7 @@ export const productPlatformApi = {
   logout: () => api<ProductPlatformStatus>('/product-platform/logout', 'POST'),
   selectScope: (mainIpId: string) => api<ProductPlatformStatus>('/product-platform/scope', 'POST', {main_ip_id: mainIpId}),
   search: (keyword: string) => api<{product: XingdouProduct | null; scope_name: string}>('/product-platform/products/search', 'POST', {keyword}),
-  images: (assetId:string, platformProductId: string) => api<{images:{id:string;url:string}[]}>('/product-platform/products/images', 'POST', {asset_id:assetId,platform_product_id:platformProductId}),
+  images: (assetId:string, productId: string, refresh=false) => api<{images:{id:string;url:string}[];cached:boolean}>('/product-platform/products/images', 'POST', {asset_id:assetId,product_id:productId,refresh}),
   addToShowcase: (platformProductId: string) => api<{added: boolean}>('/product-platform/products/add-to-showcase', 'POST', {platform_product_id: platformProductId}),
 }
 

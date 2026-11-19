@@ -947,3 +947,57 @@ Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 36: Release 发布确认
+<!-- trellis-session: v=2 fp=c45229bc1a803201 -->
+
+**Date**: 2026-11-18
+**Task**: Release 发布确认
+**Branch**: `master`
+
+### Summary
+
+用户确认后续按要求发布 Release 时不因随包 FFmpeg 材料尚未齐备重复询问，实际材料状态不变。
+Topics: [docs/software-updates.md](../../../docs/software-updates.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 37: 正式版启动就绪检查超时修复
+<!-- trellis-session: v=2 fp=862a64a452079ecd -->
+
+**Date**: 2026-11-19
+**Task**: 正式版启动就绪检查超时修复
+**Branch**: `master`
+
+### Summary
+
+正式版三个后台角色均已就绪，但启动器以 300 毫秒超时请求项目列表。用户约 34 MB 数据库只读实测项目列表耗时 388～497 毫秒，导致反复超时。已将启动探测改为带会话认证的 /api/v1/health，并同步接口与运行规格。
+Topics: [.trellis/spec/project/runtime-release.md](../../spec/project/runtime-release.md)
+
+### Main Changes
+
+- 复用固定状态健康检查，新增认证路由并用于桌面启动探测。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] API、桌面运行时及项目回归共 49 项通过。隔离数据库副本真实 HTTP 验证中，项目列表两次超过 300 毫秒，health 两次约 17～18 毫秒成功。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 源码修复保留未提交，安装版需重新打包更新并验证启动界面。

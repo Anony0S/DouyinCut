@@ -196,7 +196,7 @@ class DesktopSession:
                             raise RuntimeError(f'桌面服务提前退出：{role}')
                     if all(state['ready'] for state in self._roles.values()):
                         try:
-                            response = client.get('/api/v1/projects', headers={'X-Session-Token': info.token})
+                            response = client.get('/api/v1/health', headers={'X-Session-Token': info.token})
                             if response.status_code == 200:
                                 self._info = info
                                 return info

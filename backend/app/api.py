@@ -140,6 +140,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         return JSONResponse({"detail": "请求参数无效，请检查字段类型、范围和必填项"}, status_code=422)
 
     @app.get("/health")
+    @app.get("/api/v1/health")
     def health():
         return {"status": "ok", "version": "0.1.0"}
 

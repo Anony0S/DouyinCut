@@ -1,6 +1,7 @@
 import importlib.util
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 AVAILABLE=all(importlib.util.find_spec(m) is not None for m in ["fastapi","httpx"])
@@ -25,6 +26,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/assets',headers=self.headers).status_code,200)
         self.assertEqual(self.client.get('/api/v1/assets',headers={**self.headers,'Origin':'https://untrusted.example'}).status_code,401)
         self.assertEqual(self.client.get('/api/v1/assets/unknown/media',headers=self.headers).status_code,404)
+
+    def test_health_requires_auth_without_querying_business_data(self):
+        with patch.object(self.app.state.store, 'connection', side_effect=AssertionError('Health queried storage')):
+            self.assertEqual(self.client.get('/api/v1/health').status_code, 401)
+            self.assertEqual(self.client.get('/api/v1/health', headers={'X-Session-Token': 'wrong-token'}).status_code, 401)
+            self.assertEqual(self.client.get('/api/v1/health', headers={
+                **self.headers, 'Origin': 'https://untrusted.example'}).status_code, 401)
+            response = self.client.get('/api/v1/health', headers=self.headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['status'], 'ok')
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
 
     def test_cover_original_checks_ownership_and_file_location(self):
         store = self.app.state.store

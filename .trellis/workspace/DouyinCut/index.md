@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 35
-- **Last Active**: 2026-11-18
+- **Total Sessions**: 37
+- **Last Active**: 2026-11-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~949 | Active |
+| `journal-1.md` | ~1003 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-11-19 | 正式版启动就绪检查超时修复 | - | `master` |
+| 36 | 2026-11-18 | Release 发布确认 | - | `master` |
 | 35 | 2026-11-18 | 封面原图查看 | - | `master` |
 | 34 | 2026-11-18 | 调整封面生成尺寸与裁剪 | - | `master` |
 | 33 | 2026-11-18 | 本地清理七天前未使用文件 | - | `-` |

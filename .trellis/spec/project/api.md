@@ -9,6 +9,7 @@
 | 接口 | 当前用途 |
 | --- | --- |
 | `POST /auth` | 本地会话 Cookie |
+| `GET /health` | 认证的桌面会话就绪检查，返回 status / version；处理时只返回固定状态 |
 | `GET /projects` | page（默认 1）、page_size（默认 20，最大 100）、search、status；返回 items / total / page / page_size / pages |
 | `GET /projects/{asset_id}` | 当前视频、资料草稿、同源方案 / 候选 / 产物 / 相关任务及最新分析 |
 | `PATCH /projects/{asset_id}` | 保存 product_name、instructions、target_duration_us、duration_tolerance_us（0–30000000，默认15000000） |

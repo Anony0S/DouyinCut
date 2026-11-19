@@ -455,7 +455,15 @@ WorkDirectoryRegistry(sys.argv[1]).select(sys.argv[2])
             ).model_dump())
             session = DesktopSession(settings, frontend)
             try:
-                info = session.start()
+                original_get = httpx.Client.get
+
+                def check_readiness(client, url, **kwargs):
+                    self.assertEqual(url, '/api/v1/health')
+                    return original_get(client, url, **kwargs)
+
+                with patch.object(httpx.Client, 'get', autospec=True, side_effect=check_readiness) as readiness:
+                    info = session.start()
+                    self.assertGreater(readiness.call_count, 0)
                 self.assertTrue(info.url.startswith('http://127.0.0.1:'))
                 self.assertNotIn(info.token, info.url)
                 self.assertGreaterEqual(len(info.token), 32)

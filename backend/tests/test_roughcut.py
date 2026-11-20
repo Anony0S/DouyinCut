@@ -71,10 +71,52 @@ class RoughcutTests(unittest.TestCase):
         self.assertNotIn('product_info', prompt)
         self.assertEqual(prompt['duration_tolerance_ms'], 15000)
         self.assertEqual(prompt['instructions'], DEFAULT_INSTRUCTIONS)
-        self.assertEqual([t['start_ms'] for t in prompt['transcript']], [0, 10000, 20000])
+        self.assertEqual(prompt['transcript'], [[0, 5000, '上身很显瘦。'],
+                                               [10000, 15000, '今天只要九十九。'],
+                                               [20000, 25000, '面料柔软透气。']])
         self.assertEqual(prompt['source_duration_ms'], 250000)
         self.assertNotIn('image_url', json.dumps(payload))
         self.assertEqual(network.call_args.kwargs, {'timeout_seconds': 300, 'operation': 'planner'})
+
+    def test_short_filler_filter_keeps_short_meaningful_text_and_exact_thresholds(self):
+        rows = [
+            (5000, 5400, '嗯，啊。'),
+            (5500, 5900, '不透。'),
+            (6000, 6400, '嗯嗯嗯嗯嗯。'),
+            (6500, 7500, '嗯。'),
+        ]
+        sentences = [self.sentences[0], *[
+            Transcript(source_asset_id=self.asset.id, start_us=start * 1000, end_us=end * 1000, text=text)
+            for start, end, text in rows
+        ], self.sentences[-1]]
+        response = {'choices': [{'message': {'content': self.selection.model_dump_json()}}]}
+        unfiltered_content = ''
+        for options, retained in ((None, rows), ({}, rows[1:]),
+                                  ({'max_chars': 2, 'max_duration_ms': 1100}, rows[:3])):
+            request = RoughcutRequest(product_name='测试', short_filler_filter=options)
+            with self.subTest(options=options), \
+                    patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
+                    patch('app.ai.roughcut.cloud_json', return_value=response) as network:
+                self.assertEqual(select_intervals(sentences, request, self.config, self.asset.duration_us), self.selection)
+            content = network.call_args.args[2]['messages'][0]['content']
+            prompt = json.loads(content.split('\n', 1)[1])
+            self.assertEqual(prompt['transcript'][1:-1], [list(row) for row in retained])
+            if options is None:
+                unfiltered_content = content
+            else:
+                self.assertLess(len(content), len(unfiltered_content))
+                self.assertEqual(content.split('\n', 1)[0], unfiltered_content.split('\n', 1)[0])
+
+    def test_short_filler_filter_sends_original_when_every_row_would_be_removed(self):
+        sentences = [Transcript(source_asset_id=self.asset.id, start_us=0, end_us=500_000, text='嗯。')]
+        response = {'choices': [{'message': {'content': json.dumps({'clips': [
+            {'start_ms': 0, 'end_ms': 500, 'reason': '测试原转写回退'}]})}}]}
+        request = RoughcutRequest(product_name='测试', short_filler_filter={})
+        with patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
+                patch('app.ai.roughcut.cloud_json', return_value=response) as network:
+            select_intervals(sentences, request, self.config, self.asset.duration_us)
+        content = network.call_args.args[2]['messages'][0]['content']
+        self.assertEqual(json.loads(content.split('\n', 1)[1])['transcript'], [[0, 500, '嗯。']])
 
     def test_text_only_asr_keeps_response_for_hover_and_retry_never_repays(self):
         response = {'output': {'text': '只有整段文本'}, 'request_id': 'text-only-request'}
@@ -349,21 +391,27 @@ class RoughcutTests(unittest.TestCase):
     def test_worker_publishes_single_product_plan_and_automatic_preview_without_vision(self):
         self.store.put('asset', self.asset.model_dump())
         job = self.store.enqueue('analyze', {'asset_id': self.asset.id, 'config': self.config.model_dump(),
-                                            'product_name': '奶黄千层'})
+                                            'product_name': '奶黄千层', 'short_filler_filter': {}})
+        filler = Transcript(source_asset_id=self.asset.id, start_us=5_000_000, end_us=5_400_000, text='嗯。')
+        sentences = [self.sentences[0], filler, *self.sentences[1:]]
+        response = {'choices': [{'message': {'content': self.selection.model_dump_json()}}]}
         worker = Worker(self.settings)
-        with patch('app.ai.providers.transcribe', return_value=self.sentences), \
-                patch('app.ai.roughcut.select_intervals', return_value=self.selection), \
+        with patch('app.ai.providers.transcribe', return_value=sentences), \
+                patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
+                patch('app.ai.roughcut.cloud_json', return_value=response) as network, \
                 patch('app.media.processing.extract_frame') as vision:
             worker.run_once()
             vision.assert_not_called()
         result = self.store.job(job['id'])
         self.assertEqual(result['state'], 'succeeded', result.get('error'))
+        prompt = json.loads(network.call_args.args[2]['messages'][0]['content'].split('\n', 1)[1])
+        self.assertEqual([row[2] for row in prompt['transcript']], [sentence.text for sentence in self.sentences])
         self.assertEqual(result['result']['mode'], 'asr_text_roughcut')
         self.assertEqual(result['result']['timestamp_unit'], 'milliseconds')
         self.assertEqual(result['result']['selected_intervals'], self.selection.model_dump()['clips'])
         snapshot = self.store.cached(f"roughcut-transcript:{job['id']}")
         self.assertTrue(snapshot['ready'])
-        self.assertEqual(snapshot['sentences'], [t.model_dump() for t in self.sentences])
+        self.assertEqual(snapshot['sentences'], [t.model_dump() for t in sentences])
         self.assertEqual(len(self.store.list('product')), 1)
         plan = self.store.get('plan', result['result']['plan_id'])
         self.assertEqual([c['source_start_us'] for c in plan['clips']], [20_000_000, 0])
@@ -579,8 +627,12 @@ class RoughcutApiTests(unittest.TestCase):
                                oss_bucket='test-bucket')
         store.put('config', {'id': 'cloud', 'config': previous.model_dump()})
         with patch('app.api.model_api_key', return_value='mock-key'), patch('app.api.asr_api_key', return_value='mock-asr-key'):
-            task = self.client.post('/api/v1/assets/video/analyze', headers=self.headers,
-                                    json={'product_name': '奶黄千层'}).json()
+            options = {'max_chars': 4, 'max_duration_ms': 700}
+            submitted = self.client.post('/api/v1/assets/video/analyze', headers=self.headers,
+                                         json={'product_name': '奶黄千层', 'short_filler_filter': options})
+            self.assertEqual(submitted.status_code, 202, submitted.text)
+            task = submitted.json()
+            self.assertEqual(task['payload']['short_filler_filter'], options)
         worker = Worker(self.settings)
         with patch('app.ai.providers.transcribe', side_effect=ProviderError('模型调用失败')):
             worker.run_once()
@@ -590,6 +642,7 @@ class RoughcutApiTests(unittest.TestCase):
         retried = self.client.post(f"/api/v1/jobs/{task['id']}/retry", headers=self.headers)
         self.assertEqual(retried.status_code, 200, retried.text)
         self.assertEqual(retried.json()['payload']['config']['asr_model'], current.asr_model)
+        self.assertEqual(retried.json()['payload']['short_filler_filter'], options)
         self.assertIsNone(retried.json()['error'])
         selection = TimeSelection.model_validate({'clips': [{'start_ms': 600, 'end_ms': 4000, 'reason': '面料'}]})
         response = {'sentence': {'text': '面料柔软。', 'begin_time': 600, 'end_time': 4000}}

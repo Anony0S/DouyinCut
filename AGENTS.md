@@ -16,6 +16,7 @@
 
 - 新建或读取工单：按 [本地 Markdown 工单约定](docs/agents/issue-tracker.md)，使用 `.scratch/<feature-slug>/spec.md` 和独立的 `issues/<NN>-<slug>.md`。
 - 设置分诊状态：按 [分诊标签约定](docs/agents/triage-labels.md)，使用 `needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。
+- 每次正式发布前，根据本次变更选择应用版本号，并同步规格索引和规格变更记录。[语义化版本规则](docs/software-updates.md#语义化版本规则)
 - 探索领域或修改术语 / 决策：先读 [领域文档约定](docs/agents/domain.md)、根目录 [GLOSSARY.md](GLOSSARY.md) 及相关 `docs/adr/`；术语保持一致，冲突须明确提出。
 - 跨会话继续、接入历史材料或记录确认结论：按 [mini-trellis 项目指南](docs/agents/mini-trellis.md)，从 [项目文档入口](.trellis/spec/project/index.md) 找到并维护原文。
 

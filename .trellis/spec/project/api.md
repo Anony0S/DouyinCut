@@ -16,7 +16,7 @@
 | `DELETE /projects/{asset_id}` | 删除项目及本地专属数据；活动任务时拒绝，OSS 临时音频保留 |
 | `POST /assets/upload?filename=...` | 认证的原始二进制流，本地复制与排队探测 |
 | `GET /assets`、`GET /assets/{id}/media` | 素材查询与原素材范围预览 |
-| `POST /assets/{id}/analyze` | product_name、instructions、target_duration_us、duration_tolerance_us、refresh_asr；快照模型配置 |
+| `POST /assets/{id}/analyze` | product_name、instructions、target_duration_us、duration_tolerance_us、refresh_asr、short_filler_filter。short_filler_filter 默认 null，开启时传对象，内含 max_chars（整数，至少 1，默认 5）和 max_duration_ms（整数，至少 100，默认 1000），两者均为严格上界。任务快照保存过滤设置和模型配置 |
 | `GET /plans`、`PATCH /plans/{id}`、`DELETE /plans/{id}` | 方案查询、保存新版本 / 自动排队预览、删除单个方案及其本地产物 |
 | `POST /plans/{id}/approve` | 审核保存版本；当前界面不调用 |
 | `POST /plans/{id}/exports` | 只接受 format=mp4，默认 mp4；当前界面不调用 |

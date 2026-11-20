@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { Asset, Candidate, Plan, Job, Artifact, ProjectDraft, ProjectDetail } from '../api'
-import { projectsApi } from '../services/projects'
+import { projectsApi, type ShortFillerFilter } from '../services/projects'
 import { useSessionStore } from './session'
 
 export const useProjectStore=defineStore('project',()=>{
@@ -90,7 +90,7 @@ function trackRetry(updated: Job) {
     pendingAnalyzeId.value=updated.id;transcript.value=null;transcriptVisible.value=false
   }
 }
-async function analyze() { await session.act(async()=>{
+async function analyze(shortFillerFilter: ShortFillerFilter | null) { await session.act(async()=>{
   if(!activeAsset.value) throw new Error('请先选择视频')
   if(!productName.value.trim()) throw new Error('请先填写商品名称')
   await persistDraft()
@@ -98,7 +98,7 @@ async function analyze() { await session.act(async()=>{
     product_name:productName.value.trim(),
     instructions:instructions.value.trim()||defaultInstructions,target_duration_us:Math.round(targetSeconds.value*1e6),
     duration_tolerance_us:Math.round(toleranceSeconds.value*1e6),
-  },refreshAsr.value)
+  }, { refresh_asr: refreshAsr.value, short_filler_filter: shortFillerFilter })
   refreshAsr.value=false;transcript.value=null;transcriptVisible.value=false
   pendingAnalyzeId.value=job.id;session.message='已排队：完成全量转写 → 决策模型选择时间区间 → 裁剪拼接预览';await refresh()
 }) }

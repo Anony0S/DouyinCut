@@ -85,9 +85,37 @@ button:disabled {
   opacity:.45
 }
 
-button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible {
+button:focus-visible {
   outline:2px solid var(--accent);
   outline-offset:2px
+}
+
+:is(input, textarea, select, .date-picker-trigger):focus,
+:is(.input, .textarea, .select, .toggle):focus-within,
+.dropdown[open] > .date-picker-trigger {
+  --form-focus-border: color-mix(in oklab, var(--color-primary) 70%, var(--color-base-content));
+  border-color: var(--form-focus-border);
+  outline: none;
+}
+
+:is(.input, .textarea, .select):focus-within {
+  box-shadow: none;
+}
+
+.range:focus::-webkit-slider-thumb {
+  border-color: var(--form-focus-border);
+}
+
+.range:focus::-moz-range-thumb {
+  border-color: var(--form-focus-border);
+}
+
+@media (forced-colors: active) {
+  :is(input, textarea, select, .date-picker-trigger):focus-visible,
+  :is(label.input, label.textarea, .toggle):has(:focus-visible) {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
 }
 
 @layer base {
@@ -100,11 +128,14 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
   input,select,textarea {
     accent-color:var(--accent);
     width:100%;
-    padding:11px 12px;
     border:1px solid var(--app-border);
     background:var(--surface-soft);
     border-radius:7px;
     color:var(--text)
+  }
+
+  input,select:not(.select),textarea {
+    padding:11px 12px
   }
 
   textarea {
@@ -550,15 +581,14 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
 .roughcut-config-group { flex: 1; min-height: 0; padding: 0 4px 2px 2px; margin: 0 -4px 0 -2px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .roughcut-controls .panel-title { margin-bottom: 10px; }
 .roughcut-controls label { margin-top: 12px; }
-.roughcut-controls input:not([type="range"]), .roughcut-controls select, .roughcut-controls textarea { padding: 9px 10px; }
+.roughcut-controls input:not([type="range"], .checkbox), .roughcut-controls select, .roughcut-controls textarea { padding: 9px 10px; }
 .roughcut-controls .hint { margin: 9px 0; }
 .asset-task-list { flex: none; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--app-border); }
 .asset-task-rows { max-height: 168px; overflow-y: auto; overscroll-behavior: contain; }
 .asset-task-list > h2 { margin: 0 0 8px; }
 .asset-task-rows .roughcut-job:first-child { margin-top: 0; }
 .file-input { display: none; }
-.asr-refresh { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; line-height: 1.6; }
-.asr-refresh input { width: auto; margin: 3px 0 0; }
+.asr-refresh { display: flex; align-items: center; gap: 8px; font-size: 11px; line-height: 1.6; }
 .transcript-list { max-height: 360px; overflow: auto; margin-top: 12px; padding: 12px; background: var(--accent-soft); border-radius: 8px; font-size: 13px; line-height: 1.7; }
 .transcript-list p { margin: 0 0 12px; }
 .roughcut-preview { display: flex; flex-direction: column; container-type: inline-size; }
@@ -673,7 +703,14 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
 .editor-empty { flex: 1; min-height: 200px; display: grid; place-content: center; border: 1px dashed var(--app-border); border-radius: 9px; }
 .roughcut-job { margin-top: 8px; padding: 10px; border: 1px solid var(--app-border); border-radius: 8px; }
 .roughcut-job.is-finished { margin-top: 4px; padding: 5px 10px; border-color: transparent; background: var(--surface-soft); color: var(--text-muted); }
-.roughcut-job progress { margin-top: 8px; }
+.roughcut-job-status.badge-soft {
+  color: color-mix(in oklab, var(--badge-color, var(--color-base-content)) 25%, var(--color-base-content));
+}
+.roughcut-job-progress.progress {
+  display: block;
+  margin-top: 8px;
+  background-color: var(--color-base-300);
+}
 .jianying-job-path { display: grid; gap: 5px; margin-top: 8px; font-size: 11px; }
 .jianying-job-path code { display: block; padding: 8px; border-radius: 5px; background: var(--surface-soft); overflow-wrap: anywhere; user-select: text; }
 @container (max-width: 620px) {
@@ -1128,7 +1165,6 @@ h1 {
 .project-filters input { flex: 1 1 280px; min-width: 0; max-width: 520px; }
 .project-filters select { flex: none; width: 140px; }
 .project-toolbar-actions { display: flex; align-items: center; flex: none; gap: 10px; }
-.project-filters :is(.input, .select):focus:not(:focus-visible) { --input-color: color-mix(in oklab, var(--color-base-content) 20%, #0000); outline: none; box-shadow: none; }
 .projects-panel .table { min-width: 960px; font-size: 14px; }
 .projects-panel .table :is(th, td) { padding: 18px 16px; vertical-align: middle; }
 .projects-panel .table :is(th, td):first-child { padding-left: 24px; }

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 38
-- **Last Active**: 2026-11-19
+- **Total Sessions**: 42
+- **Last Active**: 2026-11-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1036 | Active |
+| `journal-1.md` | ~1140 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,10 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 42 | 2026-11-20 | 隔离开发版与正式版 Windows 凭据 | - | `master` |
+| 41 | 2026-11-20 | 统一表单控件焦点样式 | - | `master` |
+| 40 | 2026-11-20 | 压缩粗剪模型的转写输入 | - | `master` |
+| 39 | 2026-11-20 | 采用语义化版本选择发布编号 | - | `master` |
 | 38 | 2026-11-19 | 直播讲解多选合并商品片段 | - | `master` |
 | 37 | 2026-11-19 | 正式版启动就绪检查超时修复 | - | `master` |
 | 36 | 2026-11-18 | Release 发布确认 | - | `master` |

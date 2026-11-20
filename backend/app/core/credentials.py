@@ -1,4 +1,5 @@
 import os
+import sys
 
 
 def secret_preview(value: str | None) -> str:
@@ -14,24 +15,27 @@ def secret_preview(value: str | None) -> str:
     return f"{value[:prefix_length]}*****{value[-4:]}"
 
 
-# Saved cloud keys live in Windows Credential Manager under this service name.
-SERVICE = "DouyinCut"
+def _credential_service() -> str:
+    # Keep the installed runtime's existing Windows Credential Manager entries.
+    return "DouyinCut" if getattr(sys, "frozen", False) else "DouyinCut Dev"
 
 
-def read_secret(name: str, service: str = SERVICE) -> str | None:
+def read_secret(name: str, service: str | None = None) -> str | None:
     # Process environment supports development without persisting a secret in a file.
     value = os.environ.get(f"DOUYINCUT_{name.upper()}")
     if value:
         return value
     try:
         import keyring
-        return keyring.get_password(service, name)
+        return keyring.get_password(_credential_service() if service is None else service, name)
     except Exception:
         return None
 
 
-def write_secret(name: str, value: str, service: str = SERVICE):
+def write_secret(name: str, value: str, service: str | None = None):
     import keyring
+    if service is None:
+        service = _credential_service()
     if value:
         keyring.set_password(service, name, value)
     else:

@@ -6,7 +6,7 @@ import { duration, seconds } from '../api'
 import type { Plan } from '../api'
 import { useProjectStore } from '../stores/project'
 import { useSessionStore } from '../stores/session'
-import { kindLabels, stateLabels } from '../presentation'
+import { jobStateBadgeClass, kindLabels, stateLabels } from '../presentation'
 import { useWorkspace } from '../workspace'
 import { useVideoImport } from '../composables/useVideoImport'
 import WorkspaceSplit from '../components/WorkspaceSplit.vue'
@@ -20,6 +20,19 @@ const {assetId,activeAsset,productName,instructions,targetSeconds,toleranceSecon
  latestAnalysis,transcript,transcriptVisible,assetJobs,selectedPlan,previewArtifact,assetPlans,planDirty}=storeToRefs(project)
 const orderedPlans=computed(()=>assetPlans.value)
 const {analyze,loadTranscript,saveProjectInfo,savePlan,deletePlan,createJianyingDraft,moveClip,moveClipTo}=project
+const filterShortFillers = ref(false)
+const fillerMaxChars = ref<number | ''>(5)
+const fillerMaxSeconds = ref<number | ''>(1)
+watch(assetId, () => {
+  filterShortFillers.value = false
+  fillerMaxChars.value = 5
+  fillerMaxSeconds.value = 1
+})
+function submitAnalysis() {
+  if (!filterShortFillers.value) return analyze(null)
+  if (fillerMaxChars.value === '' || fillerMaxSeconds.value === '') return
+  return analyze({ max_chars: fillerMaxChars.value, max_duration_ms: Math.round(fillerMaxSeconds.value * 1000) })
+}
 const {chooseNewVideo}=useVideoImport()
 const controlJob=workspace.controlJob
 const productImages=ref<{id:string;url:string}[]>([]), selectedReferenceId=ref('')
@@ -224,7 +237,7 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
           <template #left>
           <section class="panel roughcut-controls">
             <div class="roughcut-config-group"><div class="panel-title"><h2>01 / 商品资料与要求</h2></div>
-            <form @submit.prevent="analyze">
+            <form @submit.prevent="submitAnalysis">
               <label for="product-name">商品名称</label><input id="product-name" v-model="productName" required maxlength="200" placeholder="独束分身型微定制【奶黄千层】假两件针织开衫"/>
               <div class="mt-4 flex flex-wrap items-center justify-between gap-2">
                 <label for="roughcut-instructions" class="m-0">剪辑要求</label>
@@ -237,17 +250,55 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
               <input id="duration-tolerance" v-model.number="toleranceSeconds" class="range range-sm mt-2 w-full text-primary [--range-bg:var(--color-base-300)] [--range-thumb:var(--color-primary)] [--range-fill:0]" type="range" min="0" max="30" step="1" :disabled="busy||analyzingAsset" :aria-valuetext="'允许偏差 ' + toleranceSeconds + ' 秒'" aria-describedby="duration-tolerance-hint"/>
               <div class="mt-1 flex justify-between text-xs text-base-content/60" aria-hidden="true"><span>0 秒</span><span>15 秒</span><span>30 秒</span></div>
               <p id="duration-tolerance-hint" class="hint">优先控制在 {{ Math.max(0,targetSeconds-toleranceSeconds) }}～{{ targetSeconds+toleranceSeconds }} 秒；素材不足可更短，最长不超过 {{ targetSeconds+toleranceSeconds }} 秒。</p>
-              <label class="asr-refresh"><input v-model="refreshAsr" type="checkbox"/>重新识别语音（会再次调用 ASR）</label>
+              <div class="mt-3 flex items-center gap-1.5 whitespace-nowrap sm:gap-2">
+                <label class="m-0! flex shrink-0 cursor-pointer items-center gap-1">
+                  <input v-model="filterShortFillers" class="checkbox checkbox-xs" type="checkbox" :disabled="busy||analyzingAsset" />
+                  过滤短语气词
+                </label>
+                <template v-if="filterShortFillers">
+                  <label class="m-0! flex min-w-0 items-center gap-1">
+                    <input v-model.number="fillerMaxChars" class="input input-xs w-10 min-w-0 px-0.5! py-0! text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" type="number" min="1" step="1" required :disabled="busy||analyzingAsset" aria-label="少于多少字" />
+                    字
+                  </label>
+                  <label class="m-0! flex min-w-0 items-center gap-1">
+                    <input v-model.number="fillerMaxSeconds" class="input input-xs w-10 min-w-0 px-0.5! py-0! text-center [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none" type="number" min="0.1" step="0.1" required :disabled="busy||analyzingAsset" aria-label="时长小于多少秒" />
+                    秒
+                  </label>
+                </template>
+              </div>
+              <label class="asr-refresh"><input v-model="refreshAsr" class="checkbox checkbox-xs" type="checkbox"/>重新识别语音（会再次调用 ASR）</label>
               <button class="primary full" :disabled="busy||!connected||!activeAsset||!productName.trim()||analyzingAsset">{{ analyzingAsset?'正在分析与粗剪…':'使用云端 AI 分析并粗剪' }}</button>
             </form>
             <p class="hint">每 2 分钟上传识别，完成整个视频的带时间戳对话后统一决策，按选中的时间区间裁剪并拼接。</p>
             <button v-if="latestAnalysis" class="secondary" :disabled="busy" :aria-expanded="transcriptVisible" @click="toggleTranscript">{{ transcriptVisible?'收起全量 ASR 对话与时间戳':'查看全量 ASR 对话与时间戳' }}</button>
-            <div v-if="transcriptVisible" class="transcript-list"><p v-if="!transcript?.ready" class="hint">全量转写尚未完成，请稍后再次查看。</p><template v-else><p class="hint">共 {{ transcript.sentences.length }} 条口播；决策模型使用这些完整对话。</p><p v-for="(line,index) in transcript.sentences" :key="index"><strong>{{ seconds(line.start_us) }}～{{ seconds(line.end_us) }} 秒</strong><br/>{{ line.text }}</p></template></div>
+            <div v-if="transcriptVisible" class="transcript-list"><p v-if="!transcript?.ready" class="hint">全量转写尚未完成，请稍后再次查看。</p><template v-else><p class="hint">共 {{ transcript.sentences.length }} 条口播。</p><p v-for="(line,index) in transcript.sentences" :key="index"><strong>{{ seconds(line.start_us) }}～{{ seconds(line.end_us) }} 秒</strong><br/>{{ line.text }}</p></template></div>
             </div>
             <section v-if="assetJobs.length" class="asset-task-list" aria-label="当前项目任务">
             <h2>任务状态</h2>
             <div class="asset-task-rows">
-            <div v-for="job in assetJobs" :key="job.id" class="roughcut-job" :class="{'is-finished':['succeeded','cancelled'].includes(job.state)}"><small>{{ kindLabels[job.kind] }} · {{ stateLabels[job.state] }}</small><progress v-if="!['succeeded','cancelled'].includes(job.state)" :value="job.progress" max="1"/><div v-if="job.kind==='jianying' && job.result?.draft_path" class="jianying-job-path"><strong>剪映草稿目录</strong><code>{{ job.result.draft_path }}</code><small>视频片段 {{ job.result.clip_count }} · 字幕 {{ job.result.subtitle_count }}</small></div><div v-if="job.error" class="job-error-line"><JobErrorDetails :key="`${job.id}-${job.attempts}`" :job-id="job.id"/><p class="error-text">{{ job.error }}</p></div><button v-if="job.state==='failed' && job.error?.includes('请求结果不确定')" class="secondary" title="确认已核查云端请求记录后，解除防重复提交保护" @click="controlJob(job,'acknowledge_asr_uncertain')">已核查云端，重试</button><button v-else-if="job.state==='failed'" class="secondary" @click="controlJob(job,'retry')">重试任务</button></div>
+              <div v-for="job in assetJobs" :key="job.id" class="roughcut-job"
+                :class="{ 'is-finished': ['succeeded', 'cancelled'].includes(job.state) }">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <small>{{ kindLabels[job.kind] || job.kind }}</small>
+                  <span class="badge badge-soft badge-xs roughcut-job-status" :class="jobStateBadgeClass(job.state)">
+                    {{ stateLabels[job.state] || job.state }}
+                  </span>
+                </div>
+                <progress v-if="!['succeeded', 'cancelled'].includes(job.state)" class="progress progress-primary roughcut-job-progress"
+                  :value="job.progress" max="1" :aria-label="`${kindLabels[job.kind] || job.kind}进度`" />
+                <div v-if="job.kind === 'jianying' && job.result?.draft_path" class="jianying-job-path">
+                  <strong>剪映草稿目录</strong>
+                  <code>{{ job.result.draft_path }}</code>
+                  <small>视频片段 {{ job.result.clip_count }} · 字幕 {{ job.result.subtitle_count }}</small>
+                </div>
+                <div v-if="job.error" class="job-error-line">
+                  <JobErrorDetails :key="`${job.id}-${job.attempts}`" :job-id="job.id" />
+                  <p class="error-text">{{ job.error }}</p>
+                </div>
+                <button v-if="job.state === 'failed' && job.error?.includes('请求结果不确定')" class="secondary"
+                  title="确认已核查云端请求记录后，解除防重复提交保护" @click="controlJob(job, 'acknowledge_asr_uncertain')">已核查云端，重试</button>
+                <button v-else-if="job.state === 'failed'" class="secondary" @click="controlJob(job, 'retry')">重试任务</button>
+              </div>
             </div>
             </section>
           </section>

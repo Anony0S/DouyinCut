@@ -1034,3 +1034,107 @@ Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monit
 ### Next Steps
 
 - 源码和规格保留未提交；待用户手动验证桌面界面及真实直播素材效果。
+
+
+## Session 39: 采用语义化版本选择发布编号
+<!-- trellis-session: v=2 fp=37ceae2d000b9f50 -->
+
+**Date**: 2026-11-20
+**Task**: 采用语义化版本选择发布编号
+**Branch**: `master`
+
+### Summary
+
+用户要求以后每次更新按变更内容选择合适的版本号。发布文档集中维护规则，并从项目开发约定链接。
+Topics: [docs/software-updates.md](../../../docs/software-updates.md)
+
+### Main Changes
+
+- 在发布说明中增加版本选择规则，并在 AGENTS.md 增加发布入口。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 读回版本规则和发布步骤，通过 git diff --check。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 40: 压缩粗剪模型的转写输入
+<!-- trellis-session: v=2 fp=9d9350e0d90bcb9c -->
+
+**Date**: 2026-11-20
+**Task**: 压缩粗剪模型的转写输入
+**Branch**: `master`
+
+### Summary
+
+用户确认以紧凑数组发送时间戳和文本，并提供默认关闭的短语气词过滤。过滤只作用于决策模型输入，完整转写继续保存。
+Topics: [.trellis/spec/project/roughcut.md](../../spec/project/roughcut.md), [.trellis/spec/project/workspace.md](../../spec/project/workspace.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端生产构建与 77 项后端测试通过，实际模型 Token 用量未测。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 41: 统一表单控件焦点样式
+<!-- trellis-session: v=2 fp=d85fd252ae1cdc85 -->
+
+**Date**: 2026-11-20
+**Task**: 统一表单控件焦点样式
+**Branch**: `master`
+
+### Summary
+
+用户要求输入和选择控件通过现有边框变色表示焦点。统一在前端共享样式中维护。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端生产构建通过，Chromium 核对浅色和深色主题下 22 个控件焦点或展开状态。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 42: 隔离开发版与正式版 Windows 凭据
+<!-- trellis-session: v=2 fp=5b1bcb39f9d1e594 -->
+
+**Date**: 2026-11-20
+**Task**: 隔离开发版与正式版 Windows 凭据
+**Branch**: `master`
+
+### Summary
+
+确认 Windows 开发版和正式版原先共用凭据服务名。源码运行使用 DouyinCut Dev，冻结安装版使用现有 DouyinCut 服务名。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 61 项凭据、API、星斗、OSS 和生图相关测试通过。
+
+### Status
+
+[OK] **Completed**

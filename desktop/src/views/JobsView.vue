@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useJobsStore } from '../stores/jobs'
 import { useSessionStore } from '../stores/session'
 import { useWorkspace } from '../workspace'
-import { kindLabels,stateLabels,updatedTime } from '../presentation'
+import { jobStateBadgeClass,kindLabels,stateLabels,updatedTime } from '../presentation'
 import JobErrorDetails from '../components/JobErrorDetails.vue'
 const jobsStore=useJobsStore(),session=useSessionStore(),workspace=useWorkspace()
 const {jobs,loading,loadingMore,hasMore,initialized,loadError}=storeToRefs(jobsStore)
@@ -13,9 +13,6 @@ const scrollArea=ref<HTMLElement|null>(null),showBackToTop=ref(false)
 const controlJob=workspace.controlJob
 let resizeObserver: ResizeObserver | undefined, mounted=true
 const progressPercent=(progress:number)=>Math.round(Math.max(0,Math.min(1,progress))*100)
-function statusClass(state:string) {
-  return ({succeeded:'badge-success',failed:'badge-error',running:'badge-info',paused:'badge-warning',pause_requested:'badge-warning'} as Record<string,string>)[state]||'badge-neutral'
-}
 function checkScroll() {
   const element=scrollArea.value
   if(!element || !mounted) return
@@ -58,7 +55,7 @@ onUnmounted(()=>{mounted=false;resizeObserver?.disconnect()})
         <div class="jobs-entry-copy">
           <div class="jobs-entry-title">
             <strong>{{ kindLabels[job.kind]||job.kind }}</strong>
-            <span class="badge badge-soft badge-sm" :class="statusClass(job.state)">{{ stateLabels[job.state]||job.state }}</span>
+            <span class="badge badge-soft badge-sm" :class="jobStateBadgeClass(job.state)">{{ stateLabels[job.state]||job.state }}</span>
           </div>
           <div class="jobs-entry-meta"><span :title="job.id">任务 {{ job.id.slice(-10) }}</span><time :datetime="new Date(job.created*1000).toISOString()">{{ updatedTime(job.created) }}</time></div>
           <div v-if="job.error" class="job-error-line"><JobErrorDetails :key="`${job.id}-${job.attempts}`" :job-id="job.id"/><p class="error-text">{{ job.error }}</p></div>

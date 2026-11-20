@@ -221,13 +221,14 @@ async function verifyEditingControls() {
   const empty={render(){return null}}
   new Function('require','module','exports',code)(name=>{
     if(name==='vue') return {...vue,vModelText:{},vModelSelect:{},vModelCheckbox:{}}
-    if(name==='vue-router') return {...require(name),useRoute:()=>router.currentRoute.value}
+    if(name==='vue-router') return {...require(name),useRoute:()=>router.currentRoute.value,useRouter:()=>router}
     if(name==='../api') return {duration:value=>String(value/1e6),seconds:value=>String(value/1e6)}
     if(name==='../stores/project') return loaded.load('stores/project.ts')
     if(name==='../stores/session') return loaded.load('stores/session.ts')
     if(name==='../presentation') return loaded.load('presentation.ts')
     if(name==='../workspace') return {useWorkspace:()=>workspace}
     if(name==='../composables/useVideoImport') return {useVideoImport:()=>({chooseNewVideo(){}})}
+    if(name.startsWith('../services/')) return loaded.load(name.slice(3)+'.ts')
     if(name.endsWith('WorkspaceSplit.vue')) return {__esModule:true,default:split}
     if(name.endsWith('.vue')) return {__esModule:true,default:empty}
     return require(name)
@@ -249,6 +250,18 @@ async function verifyEditingControls() {
   const paidBefore=requests.filter(url=>url.endsWith('/analyze')).length
   try {
     app.use(pinia);app.mount(root);await settle()
+    project.jobs = ['running', 'succeeded', 'failed', 'paused', 'cancelled'].map(state => ({
+      id: state, kind: 'analyze', state, progress: 0.4, payload: { asset_id: project.assetId },
+    }))
+    await settle()
+    const taskRows = all(root, el => typeof el.props.class === 'string' && el.props.class.split(' ').includes('roughcut-job'))
+    assert.deepEqual(taskRows.map(row => {
+      const [badge] = all(row, el => typeof el.props.class === 'string' && el.props.class.includes('roughcut-job-status'))
+      return badge.props.class.match(/badge-(info|success|error|warning|neutral)/)?.[1]
+    }), ['info', 'success', 'error', 'warning', 'neutral'])
+    assert.deepEqual(all(root, el => el.type === 'progress').map(el => el.props.value), [0.4, 0.4, 0.4])
+    project.jobs = []
+    await settle()
     assert.equal(all(root,el=>el.props.id==='product-info').length,0,'Supplementary-info control is removed')
     const range=all(root,el=>el.props.id==='duration-tolerance')[0]
     assert.equal(range.props.type,'range')

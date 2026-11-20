@@ -51,7 +51,7 @@ onUnmounted(() => {
 
 <template>
   <details ref="dropdown" class="dropdown dropdown-end dropdown-bottom" @toggle="toggle">
-    <summary ref="trigger" class="btn btn-sm" aria-label="录制日期"
+    <summary ref="trigger" class="btn btn-sm date-picker-trigger" aria-label="录制日期"
       :aria-expanded="open" :aria-disabled="disabled" :tabindex="disabled ? -1 : undefined"
       @click="disabled && $event.preventDefault()">
       {{ value || max }}

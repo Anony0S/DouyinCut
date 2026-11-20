@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
-import type { LivePeriodSource, LiveSession, LiveProductPeriod, LiveSplitResult } from "../../services/liveMonitoring";
+import { duration } from "../../api";
+import type { LivePeriodSource, LiveSession, LiveProductPeriod, LiveMergeResult, LiveSplitResult } from "../../services/liveMonitoring";
 import ConfirmPopover from "../ConfirmPopover.vue";
 import LiveIcon from "./LiveIcon.vue";
 import { formatOffset, productPeriodColor } from "./presentation";
@@ -12,7 +13,9 @@ const props = defineProps<{
   session: LiveSession;
   selectedPeriodId: string;
   busy: boolean;
+  mergePeriodIds: string[];
   onSplit: (id: string, confirmedMissingSegmentIds: string[], range?: { start: number; end: number }) => Promise<LiveSplitResult>;
+  onMerge: (periodIds: string[], confirmedMissingSources?: string[]) => Promise<LiveMergeResult>;
 }>();
 const emit = defineEmits<{ "update:selectedPeriodId": [id: string]; select: [id: string]; "view-source": [segmentId: string, offset: number] }>();
 const periods = computed(() => [...props.session.product_periods].sort((a, b) => a.started - b.started || a.id.localeCompare(b.id)));
@@ -137,12 +140,21 @@ const cuttableSeconds = computed(() => {
 });
 const selectionLimit = computed(() => frozenCuttableSeconds.value ?? cuttableSeconds.value);
 const splitting = computed(() => Boolean(selected.value?.clip_job && activeClipJobStates.has(selected.value.clip_job.state)));
+const merging = ref(false);
+const mergeMissing = ref<Array<LivePeriodSource & { period_id: string }>>([]);
+const mergeSelected = computed(() => props.mergePeriodIds.length >= 2);
+const mergeDurationSeconds = computed(() => props.session.product_periods
+  .filter(period => props.mergePeriodIds.includes(period.id))
+  .reduce((total, period) => total + period.sources
+    .filter(source => source.state === "ready" && source.end - source.start >= 1)
+    .reduce((sum, source) => sum + source.end - source.start, 0), 0));
 const splitMessage = computed(() => missing.value.map(source => "录制文件 " + String(source.segment_index).padStart(2, "0") + "（" + (source.state === "deleted" ? "已删除" : source.state === "missing" ? "文件不存在" : "文件异常") + "）").join("、") + "不可用。本次只能处理其余 " + availableCount.value + " 个已封存来源，生成结果不完整。是否继续？");
 let disposed = false;
 const clock = setInterval(() => { now.value = Date.now() / 1000; }, 1000);
 onUnmounted(() => { disposed = true; clearInterval(clock); });
 watch(() => props.session.id, () => { closeContext(); hover.value = null; editing.value = false; frozenTimelineEnd.value = null; frozenCuttableSeconds.value = null; emit("update:selectedPeriodId", ""); });
 watch(() => props.selectedPeriodId, () => { editing.value = false; frozenTimelineEnd.value = null; frozenCuttableSeconds.value = null; });
+watch(() => props.mergePeriodIds, () => { mergeMissing.value = []; }, { deep: true });
 
 function colorFor(period: LiveProductPeriod) {
   return productPeriodColor(period.promotion_id);
@@ -248,6 +260,24 @@ function keyHandle(event: KeyboardEvent, edge: "start" | "end") {
   else setEnd(value);
 }
 function cancelSplit() { editing.value = false; frozenTimelineEnd.value = null; frozenCuttableSeconds.value = null; }
+async function mergeSelectedPeriods(confirmedMissingSources: string[] = []) {
+  if (!mergeSelected.value || merging.value || props.busy) return;
+  merging.value = true;
+  try {
+    const result = await props.onMerge(props.mergePeriodIds, confirmedMissingSources);
+    if (disposed) return;
+    if (result.state === "confirmation_required" && "missing_sources" in result) {
+      mergeMissing.value = result.missing_sources;
+      return;
+    }
+    mergeMissing.value = [];
+  } finally {
+    merging.value = false;
+  }
+}
+async function confirmMergePartial() {
+  await mergeSelectedPeriods(mergeMissing.value.map(source => `${source.period_id}:${source.segment_id}`));
+}
 function range() {
   return { start: selected.value!.started + rangeStart.value, end: selected.value!.started + rangeEnd.value };
 }
@@ -287,8 +317,11 @@ async function confirmPartial() {
       <div class="live-product-rail-label"><LiveIcon name="clock" /><strong>商品讲解</strong><span>{{ periods.length }} 段</span></div>
       <div v-if="selected" class="live-product-rail-actions">
         <span class="live-product-rail-selected-name">{{ selected.product_name || ("商品 " + selected.promotion_id) }}</span>
-        <button v-if="!editing" type="button" class="btn btn-primary btn-sm" :disabled="busy || splitting || cuttableSeconds < 1" :title="cuttableSeconds < 1 ? '该讲解尚无可切分的封存内容' : '为选中的商品讲解选择切分范围'" @click="beginSplit">
-          <LiveIcon name="layers" />{{ splitting ? "切分中…" : "切分商品" }}
+        <button v-if="!editing" type="button" class="btn btn-primary btn-sm"
+          :disabled="busy || splitting || merging || (mergeSelected ? !mergeDurationSeconds : cuttableSeconds < 1)"
+          :title="mergeSelected ? `按录制顺序拼接所选同商品讲解，预计 ${duration(mergeDurationSeconds * 1000000)}` : (cuttableSeconds < 1 ? '该讲解尚无可切分的封存内容' : '为选中的商品讲解选择切分范围')"
+          @click="mergeSelected ? mergeSelectedPeriods() : beginSplit()">
+          <LiveIcon name="layers" />{{ merging ? "合并中…" : splitting ? "切分中…" : mergeSelected ? `合并切分 ${props.mergePeriodIds.length} 段 · ${duration(mergeDurationSeconds * 1000000)}` : "切分商品" }}
         </button>
         <template v-else>
           <span class="live-product-rail-range-label">{{ formatOffset(selected.started + rangeStart, session.started) }}–{{ formatOffset(selected.started + rangeEnd, session.started) }} · {{ Math.floor(selectedDuration / 60) }}分{{ Math.floor(selectedDuration % 60) }}秒</span>
@@ -301,6 +334,15 @@ async function confirmPartial() {
         </template>
       </div>
       <span v-else class="live-product-rail-hint">选择区间后可切分商品</span>
+    </div>
+    <div v-if="mergeMissing.length" role="alert" class="alert alert-warning mt-2 text-xs">
+      <div class="min-w-0 flex-1">
+        <strong>有 {{ mergeMissing.length }} 个录制来源不可用</strong>
+        <span class="block">确认后只合并已封存且可用的来源。</span>
+      </div>
+      <button type="button" class="btn btn-warning btn-xs" :disabled="busy || merging" @click="confirmMergePartial">
+        只合并可用来源
+      </button>
     </div>
     <div class="live-product-rail-track" role="group" aria-label="选择商品讲解区间" @contextmenu="openContext" @pointermove="previewAtPointer" @pointerleave="hover = null" @pointercancel="hover = null">
       <Teleport to="body">

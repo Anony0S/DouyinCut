@@ -30,7 +30,8 @@ from .core.storage import SessionStopping, Store
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, WorkspaceLayout,
                        workspace_layout, save_workspace_layout, ProjectDraft, delete_plan, delete_project, job_summary,
                        project_detail, project_list, save_draft)
-from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveMonitorRequest, LiveMonitorSettings, LiveRecordingAction, LiveStore)
+from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveProductMerge, LiveMonitorRequest,
+                              LiveMonitorSettings, LiveRecordingAction, LiveStore)
 from .product_platform import ProductPlatformService
 from .product_platform.client import ProductPlatformError
 from .product_platform.schemas import AddToShowcaseRequest, LoginRequest, MobileRequest, ScopeRequest, SearchRequest
@@ -408,6 +409,15 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         try:
             return live_store.request_period_product_clips(
                 period_id, body.confirmed_missing_segment_ids, body.start, body.end
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+
+    @app.post("/api/v1/live/sessions/{session_id}/product-clips/merge", status_code=202)
+    def merge_live_product_clips(session_id: str, body: LiveProductMerge):
+        try:
+            return live_store.request_merged_product_clip(
+                session_id, body.period_ids, body.confirmed_missing_sources
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None

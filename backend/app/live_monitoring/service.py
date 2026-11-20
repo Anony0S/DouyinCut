@@ -63,6 +63,11 @@ class LivePeriodSplit(Model):
     end: float | None = None
 
 
+class LiveProductMerge(Model):
+    period_ids: list[str] = Field(min_length=2, max_length=1000)
+    confirmed_missing_sources: list[str] = Field(default_factory=list, max_length=1000)
+
+
 def normalize_douyin_url(raw: str) -> str:
     match = re.search(r"https?://[^\s，。；;]+", raw.strip())
     value = (match.group(0) if match else raw.strip()).rstrip(".,，。;；)")
@@ -135,6 +140,17 @@ class LiveStore:
                     FOREIGN KEY(session_id) REFERENCES live_sessions(id),
                     FOREIGN KEY(period_id) REFERENCES live_product_periods(id)
                 );
+                CREATE TABLE IF NOT EXISTS live_merged_product_clips (
+                    id TEXT PRIMARY KEY, session_id TEXT NOT NULL, period_ids TEXT NOT NULL,
+                    promotion_id TEXT NOT NULL, product_name TEXT NOT NULL DEFAULT '',
+                    start REAL NOT NULL, end REAL NOT NULL, path TEXT NOT NULL UNIQUE,
+                    status TEXT NOT NULL, size_bytes INTEGER NOT NULL DEFAULT 0,
+                    duration_us INTEGER, asset_id TEXT, import_job_id TEXT,
+                    error TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(session_id) REFERENCES live_sessions(id)
+                );
+                CREATE INDEX IF NOT EXISTS live_merged_clips_session
+                    ON live_merged_product_clips(session_id,start DESC);
                 CREATE TABLE IF NOT EXISTS live_monitor_liveness (
                     monitor_id TEXT PRIMARY KEY, is_live INTEGER, checked REAL NOT NULL,
                     FOREIGN KEY(monitor_id) REFERENCES live_monitors(id)
@@ -189,6 +205,14 @@ class LiveStore:
                         f"直播监控数据库结构不符合当前项目规格：{table} 缺少字段 {', '.join(sorted(missing))}。"
                         "请先备份并修复当前工作目录数据库后重新启动。"
                     )
+            merged_clip_columns = {row["name"] for row in conn.execute(
+                "PRAGMA table_info(live_merged_product_clips)")}
+            required_merged_clip_columns = {
+                "id", "session_id", "period_ids", "promotion_id", "product_name", "start", "end",
+                "path", "status", "size_bytes", "duration_us", "asset_id", "import_job_id", "error",
+            }
+            if not required_merged_clip_columns <= merged_clip_columns:
+                raise RuntimeError("合并商品片段表结构不完整，请备份并修复当前工作目录数据库后重新启动。")
 
     def create_monitor(self, url: str, name: str):
         url = normalize_douyin_url(url)
@@ -300,17 +324,23 @@ class LiveStore:
             clips = conn.execute(
                 "SELECT * FROM live_segment_product_clips WHERE session_id=?", (session_id,)
             ).fetchall()
+            merged_clips = conn.execute(
+                "SELECT * FROM live_merged_product_clips WHERE session_id=?", (session_id,)
+            ).fetchall()
             active = conn.execute(
                 "SELECT 1 FROM jobs WHERE state IN (" + ",".join("?" for _ in ACTIVE_JOB_STATES) + ") AND ("
                 "(kind=? AND json_extract(payload,'$.session_id')=?) OR "
                 "(kind='import' AND (json_extract(payload,'$.live_segment_id') IN "
                 "(SELECT id FROM live_segments WHERE session_id=?) OR "
                 "json_extract(payload,'$.live_product_clip_id') IN "
-                "(SELECT id FROM live_segment_product_clips WHERE session_id=?)))) LIMIT 1",
-                (*ACTIVE_JOB_STATES, PRODUCT_CLIP_JOB, session_id, session_id, session_id),
+                "(SELECT id FROM live_segment_product_clips WHERE session_id=?) OR "
+                "json_extract(payload,'$.live_product_clip_id') IN "
+                "(SELECT id FROM live_merged_product_clips WHERE session_id=?)))) LIMIT 1",
+                (*ACTIVE_JOB_STATES, PRODUCT_CLIP_JOB, session_id, session_id, session_id, session_id),
             ).fetchone()
             if active or any(row["status"] in {"recording", "importing"} for row in segments) \
-                    or any(row["status"] in {"processing", "importing"} for row in clips):
+                    or any(row["status"] in {"processing", "importing"} for row in clips) \
+                    or any(row["status"] in {"processing", "importing"} for row in merged_clips):
                 raise ValueError("该场次仍有录制、导入或商品片段任务，请完成或取消后再删除")
 
             session_dir = (recordings_root / monitor_id / session_id).resolve()
@@ -325,6 +355,7 @@ class LiveStore:
             retained = set(referenced)
             retained.update(normalize_path(row["path"]) for row in segments if row["status"] == "imported")
             retained.update(normalize_path(row["path"]) for row in clips if row["status"] == "imported")
+            retained.update(normalize_path(row["path"]) for row in merged_clips if row["status"] == "imported")
             files = []
             if session_dir.exists():
                 if not session_dir.is_dir():
@@ -358,6 +389,7 @@ class LiveStore:
 
             conn.execute("DELETE FROM live_segments WHERE session_id=?", (session_id,))
             conn.execute("DELETE FROM live_segment_product_clips WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM live_merged_product_clips WHERE session_id=?", (session_id,))
             conn.execute("DELETE FROM live_product_periods WHERE session_id=?", (session_id,))
             conn.execute("DELETE FROM live_product_events WHERE session_id=?", (session_id,))
             conn.execute("DELETE FROM live_session_current_product WHERE session_id=?", (session_id,))
@@ -371,7 +403,7 @@ class LiveStore:
         return {
             "deleted_session_id": session_id,
             "deleted_segments": len(segments),
-            "deleted_product_clips": len(clips),
+            "deleted_product_clips": len(clips) + len(merged_clips),
             "deleted_files": len(files),
             "bytes_reclaimed": deleted_bytes,
             "retained_files": len(retained.intersection(
@@ -437,7 +469,9 @@ class LiveStore:
         period_jobs = {}
         for job in clip_jobs:
             payload = json.loads(job.pop("payload"))
-            period_jobs.setdefault(payload["period_id"], job)
+            for period_id in payload.get("period_ids", [payload.get("period_id")]):
+                if period_id:
+                    period_jobs.setdefault(period_id, job)
             if job["state"] in ACTIVE_JOB_STATES:
                 locked_segments.update(window["segment_id"] for window in payload["windows"])
         all_segments = [dict(row) for row in conn.execute(
@@ -452,8 +486,32 @@ class LiveStore:
             "SELECT * FROM live_segment_product_clips WHERE session_id=? "
             "ORDER BY segment_index DESC,start DESC",
             (session["id"],)).fetchall()]
+        for clip in item["product_clips"]:
+            period = conn.execute(
+                "SELECT id,started,ended FROM live_product_periods WHERE id=?", (clip["period_id"],)
+            ).fetchone()
+            clip["source_periods"] = [dict(period)] if period else []
+            clip["clip_kind"] = "single"
+        session_periods = {row["id"]: dict(row) for row in conn.execute(
+            "SELECT id,started,ended FROM live_product_periods WHERE session_id=?", (session["id"],)
+        )}
+        for clip_row in conn.execute(
+            "SELECT * FROM live_merged_product_clips WHERE session_id=? ORDER BY start DESC,id DESC",
+            (session["id"],),
+        ):
+            clip = dict(clip_row)
+            period_ids = json.loads(clip.pop("period_ids"))
+            clip["source_periods"] = [session_periods[period_id] for period_id in period_ids
+                                      if period_id in session_periods]
+            clip["period_id"] = period_ids[0]
+            clip["segment_id"] = ""
+            clip["segment_index"] = 0
+            clip["clip_kind"] = "merged"
+            item["product_clips"].append(clip)
+        item["product_clips"].sort(key=lambda clip: (clip["start"], clip["id"]), reverse=True)
         item["product_periods"] = LiveStore._period_details(
-            conn, session, all_segments, item["product_clips"], period_jobs)
+            conn, session, all_segments,
+            [clip for clip in item["product_clips"] if clip["clip_kind"] == "single"], period_jobs)
         current_product = conn.execute(
             "SELECT promotion_id,product_name,event_time,received_at "
             "FROM live_session_current_product WHERE session_id=?",
@@ -770,6 +828,8 @@ class LiveStore:
                          (monitor_id,))
             conn.execute("DELETE FROM live_segment_product_clips WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
                          (monitor_id,))
+            conn.execute("DELETE FROM live_merged_product_clips WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
+                         (monitor_id,))
             conn.execute("DELETE FROM live_product_periods WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
                          (monitor_id,))
             conn.execute("DELETE FROM live_product_events WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
@@ -978,6 +1038,77 @@ class LiveStore:
                          (job_id, PRODUCT_CLIP_JOB, json.dumps(payload, ensure_ascii=False), now, now))
         return self.store.job(job_id)
 
+    def request_merged_product_clip(self, session_id: str, period_ids: list[str],
+                                    confirmed_missing_sources: list[str]):
+        if len(set(period_ids)) != len(period_ids) or len(period_ids) < 2:
+            raise ValueError("请选择至少两次不同的商品讲解")
+        with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            session = conn.execute("SELECT * FROM live_sessions WHERE id=?", (session_id,)).fetchone()
+            if session is None:
+                raise KeyError(session_id)
+            detail = self._session_detail(conn, session)
+            by_id = {period["id"]: period for period in detail["product_periods"]}
+            selected = [by_id.get(period_id) for period_id in period_ids]
+            if any(period is None for period in selected):
+                raise ValueError("所选讲解不属于当前录制场次")
+            selected.sort(key=lambda period: (period["started"], period["id"]))
+            promotion_ids = {period["promotion_id"] for period in selected}
+            if len(promotion_ids) != 1:
+                raise ValueError("只能合并同一商品 ID 的多次讲解")
+            if any(period["mapping_error"] for period in selected):
+                raise ValueError(next(period["mapping_error"] for period in selected if period["mapping_error"]))
+
+            windows, missing, waiting_periods = [], [], []
+            for period in selected:
+                period_windows = []
+                period_missing = False
+                for source in period["sources"]:
+                    if source["state"] in {"missing", "deleted", "failed"}:
+                        missing.append({"period_id": period["id"], **source})
+                        period_missing = True
+                    elif source["state"] == "recording":
+                        continue
+                    elif source["state"] == "ready" and source["end"] - source["start"] >= 1:
+                        period_windows.append({"period_id": period["id"], "segment_id": source["segment_id"],
+                                               "start": source["start"], "end": source["end"],
+                                               "clip_start": source["clip_start"], "clip_end": source["clip_end"],
+                                               "promotion_id": period["promotion_id"],
+                                               "product_name": period["product_name"]})
+                if not period_windows and not period_missing:
+                    waiting_periods.append(period["id"])
+                windows.extend(period_windows)
+            missing_keys = {f"{source['period_id']}:{source['segment_id']}" for source in missing}
+            if missing_keys != set(confirmed_missing_sources):
+                return {"state": "confirmation_required", "missing_sources": missing,
+                        "available_count": len(windows)}
+            if waiting_periods:
+                return {"state": "noop", "message": "所选讲解尚无已封存内容，请等待封存后再合并"}
+            if not windows:
+                raise ValueError("没有可用的已封存讲解来源")
+            segment_ids = {window["segment_id"] for window in windows}
+            placeholders = ",".join("?" * len(ACTIVE_JOB_STATES))
+            for row in conn.execute(
+                f"SELECT id,payload FROM jobs WHERE kind=? AND state IN ({placeholders})",
+                (PRODUCT_CLIP_JOB, *ACTIVE_JOB_STATES),
+            ):
+                active_payload = json.loads(row["payload"])
+                if active_payload.get("session_id") == session_id and any(
+                    window["segment_id"] in segment_ids for window in active_payload["windows"]
+                ):
+                    if (active_payload.get("merge_clip_id")
+                            and active_payload.get("period_ids") == [period["id"] for period in selected]):
+                        return self.store.job(row["id"])
+                    raise ValueError("对应录制来源正在执行其他切分任务，请等待完成后重试")
+            job_id, clip_id, now = new_id("job"), new_id("liveclip"), time.time()
+            first = selected[0]
+            payload = {"session_id": session_id, "period_ids": [period["id"] for period in selected],
+                       "merge_clip_id": clip_id, "promotion_id": first["promotion_id"],
+                       "product_name": first["product_name"], "windows": windows}
+            conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
+                         (job_id, PRODUCT_CLIP_JOB, json.dumps(payload, ensure_ascii=False), now, now))
+        return self.store.job(job_id)
+
     def begin_segment_product_clip(self, segment: dict, window: dict, path: Path):
         """Return the clip id to (re)generate, or None when a usable clip already exists."""
         path_text = str(path.resolve())
@@ -1011,10 +1142,34 @@ class LiveStore:
             conn.execute("UPDATE live_segment_product_clips SET status='failed',error=? "
                          "WHERE id=? AND status='processing'", (error[:1000], clip_id))
 
+    def begin_merged_product_clip(self, clip_id: str, session_id: str, period_ids: list[str],
+                                  promotion_id: str, product_name: str, start: float, end: float,
+                                  path: Path):
+        with self.store.connection() as conn:
+            conn.execute("INSERT INTO live_merged_product_clips(id,session_id,period_ids,promotion_id,product_name,"
+                         "start,end,path,status) VALUES(?,?,?,?,?,?,?,?,'processing') "
+                         "ON CONFLICT(id) DO UPDATE SET status='processing',error='',path=excluded.path",
+                         (clip_id, session_id, json.dumps(period_ids), promotion_id, product_name,
+                          start, end, str(path.resolve())))
+
+    def finish_merged_product_clip(self, clip_id: str, path: Path, duration_us: int):
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_merged_product_clips SET status='completed',size_bytes=?,duration_us=?,error='' "
+                         "WHERE id=?", (path.stat().st_size, duration_us, clip_id))
+
+    def fail_merged_product_clip(self, clip_id: str, error: str):
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_merged_product_clips SET status='failed',error=? "
+                         "WHERE id=? AND status='processing'", (error[:1000], clip_id))
+
     def import_product_clip(self, clip_id: str):
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM live_segment_product_clips WHERE id=?", (clip_id,)).fetchone()
+            table = "live_segment_product_clips"
+            if row is None:
+                row = conn.execute("SELECT * FROM live_merged_product_clips WHERE id=?", (clip_id,)).fetchone()
+                table = "live_merged_product_clips"
             if row is None:
                 raise KeyError(clip_id)
             clip = dict(row)
@@ -1031,19 +1186,24 @@ class LiveStore:
                        "live_product_clip_id": clip_id, "product_name": clip["product_name"]}
             conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
                          (job_id, "import", json.dumps(payload, ensure_ascii=False), now, now))
-            conn.execute("UPDATE live_segment_product_clips SET status='importing',import_job_id=? WHERE id=?",
-                         (job_id, clip_id))
+            conn.execute(f"UPDATE {table} SET status='importing',import_job_id=? WHERE id=?", (job_id, clip_id))
         return self.store.job(job_id)
 
     def finish_product_clip_import(self, clip_id: str, asset_id: str):
         with self.store.connection() as conn:
-            conn.execute("UPDATE live_segment_product_clips SET status='imported',asset_id=? WHERE id=?",
-                         (asset_id, clip_id))
+            cursor = conn.execute("UPDATE live_segment_product_clips SET status='imported',asset_id=? WHERE id=?",
+                                  (asset_id, clip_id))
+            if not cursor.rowcount:
+                conn.execute("UPDATE live_merged_product_clips SET status='imported',asset_id=? WHERE id=?",
+                             (asset_id, clip_id))
 
     def retry_product_clip_import(self, clip_id: str):
         with self.store.connection() as conn:
-            conn.execute("UPDATE live_segment_product_clips SET status='completed',import_job_id=NULL "
-                         "WHERE id=? AND status='importing'", (clip_id,))
+            cursor = conn.execute("UPDATE live_segment_product_clips SET status='completed',import_job_id=NULL "
+                                  "WHERE id=? AND status='importing'", (clip_id,))
+            if not cursor.rowcount:
+                conn.execute("UPDATE live_merged_product_clips SET status='completed',import_job_id=NULL "
+                             "WHERE id=? AND status='importing'", (clip_id,))
 
     def import_segment(self, segment_id: str):
         with self.store.connection() as conn:
@@ -1074,6 +1234,8 @@ class LiveStore:
         """Open a generated clip in the system player, or select it in Explorer."""
         with self.store.connection() as conn:
             row = conn.execute("SELECT path FROM live_segment_product_clips WHERE id=?", (clip_id,)).fetchone()
+            if row is None:
+                row = conn.execute("SELECT path FROM live_merged_product_clips WHERE id=?", (clip_id,)).fetchone()
         if row is None:
             raise KeyError(clip_id)
         path = Path(row["path"]).resolve()
@@ -1121,6 +1283,10 @@ class LiveStore:
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM live_segment_product_clips WHERE id=?", (clip_id,)).fetchone()
+            table = "live_segment_product_clips"
+            if row is None:
+                row = conn.execute("SELECT * FROM live_merged_product_clips WHERE id=?", (clip_id,)).fetchone()
+                table = "live_merged_product_clips"
             if row is None:
                 raise KeyError(clip_id)
             clip = dict(row)
@@ -1135,7 +1301,7 @@ class LiveStore:
                     raise ValueError("商品片段路径不是普通文件，拒绝删除")
                 path.unlink()
                 file_deleted = True
-            conn.execute("DELETE FROM live_segment_product_clips WHERE id=?", (clip_id,))
+            conn.execute(f"DELETE FROM {table} WHERE id=?", (clip_id,))
         return {"deleted_clip_id": clip_id, "file_deleted": file_deleted,
                 "project_file_retained": clip["status"] == "imported"}
 
@@ -1198,12 +1364,15 @@ def generate_period_product_clips(store, settings: Settings, payload: dict,
     from ..media.live_clips import cut_product_clip
 
     live = LiveStore(store)
+    merged = "merge_clip_id" in payload
+    period_ids = payload.get("period_ids", [payload.get("period_id")])
     with store.connection() as conn:
-        row = conn.execute("SELECT * FROM live_product_periods WHERE id=? AND session_id=?",
-                           (payload["period_id"], payload["session_id"])).fetchone()
-        if row is None:
+        rows = [conn.execute("SELECT * FROM live_product_periods WHERE id=? AND session_id=?",
+                             (period_id, payload["session_id"])).fetchone() for period_id in period_ids]
+        if any(row is None for row in rows):
             raise ValueError("商品讲解记录已不存在")
-        period = dict(row)
+        periods = [dict(row) for row in rows]
+    period = periods[0]
     windows = sorted(payload["windows"], key=lambda piece: piece["start"])
     if not windows:
         raise ValueError("没有可切分的商品讲解区间")
@@ -1226,13 +1395,20 @@ def generate_period_product_clips(store, settings: Settings, payload: dict,
     # The first source anchors the database record; start/end describe the whole
     # output. Source parts are never independent clip records.
     anchor = sources[0][0]
-    window = {**period, "abs_start": windows[0]["start"], "abs_end": windows[-1]["end"]}
-    safe_product = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", period["product_name"]).strip(" ._")[:48]
+    safe_product = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", payload.get("product_name", period["product_name"])).strip(" ._")[:48]
     label = safe_product or period["promotion_id"]
-    target = sources[0][1].parent / f"商品片段_{anchor['segment_index']:02d}_{label}_{period['id'][-8:]}.mp4"
-    clip_id = live.begin_segment_product_clip(anchor, window, target)
-    if clip_id is None:
-        return {"period_id": period["id"], "created": 0, "skipped": 1, "failed": 0}
+    if merged:
+        clip_id = payload["merge_clip_id"]
+        target = sources[0][1].parent / f"商品片段_{anchor['segment_index']:02d}_{label}_合并_{clip_id[-8:]}.mp4"
+        live.begin_merged_product_clip(clip_id, payload["session_id"], period_ids,
+                                       payload["promotion_id"], payload.get("product_name", ""),
+                                       windows[0]["start"], windows[-1]["end"], target)
+    else:
+        window = {**period, "abs_start": windows[0]["start"], "abs_end": windows[-1]["end"]}
+        target = sources[0][1].parent / f"商品片段_{anchor['segment_index']:02d}_{label}_{period['id'][-8:]}.mp4"
+        clip_id = live.begin_segment_product_clip(anchor, window, target)
+        if clip_id is None:
+            return {"period_id": period["id"], "created": 0, "skipped": 1, "failed": 0}
     try:
         with tempfile.TemporaryDirectory(prefix=".product-clip-", dir=target.parent) as directory:
             stage = Path(directory)
@@ -1244,13 +1420,21 @@ def generate_period_product_clips(store, settings: Settings, payload: dict,
             if checkpoint:
                 checkpoint()
             output.replace(target)
-            live.finish_segment_product_clip(clip_id, target, duration_us)
+            if merged:
+                live.finish_merged_product_clip(clip_id, target, duration_us)
+            else:
+                live.finish_segment_product_clip(clip_id, target, duration_us)
         if progress:
             progress(1)
     except Exception as exc:
-        live.fail_segment_product_clip(clip_id, f"{type(exc).__name__}: {str(exc)[:800]}")
+        error = f"{type(exc).__name__}: {str(exc)[:800]}"
+        if merged:
+            live.fail_merged_product_clip(clip_id, error)
+        else:
+            live.fail_segment_product_clip(clip_id, error)
         raise
-    return {"period_id": period["id"], "created": 1, "skipped": 0, "failed": 0}
+    return ({"period_ids": period_ids, "created": 1, "skipped": 0, "failed": 0} if merged
+            else {"period_id": period["id"], "created": 1, "skipped": 0, "failed": 0})
 
 
 class DouyinResolver:

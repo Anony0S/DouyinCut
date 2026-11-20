@@ -38,6 +38,7 @@
 | `DELETE /live/segments/{id}` | 内部媒体块清理端点；当前界面不调用，活动或被项目引用时返回 409 |
 | `GET /live/product-periods/{id}/split-plan` | 获取单次讲解的来源分段、缺失 / 待封存状态及切分任务状态 |
 | `POST /live/product-periods/{id}/product-clips` | body 的 confirmed_missing_segment_ids 确认缺失来源；按该次讲解已封存部分排队，部分缺失先返回确认信息，无新增区间返回 noop，全部来源不可用返回 409 |
+| `POST /live/sessions/{session_id}/product-clips/merge` | body 的 period_ids 必须是同一场次、同一商品 ID 的至少两次讲解；按录制顺序拼接已封存窗口并创建单个独立成品。缺失来源先返回 confirmation_required，confirmed_missing_sources 按 `period_id:segment_id` 确认后只拼可用窗口；所选讲解无已封存可用内容返回 noop |
 | `POST /live/product-clips/{id}/import` | 将待导入商品片段排入 import 任务，成功后创建普通视频项目 |
 | `POST /live/product-clips/{id}/open` | body 的 reveal=true 在资源管理器中选中文件，否则用系统默认播放器打开；仅限直播录制目录内的现有文件 |
 | `DELETE /live/product-clips/{id}` | 删除商品片段记录；未导入时同时删除录制目录内片段文件，已导入时保留项目文件；生成中 / 导入中返回 409 |

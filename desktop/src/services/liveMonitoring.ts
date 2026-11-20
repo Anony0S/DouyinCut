@@ -6,7 +6,9 @@ export type LivePeriodSource = { segment_id:string; segment_index:number; state:
 export type LiveProductPeriod = { id:string; session_id:string; promotion_id:string; product_name:string; started:number; ended:number|null; sources:LivePeriodSource[]; mapping_error:string; clip_job:LiveClipJob|null }
 export type LiveSplitResult = Job | {state:'confirmation_required'; missing_segments:LivePeriodSource[]; available_count:number} | {state:'noop'; message:string}
 export type LiveProductEvent = { id:string; promotion_id:string; product_name:string; explain_type:number|null; event_time:number; received_at:number; source:string }
-export type LiveProductClip = { id:string; segment_id:string; segment_index:number; period_id:string; promotion_id:string; product_name:string; start:number; end:number; path:string; status:string; size_bytes:number; duration_us:number|null; asset_id:string|null; import_job_id:string|null; error:string }
+export type LiveProductClipSource = {id:string;started:number;ended:number|null}
+export type LiveProductClip = { id:string; segment_id:string; segment_index:number; period_id:string; promotion_id:string; product_name:string; start:number; end:number; path:string; status:string; size_bytes:number; duration_us:number|null; asset_id:string|null; import_job_id:string|null; error:string; clip_kind:'single'|'merged'; source_periods:LiveProductClipSource[] }
+export type LiveMergeResult = Job | {state:'confirmation_required';missing_sources:Array<LivePeriodSource & {period_id:string}>;available_count:number} | {state:'noop';message:string}
 export type LiveCurrentProduct = { promotion_id:string; product_name:string; event_time:number; received_at:number }
 export type LiveProductListener = { status:string; detail:string; updated:number; event_count?:number; silent?:boolean; silent_detail?:string }
 export type LiveProductCatalogError = { detail:Record<string,unknown>; updated:number }
@@ -31,4 +33,5 @@ export const liveMonitoringApi = {
   openProductClip: (id:string,reveal=false) => api<{opened:boolean;revealed:boolean;path:string}>(`/live/product-clips/${encodeURIComponent(id)}/open`,'POST',{reveal}),
   deleteProductClip: (id:string) => api<{deleted_clip_id:string;file_deleted:boolean;project_file_retained:boolean}>(`/live/product-clips/${encodeURIComponent(id)}`,'DELETE'),
   splitPeriod: (id:string, confirmedMissingSegmentIds:string[] = [], range?: {start:number; end:number}) => api<LiveSplitResult>(`/live/product-periods/${encodeURIComponent(id)}/product-clips`,'POST',{confirmed_missing_segment_ids:confirmedMissingSegmentIds, ...(range || {})}),
+  mergePeriods: (sessionId:string, periodIds:string[], confirmedMissingSources:string[] = []) => api<LiveMergeResult>(`/live/sessions/${encodeURIComponent(sessionId)}/product-clips/merge`,'POST',{period_ids:periodIds,confirmed_missing_sources:confirmedMissingSources}),
 }

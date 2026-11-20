@@ -123,3 +123,57 @@ class ProductPeriodMediaTests(unittest.TestCase):
             for source, digest in originals:
                 self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
             self.assertEqual(live.request_period_product_clips(period["id"], [])["state"], "noop")
+
+    def test_merged_lectures_skip_intervening_product_media_in_playable_output(self):
+        from app.core.domain import new_id
+        from app.live_monitoring.service import generate_period_product_clips
+
+        with tempfile.TemporaryDirectory() as temporary:
+            settings = Settings(Path(temporary))
+            settings.prepare()
+            store = Store(settings.database)
+            live = LiveStore(store)
+            monitor = live.create_monitor("https://live.douyin.com/merged-media", "merged")
+            session_id = live.start_session(monitor["id"], Path(temporary))
+            started = time.time() - 10
+            with store.connection() as conn:
+                conn.execute("UPDATE live_sessions SET started=? WHERE id=?", (started, session_id))
+            directory = settings.data_dir / "recordings" / "live" / monitor["id"] / session_id
+            directory.mkdir(parents=True)
+            source = directory / "recording-000000.ts"
+            subprocess.run([
+                settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "color=c=red:s=160x120:r=25:d=3",
+                "-f", "lavfi", "-i", "color=c=blue:s=160x120:r=25:d=3",
+                "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]",
+                "-c:v", "libx264", "-preset", "ultrafast", "-f", "mpegts", str(source),
+            ], check=True, capture_output=True)
+            source_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            live.upsert_segment(session_id, source, 1, "completed", source.stat().st_size, 6_000_000)
+            for offset, product_id in ((0, "same-product"), (1, "intervening"), (4, "same-product")):
+                live.set_current_product(session_id, promotion_id=product_id, product_name=product_id,
+                                         event_time=started + offset, received_at=started + offset)
+            live.stop_session(monitor["id"], session_id)
+            with store.connection() as conn:
+                conn.execute("UPDATE live_sessions SET ended=?,status='stopped' WHERE id=?", (started + 6, session_id))
+                conn.execute("UPDATE live_product_periods SET ended=? WHERE session_id=? AND promotion_id='same-product' "
+                             "AND started<?", (started + 1, session_id, started + 2))
+                conn.execute("UPDATE live_product_periods SET ended=? WHERE session_id=? AND promotion_id='same-product' "
+                             "AND started>=?", (started + 6, session_id, started + 2))
+            periods = [period for period in live.recording_session(monitor["id"], session_id)["product_periods"]
+                       if period["promotion_id"] == "same-product"]
+            self.assertEqual(len(periods), 2)
+            job = live.request_merged_product_clip(session_id, [period["id"] for period in periods], [])
+            with patch("app.media.encoding.select_h264_encoder", return_value=CPU_ENCODER):
+                result = generate_period_product_clips(store, settings, job["payload"])
+            self.assertEqual(result["created"], 1)
+            clip = live.recording_session(monitor["id"], session_id)["product_clips"][0]
+            media = probe(Path(clip["path"]), settings)
+            self.assertAlmostEqual(media["duration_us"] / 1_000_000, 3, delta=.2)
+            for second, dominant in ((.5, 0), (2.5, 2)):
+                pixel = subprocess.run([
+                    settings.ffmpeg, "-v", "error", "-ss", str(second), "-i", clip["path"],
+                    "-frames:v", "1", "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
+                ], check=True, capture_output=True).stdout
+                self.assertGreater(pixel[dominant], max(pixel[(dominant + 1) % 3], pixel[(dominant + 2) % 3]) + 50)
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), source_digest)

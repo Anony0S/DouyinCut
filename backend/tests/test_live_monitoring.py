@@ -582,6 +582,12 @@ class LiveMonitoringTests(unittest.TestCase):
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(live_product_listener_retries)")}
         self.assertNotIn("refresh_catalog", columns, "startup validation must not migrate the database")
 
+    def test_live_store_rejects_incomplete_merged_clip_table(self):
+        with self.store.connection() as conn:
+            conn.execute("ALTER TABLE live_merged_product_clips DROP COLUMN error")
+        with self.assertRaisesRegex(RuntimeError, "合并商品片段表结构不完整"):
+            LiveStore(self.store)
+
     def test_live_worker_restarts_only_the_product_listener_for_retry_request(self):
         monitor = self.live.create_monitor("https://live.douyin.com/retry-product-worker", "room")
         session_id = self.live.start_session(monitor["id"], Path(self.temp.name) / "retry-product-worker")
@@ -739,6 +745,83 @@ class LiveMonitoringTests(unittest.TestCase):
             conn.execute("UPDATE live_product_periods SET ended=? WHERE session_id=? AND promotion_id='p3'",
                          (started + 40, session_id))
         return monitor, session_id, segment_ids
+
+    def _repeated_product_session(self, name: str):
+        monitor, session_id, segments = self._two_segment_session(name)
+        with self.store.connection() as conn:
+            conn.execute("UPDATE live_product_periods SET promotion_id='p1',product_name='针织开衫' "
+                         "WHERE session_id=? AND promotion_id='p3'", (session_id,))
+            period_ids = [row[0] for row in conn.execute(
+                "SELECT id FROM live_product_periods WHERE session_id=? AND promotion_id='p1' ORDER BY started",
+                (session_id,),
+            )]
+        return monitor, session_id, segments, period_ids
+
+    def test_merge_api_only_accepts_same_product_lectures_and_keeps_chronological_sources(self):
+        monitor, session_id, _segments, period_ids = self._repeated_product_session("merge-api")
+        response = self.client.post(
+            f"/api/v1/live/sessions/{session_id}/product-clips/merge",
+            headers=self.headers, json={"period_ids": period_ids},
+        )
+        self.assertEqual(response.status_code, 202, response.text)
+        payload = response.json()["payload"]
+        self.assertEqual(payload["period_ids"], period_ids)
+        self.assertEqual([window["period_id"] for window in payload["windows"]], period_ids)
+        other_period = self._period_id(session_id, "p2")
+        invalid = self.client.post(
+            f"/api/v1/live/sessions/{session_id}/product-clips/merge",
+            headers=self.headers, json={"period_ids": [period_ids[0], other_period]},
+        )
+        self.assertEqual(invalid.status_code, 409)
+        self.assertIn("同一商品 ID", invalid.json()["detail"])
+
+    def test_merge_requires_scoped_confirmation_for_missing_sources(self):
+        _monitor, session_id, (first, _second), period_ids = self._repeated_product_session("merge-missing")
+        with self.store.connection() as conn:
+            path = conn.execute("SELECT path FROM live_segments WHERE id=?", (first,)).fetchone()[0]
+            Path(path).unlink()
+        url = f"/api/v1/live/sessions/{session_id}/product-clips/merge"
+        confirmation = self.client.post(url, headers=self.headers, json={"period_ids": period_ids})
+        self.assertEqual(confirmation.status_code, 202, confirmation.text)
+        result = confirmation.json()
+        self.assertEqual(result["state"], "confirmation_required")
+        missing = result["missing_sources"]
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0]["period_id"], period_ids[0])
+        accepted = self.client.post(url, headers=self.headers, json={
+            "period_ids": period_ids,
+            "confirmed_missing_sources": [f"{missing[0]['period_id']}:{missing[0]['segment_id']}"],
+        })
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        self.assertEqual({window["period_id"] for window in accepted.json()["payload"]["windows"]}, {period_ids[1]})
+
+    def test_merged_output_preserves_single_clip_and_exposes_all_source_lectures(self):
+        from app.live_monitoring.service import generate_period_product_clips
+        monitor, session_id, _segments, period_ids = self._repeated_product_session("merge-output")
+        with (patch("app.media.processing.run_process", side_effect=fake_media_process),
+              patch("app.media.processing.probe", return_value=fake_video_info(20_000_000))):
+            single = self.live.request_period_product_clips(period_ids[0], [])
+            self.assertEqual(generate_period_product_clips(self.store, self.settings, single["payload"])["created"], 1)
+            with self.store.connection() as conn:
+                conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (single["id"],))
+            merged = self.live.request_merged_product_clip(session_id, period_ids, [])
+            result = generate_period_product_clips(self.store, self.settings, merged["payload"])
+        self.assertEqual(result["created"], 1)
+        clips = self.live.recording_session(monitor["id"], session_id)["product_clips"]
+        self.assertEqual(len(clips), 2)
+        combined = next(clip for clip in clips if clip["clip_kind"] == "merged")
+        self.assertEqual([source["id"] for source in combined["source_periods"]], period_ids)
+        self.assertEqual(combined["duration_us"], 20_000_000)
+        self.assertNotEqual(combined["path"], next(clip["path"] for clip in clips if clip["clip_kind"] == "single"))
+        import_job = self.live.import_product_clip(combined["id"])
+        self.assertEqual(import_job["payload"]["live_product_clip_id"], combined["id"])
+        self.live.finish_product_clip_import(combined["id"], "asset-merged")
+        imported = self.live.recording_session(monitor["id"], session_id)["product_clips"]
+        merged = next(clip for clip in imported if clip["id"] == combined["id"])
+        self.assertEqual(merged["status"], "imported")
+        deleted = self.live.delete_product_clip(combined["id"], self.settings.data_dir / "recordings" / "live")
+        self.assertTrue(deleted["project_file_retained"])
+        self.assertTrue(Path(combined["path"]).is_file())
 
     def test_stopping_recording_no_longer_generates_product_clips_automatically(self):
         monitor = self.live.create_monitor("https://live.douyin.com/room-no-auto-clips", "room")

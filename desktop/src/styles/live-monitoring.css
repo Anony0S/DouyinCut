@@ -213,6 +213,8 @@
 .live-segment-title > strong { font-size: 12px; font-weight: 600; }
 .live-segment-meta { display: flex; flex-wrap: wrap; gap: 6px 13px; color: var(--text-muted); font-size: 12px; }
 .live-clip-period-time { color: var(--period-color); font-weight: 600; }
+.live-clip-sources > summary { cursor: pointer; }
+.live-clip-source-list { display: grid; gap: 5px; padding: 7px 0 2px; }
 .live-segment-meta > span + span { padding-left: 12px; border-left: 1px solid var(--color-base-300); }
 .live-segment-path-tooltip { align-self: center; }
 .live-segment-meta > .live-segment-path-tooltip { padding-left: 0; border-left: 0; }

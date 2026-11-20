@@ -1001,3 +1001,36 @@ Topics: [.trellis/spec/project/runtime-release.md](../../spec/project/runtime-re
 ### Next Steps
 
 - 源码修复保留未提交，安装版需重新打包更新并验证启动界面。
+
+
+## Session 38: 直播讲解多选合并商品片段
+<!-- trellis-session: v=2 fp=f5453d75852aad7e -->
+
+**Date**: 2026-11-19
+**Task**: 直播讲解多选合并商品片段
+**Branch**: `master`
+
+### Summary
+
+直播监控讲解列表支持对同场次同商品 ID 的多次讲解进行多选，按录制顺序将各已封存来源拼接为独立商品片段；单次切分成品不覆盖，合并成品可查看来源、定位、导入和删除。缺失来源显式确认，数据库结构校验和会话清理包含合并记录。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Main Changes
+
+- 新增多次讲解合并接口、任务、独立成品表及多来源展示。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端 pnpm build 通过；直播监控、切分媒体、缩略图 71 项通过；另有真实 FFmpeg 不连续讲解拼接测试通过，验证实际 3 秒输出、颜色顺序及原片未变。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 源码和规格保留未提交；待用户手动验证桌面界面及真实直播素材效果。

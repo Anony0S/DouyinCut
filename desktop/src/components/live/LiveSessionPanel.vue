@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { duration } from "../../api";
 import type { LiveSession, LiveProductPeriod } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
@@ -20,6 +20,7 @@ const props = defineProps<{
   monitorId: string;
   busy: boolean;
   selectedPeriodId: string;
+  mergePeriodIds: string[];
   onDeleteProductClip: (id: string) => Promise<void>;
   onRetryProductListener: (monitorId: string, sessionId: string) => Promise<void>;
 }>();
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   open: [assetId: string];
   "open-file": [id: string, reveal: boolean];
   "select-period": [id: string];
+  "update:merge-period-ids": [ids: string[]];
 }>();
 function pathKey(kind: "segment" | "clip", id: string) {
   return `${kind}:${id}`;
@@ -54,6 +56,26 @@ const periods = computed(() =>
     (a, b) => Number(b.ended === null) - Number(a.ended === null) || b.started - a.started || b.id.localeCompare(a.id),
   ),
 );
+const selectedPeriod = computed(() => props.session.product_periods.find(period => period.id === props.selectedPeriodId));
+function periodMergeKey(period: LiveProductPeriod) {
+  return period.promotion_id.trim() || period.product_name.trim();
+}
+const mergeCandidates = computed(() => selectedPeriod.value
+  ? periods.value.filter(period => periodMergeKey(period) === periodMergeKey(selectedPeriod.value!))
+  : []);
+const mergeCandidateIds = computed(() => new Set(mergeCandidates.value.map(period => period.id)));
+watch(() => props.selectedPeriodId, periodId => {
+  const promotionId = props.session.product_periods.find(period => period.id === periodId)?.promotion_id;
+  if (props.mergePeriodIds.some(id => props.session.product_periods.find(period => period.id === id)?.promotion_id !== promotionId)) {
+    emit("update:merge-period-ids", []);
+  }
+});
+function toggleMergePeriod(periodId: string, checked: boolean) {
+  const ids = checked
+    ? [...new Set([...props.mergePeriodIds, periodId])]
+    : props.mergePeriodIds.filter(id => id !== periodId);
+  emit("update:merge-period-ids", ids);
+}
 function splitSummary(period: LiveProductPeriod) {
   const generated = period.sources.filter(source => ["completed", "importing", "imported"].includes(source.clip_status || "")).length;
   const ready = period.sources.filter(source => source.state === "ready" && source.end - source.start >= 1 && !["completed", "importing", "imported"].includes(source.clip_status || "")).length;
@@ -182,8 +204,16 @@ const listenerNote = computed(() => {
                     切分失败：{{ period.clip_job.error }}
                   </p>
                 </div>
-                <div class="flex shrink-0 flex-col items-stretch gap-2">
-                  <button type="button" class="btn btn-soft btn-sm"
+                <div class="flex h-8 shrink-0 items-center gap-2">
+                  <label v-if="mergeCandidateIds.has(period.id) && mergeCandidates.length > 1" class="inline-flex h-8 min-h-8 cursor-pointer items-center justify-start gap-2 px-1 py-0 leading-none"
+                    @click.stop>
+                    <input type="checkbox" class="checkbox checkbox-sm m-0"
+                      :checked="props.mergePeriodIds.includes(period.id)"
+                      :aria-label="`合并讲解 ${formatOffset(period.started, session.started)}`"
+                      @change="toggleMergePeriod(period.id, ($event.target as HTMLInputElement).checked)" />
+                    <span class="label-text text-xs">合并</span>
+                  </label>
+                  <button type="button" class="btn btn-soft btn-sm h-8 min-h-8"
                     :disabled="busy || !period.product_name.trim()"
                     :title="period.product_name.trim() ? '查询星斗商品平台中的商品信息' : '暂无商品名称，无法查询'"
                     @click.stop="queryProductName = period.product_name.trim()"><LiveIcon name="search" />查询商品</button>
@@ -235,7 +265,21 @@ const listenerNote = computed(() => {
                 </span>
               </div>
               <div class="live-segment-meta items-center">
-                <span v-if="clipPeriodTime(clip.period_id)" class="live-clip-period-time" :style="productColorStyle(clip.promotion_id)">
+                <div v-if="clip.source_periods.length > 1" class="live-clip-period-time" :style="productColorStyle(clip.promotion_id)">
+                  <details class="live-clip-sources">
+                    <summary>所属讲解 {{ clip.source_periods.length }} 次</summary>
+                    <div class="live-clip-source-list">
+                      <button v-for="source in clip.source_periods" :key="source.id" type="button"
+                        class="btn btn-link btn-xs h-auto min-h-0 border-0 p-0 text-xs text-inherit no-underline hover:underline"
+                        :aria-pressed="source.id === selectedPeriodId"
+                        :aria-controls="`live-period-${source.id}`"
+                        @click="selectClipPeriod(source.id)">
+                        {{ clipPeriodTime(source.id) }}
+                      </button>
+                    </div>
+                  </details>
+                </div>
+                <span v-else-if="clipPeriodTime(clip.period_id)" class="live-clip-period-time" :style="productColorStyle(clip.promotion_id)">
                   <button type="button"
                     class="btn btn-link btn-xs h-auto min-h-0 border-0 p-0 text-xs text-inherit no-underline hover:underline"
                     :aria-pressed="clip.period_id === selectedPeriodId"

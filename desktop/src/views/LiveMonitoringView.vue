@@ -10,6 +10,7 @@ import {
   type LiveMonitorSettings,
   type LiveSession,
   type LiveSessionSummary,
+  type LiveMergeResult,
   type LiveSplitResult,
 } from "../services/liveMonitoring";
 import LiveIcon from "../components/live/LiveIcon.vue";
@@ -37,6 +38,7 @@ const selectedId = ref(""),
   updatedAt = ref<number | null>(null);
 const selectedSession = ref<LiveSession>();
 const selectedPeriodId = ref("");
+const mergePeriodIds = ref<string[]>([]);
 const refreshError = ref("");
 let refreshVersion = 0;
 let disposed = false;
@@ -321,6 +323,20 @@ async function splitPeriod(periodId: string, confirmedMissingSegmentIds: string[
     throw cause;
   }
 }
+async function mergePeriods(sessionId: string, periodIds: string[], confirmedMissingSources: string[] = []): Promise<LiveMergeResult> {
+  try {
+    session.error = "";
+    const result = await liveMonitoringApi.mergePeriods(sessionId, periodIds, confirmedMissingSources);
+    if (result.state === "confirmation_required") return result;
+    mergePeriodIds.value = [];
+    session.message = "message" in result ? result.message : `已合并 ${periodIds.length} 次讲解；完成后在“商品视频片段”中查看`;
+    await refresh();
+    return result;
+  } catch (cause) {
+    session.report(cause);
+    throw cause;
+  }
+}
 async function deleteProductClip(clipId: string) {
   await session.act(async () => {
     const result = await liveMonitoringApi.deleteProductClip(clipId);
@@ -549,7 +565,9 @@ onUnmounted(() => {
             v-model:selected-period-id="selectedPeriodId"
             :session="selectedSession"
             :busy="busy"
+            :merge-period-ids="mergePeriodIds"
             :on-split="splitPeriod"
+            :on-merge="(ids, missing) => mergePeriods(selectedSession!.id, ids, missing)"
             @view-source="viewSource"
             @select="focusPeriod" />
           <section v-else class="live-product-rail live-product-rail-empty" aria-label="商品讲解轨">
@@ -570,13 +588,16 @@ onUnmounted(() => {
           :key="selectedSession.id"
           :session="selectedSession"
           :selected-period-id="selectedPeriodId"
+          :merge-period-ids="mergePeriodIds"
           :monitor-id="selectedMonitor.id"
           :busy="busy"
           @import-product-clip="importProductClip"
           @open="workspace.openProject"
           :on-delete-product-clip="deleteProductClip"
+          :on-merge-periods="mergePeriods"
           :on-retry-product-listener="retryProductListener"
           @select-period="selectedPeriodId = $event"
+          @update:merge-period-ids="mergePeriodIds = $event"
           @open-file="openClipFile" />
         <div v-else class="live-content-columns">
           <section v-for="title in ['商品讲解', '商品视频片段']" :key="title"

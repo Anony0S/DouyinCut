@@ -13,7 +13,7 @@ import WorkspaceSplit from '../components/WorkspaceSplit.vue'
 import JobErrorDetails from '../components/JobErrorDetails.vue'
 import ConfirmPopover from '../components/ConfirmPopover.vue'
 import { projectsApi } from '../services/projects'
-import { productPlatformApi, isProductPlatformAuthError, type XingdouProduct } from '../services/productPlatform'
+import { productPlatformApi, isProductPlatformAuthError, type PlatformProduct } from '../services/productPlatform'
 const project=useProjectStore(),session=useSessionStore(),workspace=useWorkspace(),route=useRoute(),router=useRouter()
 const {busy,connected,pendingImportId}=storeToRefs(session)
 const {assetId,activeAsset,productName,instructions,targetSeconds,toleranceSeconds,refreshAsr,analyzingAsset,
@@ -40,7 +40,7 @@ const {chooseNewVideo}=useVideoImport()
 const controlJob=workspace.controlJob
 const productImages=ref<{id:string;url:string}[]>([]), selectedReferenceId=ref('')
 const productImageStates=ref<Record<string,'loading'|'loaded'|'error'>>({})
-const platformProduct=ref<XingdouProduct|null>(null), platformScopeName=ref('')
+const platformProduct=ref<PlatformProduct|null>(null), platformScopeName=ref('')
 const coverPrompt=ref('')
 const coverError=ref(''), coverBusy=ref(false), searchingCoverProduct=ref(false), loadingCoverImages=ref(false)
 const coverDialog=ref<HTMLDialogElement|null>(null)
@@ -70,11 +70,11 @@ function setCoverPrompt() {
 async function openCoverDraftDialog() {
   const plan=selectedPlan.value
   if(!plan||planDirty.value||!activeAsset.value||!connected.value||!productName.value.trim()) return
-  coverError.value=''; platformProduct.value=null; productImages.value=[]; selectedReferenceId.value=''
+  coverError.value=''; platformProduct.value=null; platformScopeName.value=''; productImages.value=[]; selectedReferenceId.value=''
   setCoverPrompt()
   await nextTick(); coverDialog.value?.showModal()
   searchingCoverProduct.value=true
-  const productRequest=productPlatformApi.search(productName.value.trim()).then(async result=>{
+  const productRequest=productPlatformApi.search(productName.value.trim(), {asset_id: assetId.value}).then(async result=>{
     platformProduct.value=result.product; platformScopeName.value=result.scope_name
     if(!result.product) {coverError.value='星斗未查询到匹配商品'; return}
     await loadCoverImages()

@@ -1192,3 +1192,401 @@ Topics: [.trellis/spec/project/roughcut.md](../../spec/project/roughcut.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 45: 确认达多多目录查询范围
+<!-- trellis-session: v=2 fp=ef798b4bed78cc72 -->
+
+**Date**: 2026-11-21
+**Task**: 确认达多多目录查询范围
+**Branch**: `master`
+
+### Summary
+
+记录达多多分页样本及用户确认的直播间参数归属与日期参数规则。
+Topics: [.trellis/research/daduoduo-product-catalog.md](../../research/daduoduo-product-catalog.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 46: 实现达多多商品目录与直播间绑定
+<!-- trellis-session: v=2 fp=3a88b74f5fc10f49 -->
+
+**Date**: 2026-11-21
+**Task**: 实现达多多商品目录与直播间绑定
+**Branch**: `master`
+
+### Summary
+
+平台页增加达多多。各直播间独立配置查询标识，启动与手动按每页 50 条同步，全部分页成功后替换本地目录。商品片段导入记录来源直播间。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md), [.trellis/spec/project/settings.md](../../spec/project/settings.md), [.trellis/spec/project/api.md](../../spec/project/api.md), [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 418 项后端测试和 117 项子测试通过，已有决策恢复测试出现线程警告。前端构建及平台、凭据、粗剪和删除交互测试通过。达多多真实账号尚待验收。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 47: 简化达多多直播间绑定
+<!-- trellis-session: v=2 fp=d4b4a2bedb4b2678 -->
+
+**Date**: 2026-11-21
+**Task**: 简化达多多直播间绑定
+**Branch**: `master`
+
+### Summary
+
+用户实测确认达多多只需 ipId。移除达多多凭据配置和多余请求参数，给未绑定的已有直播间显示绑定平台按钮。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md), [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、平台与凭据交互测试及 27 项平台后端测试通过。完整真实分页待验收。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 48: 将直播间平台绑定移入齿轮菜单
+<!-- trellis-session: v=2 fp=5307b34020383712 -->
+
+**Date**: 2026-11-21
+**Task**: 将直播间平台绑定移入齿轮菜单
+**Branch**: `master`
+
+### Summary
+
+按用户截图将已有直播间的平台绑定入口放到齿轮菜单底部，通过弹窗保存。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、平台绑定弹窗及删除交互测试通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 49: 移除直播监控顶部统计卡
+<!-- trellis-session: v=2 fp=ffc27c8ab2cb639c -->
+
+**Date**: 2026-11-21
+**Task**: 移除直播监控顶部统计卡
+**Branch**: `master`
+
+### Summary
+
+按用户要求移除直播监控顶部四张统计卡，工具栏位于直播间列表与详情上方。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、直播录制时间线和平台交互测试通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 50: 修复达多多后续页总数为零
+<!-- trellis-session: v=2 fp=b939764d4f65997d -->
+
+**Date**: 2026-11-22
+**Task**: 修复达多多后续页总数为零
+**Branch**: `master`
+
+### Summary
+
+实测达多多后续页有商品且 total=0。以首页总数核对所有条目后整体替换目录。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md), [.trellis/research/daduoduo-product-catalog.md](../../research/daduoduo-product-catalog.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 27 项平台测试通过。隔离数据库对真实接口完整同步 294 条。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 51: 补充达多多分页实测结果
+<!-- trellis-session: v=2 fp=98821179545b3525 -->
+
+**Date**: 2026-11-22
+**Task**: 补充达多多分页实测结果
+**Branch**: `master`
+
+### Summary
+
+用户确认实际商品总数只在 pageIndex=1 返回，实测后续页的 total 均为 0。现有同步实现已经覆盖。
+Topics: [.trellis/research/daduoduo-product-catalog.md](../../research/daduoduo-product-catalog.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 52: 将达多多更新入口移入讲解列表
+<!-- trellis-session: v=2 fp=fbe1c6d98ee5b8f6 -->
+
+**Date**: 2026-11-22
+**Task**: 将达多多更新入口移入讲解列表
+**Branch**: `master`
+
+### Summary
+
+达多多目录状态和小号更新按钮显示在讲解列表标题旁，空场次仍可更新。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、录制时间线和平台交互测试通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 53: 显示达多多商品上架时间
+<!-- trellis-session: v=2 fp=b50a21d957ef9d51 -->
+
+**Date**: 2026-11-22
+**Task**: 显示达多多商品上架时间
+**Branch**: `master`
+
+### Summary
+
+用户确认 goodsInfo.CoopBeginTime 对应上架时间。达多多商品目录同步后保留该值，查询弹窗按平台原值展示。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 27 项后端平台测试、前端平台交互测试和生产构建通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 54: 将商品监听说明移入状态提示
+<!-- trellis-session: v=2 fp=aa70bdcfc50d3f0d -->
+
+**Date**: 2026-11-22
+**Task**: 将商品监听说明移入状态提示
+**Branch**: `master`
+
+### Summary
+
+商品讲解标题右侧状态徽标承载监听说明，通过悬停或键盘聚焦查看。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端生产构建、录制时间线和现有交互测试通过，覆盖错误文本与徽标关联及重试操作。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 55: 商品监听异常状态显示呼吸效果
+<!-- trellis-session: v=2 fp=cb71b3795a1377dd -->
+
+**Date**: 2026-11-22
+**Task**: 商品监听异常状态显示呼吸效果
+**Branch**: `master`
+
+### Summary
+
+状态徽标在商品连接中断、目录获取失败或连接后长时间无商品消息时显示呼吸光晕。系统减少动态效果时显示静态光晕。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、录制时间线与交互测试通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 56: 调整直播间排序手柄样式
+<!-- trellis-session: v=2 fp=39fae29a69d43859 -->
+
+**Date**: 2026-11-22
+**Task**: 调整直播间排序手柄样式
+**Branch**: `master`
+
+### Summary
+
+排序手柄贴紧卡片左侧，缩小到内容的间距。悬停和键盘聚焦使用独立底色。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、录制时间线及日期回归测试通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 57: 侧栏支持手动与自动收起
+<!-- trellis-session: v=2 fp=2de878e7ad16d900 -->
+
+**Date**: 2026-11-22
+**Task**: 侧栏支持手动与自动收起
+**Branch**: `master`
+
+### Summary
+
+增加右下角切换按钮，沿用 1100 CSS 像素断点。收起时图标支持悬停与键盘焦点提示，内容区使用剩余宽度。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建与路由、应用交互测试通过，覆盖手动切换、窗口断点与图标名称。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 58: 达多多商品查询显示最近讲解
+<!-- trellis-session: v=2 fp=ed274836c40ae094 -->
+
+**Date**: 2026-11-22
+**Task**: 达多多商品查询显示最近讲解
+**Branch**: `master`
+
+### Summary
+
+按用户指定的 goodsInfo.LiveBeginTime 原值展示最近讲解，与上架时间同列组。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 27 项后端平台测试、前端平台交互测试和前端构建通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 59: 修复侧栏折叠布局和动画
+<!-- trellis-session: v=2 fp=fd4554af9572ef62 -->
+
+**Date**: 2026-11-22
+**Task**: 修复侧栏折叠布局和动画
+
+### Summary
+
+收起时导航名称提示浮在主内容上方，底部状态、版本号与右侧按钮同排，侧栏与主内容同步过渡并遵循系统减少动态效果偏好。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Main Changes
+
+- 调整 desktop/src/style.css 的侧栏层级、底部布局和宽度过渡。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、test:updates 和 test:routing 通过；Chrome 验证窄屏导航提示、底部对齐、双向过渡与减少动态效果。安装版 WebView 待验收。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 60: 版本更新说明显示 Markdown
+<!-- trellis-session: v=2 fp=13bc02da12f75520 -->
+
+**Date**: 2026-11-22
+**Task**: 版本更新说明显示 Markdown
+
+### Summary
+
+本地设置的更新说明使用基础 Markdown 排版并保留折叠和区内滚动。原始 HTML、链接标签和图片说明以文字显示。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Main Changes
+
+- 版本更新组件加入 markdown-it 和随主题变化的正文样式。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建及 test:updates 通过；Chrome 使用模拟更新状态验证浅色与深色主题、列表与长文滚动，未执行 Windows 安装。
+
+### Status
+
+[OK] **Completed**

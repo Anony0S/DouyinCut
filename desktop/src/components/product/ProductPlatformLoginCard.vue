@@ -35,7 +35,7 @@ onUnmounted(() => { disposed = true })
 </script>
 
 <template>
-  <div>
+  <div class="card-body gap-0">
     <div class="flex flex-wrap items-center justify-between gap-4">
       <div>
         <h2 class="text-lg font-semibold">星斗商品平台</h2>

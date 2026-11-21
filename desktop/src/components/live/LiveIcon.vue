@@ -23,6 +23,8 @@ const paths: Record<string, string> = {
   palette: 'M12 3a9 9 0 1 0 0 18h1.2a2.8 2.8 0 0 0 2.1-4.7 1.6 1.6 0 0 1 1.2-2.7H18a3 3 0 0 0 3-3c0-4.2-4-7.6-9-7.6z M7.5 12h.01 M9.5 7.8h.01 M14.5 7.8h.01 M17 11h.01',
   document: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h6 M9 17h6',
   server: 'M4 5h16v10H4z M8 19h8 M12 15v4 M7 9h.01 M10 9h.01',
+  'sidebar-collapse': 'M15.5 5l-7 7 7 7',
+  'sidebar-expand': 'M8.5 5l7 7-7 7',
 }
 </script>
 <template><svg class="live-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name] || paths.rooms" /></svg></template>

@@ -22,6 +22,7 @@ from pydantic import Field
 from ..core.config import Settings
 from ..core.domain import Model, new_id
 from ..core.storage import Store
+from ..product_platform.schemas import RoomPlatformBinding
 from ..work_directory import REQUIRED_COLUMNS
 from .catalog import ProductCatalogRefresher
 
@@ -40,6 +41,7 @@ ACTIVE_JOB_STATES = ("queued", "running", "pause_requested", "paused", "cancel_r
 class LiveMonitorRequest(Model):
     url: str = Field(min_length=8, max_length=2000)
     name: str = Field(default="", max_length=200)
+    product_platform: RoomPlatformBinding | None = None
 
 
 class LiveMonitorSettings(Model):
@@ -93,6 +95,12 @@ class LiveStore:
                     last_checked REAL, error TEXT, retry_blocked INTEGER NOT NULL DEFAULT 0,
                     current_session_id TEXT,
                     created REAL NOT NULL, updated REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS live_room_platforms (
+                    monitor_id TEXT PRIMARY KEY, binding_id TEXT NOT NULL UNIQUE, body TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS daduoduo_catalogs (
+                    binding_id TEXT PRIMARY KEY, products TEXT NOT NULL, synced_at REAL NOT NULL
                 );
                 -- record_requested: manual start for the current broadcast;
                 -- record_held: user stopped recording, suppress until the room goes offline.
@@ -214,7 +222,7 @@ class LiveStore:
             if not required_merged_clip_columns <= merged_clip_columns:
                 raise RuntimeError("合并商品片段表结构不完整，请备份并修复当前工作目录数据库后重新启动。")
 
-    def create_monitor(self, url: str, name: str):
+    def create_monitor(self, url: str, name: str, product_platform: RoomPlatformBinding | None = None):
         url = normalize_douyin_url(url)
         now, monitor_id = time.time(), new_id("live")
         with self.store.connection() as conn:
@@ -224,6 +232,30 @@ class LiveStore:
             conn.execute("INSERT INTO live_monitors(id,url,name,created,updated) VALUES(?,?,?,?,?)",
                          (monitor_id, url, name.strip(), now, now))
             conn.execute("INSERT INTO live_monitor_controls(monitor_id,updated) VALUES(?,?)", (monitor_id, now))
+            self._save_platform(conn, monitor_id, product_platform)
+        return self.monitor(monitor_id)
+
+    @staticmethod
+    def _save_platform(conn, monitor_id: str, binding: RoomPlatformBinding | None):
+        body = binding.model_dump_json() if binding else None
+        previous = conn.execute("SELECT binding_id,json_extract(body,'$.platform') AS platform,"
+                                "json_extract(body,'$.ip_id') AS ip_id FROM live_room_platforms WHERE monitor_id=?",
+                                (monitor_id,)).fetchone()
+        if previous and binding and (previous["platform"], previous["ip_id"]) == (binding.platform, binding.ip_id):
+            conn.execute("UPDATE live_room_platforms SET body=? WHERE monitor_id=?", (body, monitor_id))
+            return
+        if previous:
+            conn.execute("DELETE FROM daduoduo_catalogs WHERE binding_id=?", (previous["binding_id"],))
+            conn.execute("DELETE FROM live_room_platforms WHERE monitor_id=?", (monitor_id,))
+        if binding:
+            conn.execute("INSERT INTO live_room_platforms VALUES (?,?,?)", (monitor_id, new_id("binding"), body))
+
+    def set_product_platform(self, monitor_id: str, binding: RoomPlatformBinding | None):
+        with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM live_monitors WHERE id=?", (monitor_id,)).fetchone():
+                raise KeyError(monitor_id)
+            self._save_platform(conn, monitor_id, binding)
         return self.monitor(monitor_id)
 
     def set_auto_name(self, monitor_id: str, name: str):
@@ -239,10 +271,13 @@ class LiveStore:
         "m.created,m.updated,COALESCE(c.auto_record,1) AS auto_record,COALESCE(c.notify_live,1) AS notify_live,"
         "COALESCE(c.notify_offline,1) AS notify_offline,COALESCE(c.notify_split_complete,1) AS notify_split_complete,"
         "COALESCE(c.record_requested,0) AS record_requested,COALESCE(c.record_held,0) AS record_held,"
-        "COALESCE(c.updated,0) AS updated_controls,l.is_live,l.checked AS live_checked"
+        "COALESCE(c.updated,0) AS updated_controls,l.is_live,l.checked AS live_checked,"
+        "CASE WHEN p.monitor_id IS NOT NULL THEN json_object('platform',json_extract(p.body,'$.platform'),"
+        "'ip_id',json_extract(p.body,'$.ip_id')) END AS product_platform"
     )
     _MONITOR_JOINS = ("FROM live_monitors m LEFT JOIN live_monitor_controls c ON c.monitor_id=m.id "
-                      "LEFT JOIN live_monitor_liveness l ON l.monitor_id=m.id")
+                      "LEFT JOIN live_monitor_liveness l ON l.monitor_id=m.id "
+                      "LEFT JOIN live_room_platforms p ON p.monitor_id=m.id")
 
     @staticmethod
     def _decode_monitor(row) -> dict:
@@ -251,6 +286,7 @@ class LiveStore:
                       "record_requested", "record_held", "retry_blocked"):
             result[field] = bool(result[field])
         result["is_live"] = None if result["is_live"] is None else bool(result["is_live"])
+        result["product_platform"] = json.loads(result["product_platform"]) if result["product_platform"] else None
         return result
 
     def monitor(self, monitor_id: str):
@@ -847,6 +883,7 @@ class LiveStore:
             conn.execute("DELETE FROM live_sessions WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_monitor_liveness WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_monitor_controls WHERE monitor_id=?", (monitor_id,))
+            self._save_platform(conn, monitor_id, None)
             conn.execute("DELETE FROM live_monitors WHERE id=?", (monitor_id,))
         return {"deleted_monitor_id": monitor_id, "recordings_retained": True}
 
@@ -1182,8 +1219,10 @@ class LiveStore:
             if clip["status"] == "importing":
                 return self.store.job(clip["import_job_id"])
             job_id, now = new_id("job"), time.time()
+            room = conn.execute("SELECT monitor_id FROM live_sessions WHERE id=?", (clip["session_id"],)).fetchone()
             payload = {"path": clip["path"], "display_name": Path(clip["path"]).name,
-                       "live_product_clip_id": clip_id, "product_name": clip["product_name"]}
+                       "live_product_clip_id": clip_id, "product_name": clip["product_name"],
+                       "source_monitor_id": room["monitor_id"]}
             conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
                          (job_id, "import", json.dumps(payload, ensure_ascii=False), now, now))
             conn.execute(f"UPDATE {table} SET status='importing',import_job_id=? WHERE id=?", (job_id, clip_id))

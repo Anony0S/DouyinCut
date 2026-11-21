@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, useId } from 'vue'
 import { useRouter } from 'vue-router'
-import { isProductPlatformAuthError, productPlatformApi, type XingdouProduct } from '../../services/productPlatform'
+import { isProductPlatformAuthError, productPlatformApi, type PlatformProduct } from '../../services/productPlatform'
 import { useSessionStore } from '../../stores/session'
 
-const props = defineProps<{ keyword: string }>()
+const props = defineProps<{ keyword: string; monitorId: string }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const id = useId(), router = useRouter(), session = useSessionStore()
 const query = ref(props.keyword.trim())
 const loading = ref(false), adding = ref(false), added = ref(false)
 const error = ref(''), addError = ref(''), scopeName = ref(''), imageFailed = ref(false)
-const product = ref<XingdouProduct | null>(null)
+const product = ref<PlatformProduct | null>(null)
+const canAddToShowcase = ref(false)
 let disposed = false
 const cover = computed(() => {
   if (imageFailed.value || !product.value?.cover) return ''
@@ -24,19 +25,21 @@ const price = computed(() => typeof product.value?.price === 'number' ? `¥${pro
 const facts = computed(() => product.value ? [
   { label: '佣金比例', value: product.value.commission_ratio == null ? '—' : `${product.value.commission_ratio}%` },
   { label: '库存', value: product.value.stock ?? '—' },
-  { label: '实时销量', value: product.value.real_time_sales ?? '—' },
+  canAddToShowcase.value
+    ? { label: '实时销量', value: product.value.real_time_sales ?? '—' }
+    : { label: '近 1 日销量', value: product.value.yesterday_sales ?? '—' },
   { label: '近 30 日销量', value: product.value.month_sales ?? '—' },
   { label: '累计销量', value: product.value.total_sales ?? '—' },
   { label: '直播', value: product.value.has_live == null ? '—' : product.value.has_live ? '有直播' : '暂无直播' },
   { label: 'AI 直播', value: product.value.has_ai_live == null ? '—' : product.value.has_ai_live ? '有' : '无' },
-] : [])
+].filter(fact => canAddToShowcase.value || fact.value !== '—') : [])
 function close() { disposed = true; emit('close') }
 async function addToShowcase() {
   const platformProductId = product.value?.platform_product_id
-  if (!platformProductId || adding.value || added.value) return
+  if (!platformProductId || !canAddToShowcase.value || adding.value || added.value) return
   adding.value = true; addError.value = ''
   try {
-    await productPlatformApi.addToShowcase(platformProductId)
+    await productPlatformApi.addToShowcase(platformProductId, props.monitorId)
     if (!disposed) added.value = true
   } catch (cause) {
     if (disposed) return
@@ -52,11 +55,12 @@ async function search() {
   const keyword = query.value.trim()
   if (!keyword) { error.value = '请输入查询词'; return }
   loading.value = true; error.value = ''; addError.value = ''; added.value = false
-  product.value = null; imageFailed.value = false
+  product.value = null; imageFailed.value = false; canAddToShowcase.value = false
   try {
-    const result = await productPlatformApi.search(keyword)
+    const result = await productPlatformApi.search(keyword, {monitor_id: props.monitorId})
     if (disposed) return
     product.value = result.product; scopeName.value = result.scope_name
+    canAddToShowcase.value = result.can_add_to_showcase
   } catch (cause) {
     if (disposed) return
     if (isProductPlatformAuthError(cause)) {
@@ -119,13 +123,20 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
                   <dd class="mt-1 break-words text-sm font-medium">{{ fact.value }}</dd>
                 </div>
               </dl>
-              <div class="border-t border-base-300 pt-4 text-sm">
-                <p class="text-xs text-base-content/60">上架时间</p>
-                <p class="mt-1">{{ product.listing_time || '—' }}</p>
-              </div>
+              <dl v-if="canAddToShowcase || product.listing_time || product.last_explained_at !== undefined"
+                class="grid grid-cols-2 gap-x-5 border-t border-base-300 pt-4 text-sm">
+                <div>
+                  <dt class="text-xs text-base-content/60">上架时间</dt>
+                  <dd class="mt-1">{{ product.listing_time || '—' }}</dd>
+                </div>
+                <div v-if="product.last_explained_at !== undefined">
+                  <dt class="text-xs text-base-content/60">最近讲解</dt>
+                  <dd class="mt-1">{{ product.last_explained_at || '—' }}</dd>
+                </div>
+              </dl>
             </div>
           </article>
-          <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div v-if="canAddToShowcase" class="mt-4 flex flex-wrap items-center justify-between gap-3">
             <p class="text-xs text-base-content/60">仅展示平台返回的第一条商品，请核对名称与规格。查询范围：{{ scopeName || '当前合作范围' }}。</p>
             <button type="button" class="btn btn-primary btn-sm" :disabled="adding || added || !product.platform_product_id" @click="addToShowcase">
               <span v-if="adding" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
@@ -137,7 +148,7 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
         </template>
         <div v-else role="status" class="py-16 text-center">
           <p class="font-medium">未查询到商品</p>
-          <p class="mt-2 text-sm text-base-content/60">当前范围“{{ scopeName || '合作商品' }}”内暂无匹配结果</p>
+          <p v-if="scopeName" class="mt-2 text-sm text-base-content/60">当前范围“{{ scopeName }}”内暂无匹配结果</p>
         </div>
         <div class="modal-action"><button class="btn" @click="close">关闭</button></div>
       </div>

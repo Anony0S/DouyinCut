@@ -79,6 +79,7 @@ class Worker:
                 if display_name:
                     display_name = f"{Path(display_name).stem}.mp4"
             asset = import_asset(source_path, settings, ctx.checkpoint)
+            asset.source_monitor_id = payload.get("source_monitor_id")
             if display_name:
                 asset.name = display_name
             objects.append(("asset", asset.model_dump()))

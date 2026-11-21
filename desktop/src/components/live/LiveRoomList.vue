@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import type { LiveMonitor, LiveMonitorSettings } from "../../services/liveMonitoring";
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from "vue";
+import { liveMonitoringApi, type LiveMonitor, type LiveMonitorSettings } from "../../services/liveMonitoring";
+import type { RoomPlatformBinding } from "../../services/productPlatform";
 import LiveIcon from "./LiveIcon.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
+import RoomPlatformFields from "../product/RoomPlatformFields.vue";
 import { readRoomOrder, roomOrderKey, sortRooms } from "./roomOrder";
 import {
   formatLiveTime,
@@ -21,6 +23,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   select: [id: string];
   settings: [monitor: LiveMonitor, changes: LiveMonitorSettings];
+  "platform-saved": [];
   record: [monitor: LiveMonitor, action: "start" | "stop"];
   "open-url": [url: string];
 }>();
@@ -169,36 +172,45 @@ function openSelectedRoom(event: MouseEvent) {
 // trigger; otherwise the scroll container would clip it.
 const settingsFor = ref<string | null>(null);
 const settingsPanel = ref<HTMLElement>();
+let settingsTrigger: HTMLElement | undefined;
 const anchor = ref({ top: 0, left: 0 });
 const settingsMonitor = computed(
   () => props.monitors.find((item) => item.id === settingsFor.value) ?? null,
 );
-function toggleSettings(monitor: LiveMonitor, event: MouseEvent) {
+async function toggleSettings(monitor: LiveMonitor, event: MouseEvent) {
   if (settingsFor.value === monitor.id) {
     closeSettings();
     return;
   }
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  settingsTrigger = event.currentTarget as HTMLElement;
+  const rect = settingsTrigger.getBoundingClientRect();
   anchor.value = {
-    top: Math.min(rect.bottom + 6, window.innerHeight - 300),
+    top: rect.bottom + 6,
     left: Math.max(12, Math.min(rect.right - 232, window.innerWidth - 244)),
   };
   settingsFor.value = monitor.id;
   window.addEventListener("pointerdown", onOutside, true);
   window.addEventListener("keydown", onEscape);
-  window.addEventListener("scroll", closeSettings, true);
+  window.addEventListener("scroll", onSettingsScroll, true);
+  await nextTick();
+  if (settingsFor.value !== monitor.id || !settingsPanel.value) return;
+  const { height } = settingsPanel.value.getBoundingClientRect();
+  anchor.value.top = Math.max(12, Math.min(rect.bottom + 6, window.innerHeight - height - 12));
 }
 function closeSettings() {
   settingsFor.value = null;
   window.removeEventListener("pointerdown", onOutside, true);
   window.removeEventListener("keydown", onEscape);
-  window.removeEventListener("scroll", closeSettings, true);
+  window.removeEventListener("scroll", onSettingsScroll, true);
 }
 function onOutside(event: PointerEvent) {
   const target = event.target as Node;
   if (settingsPanel.value?.contains(target)) return;
   if ((target as HTMLElement).closest?.(".live-room-settings-trigger")) return;
   closeSettings();
+}
+function onSettingsScroll(event: Event) {
+  if (event.target !== settingsPanel.value) closeSettings();
 }
 function onEscape(event: KeyboardEvent) {
   if (event.key === "Escape") closeSettings();
@@ -211,6 +223,48 @@ const settingToggles: { key: keyof LiveMonitorSettings; name: string; hint: stri
 ];
 function changeSetting(monitor: LiveMonitor, key: keyof LiveMonitorSettings, event: Event) {
   emit("settings", monitor, { [key]: (event.target as HTMLInputElement).checked });
+}
+
+const bindingDialog = ref<HTMLDialogElement>();
+const bindingTitleId = useId();
+const bindingMonitor = ref<LiveMonitor | null>(null);
+const bindingDraft = ref<RoomPlatformBinding | null>(null);
+const savingBinding = ref(false);
+const bindingError = ref("");
+
+async function openBinding(monitor: LiveMonitor) {
+  bindingMonitor.value = monitor;
+  bindingDraft.value = monitor.product_platform ? { ...monitor.product_platform } : null;
+  bindingError.value = "";
+  closeSettings();
+  await nextTick();
+  bindingDialog.value?.showModal();
+}
+
+function closeBinding() {
+  if (!savingBinding.value) bindingDialog.value?.close();
+}
+
+function resetBinding() {
+  bindingMonitor.value = null;
+  settingsTrigger?.focus();
+}
+
+async function saveBinding() {
+  const monitor = bindingMonitor.value;
+  const binding = bindingDraft.value;
+  if (!monitor || savingBinding.value || (binding?.platform === "daduoduo" && !binding.ip_id.trim())) return;
+  savingBinding.value = true;
+  bindingError.value = "";
+  try {
+    await liveMonitoringApi.setProductPlatform(monitor.id, binding);
+    bindingDialog.value?.close();
+    emit("platform-saved");
+  } catch (cause) {
+    bindingError.value = cause instanceof Error ? cause.message : "保存商品平台失败";
+  } finally {
+    savingBinding.value = false;
+  }
 }
 // A checkbox flips in the DOM before the request settles. Once the action ends, put every
 // toggle back on the saved value so a failed save does not leave a setting shown as changed.
@@ -371,10 +425,6 @@ onUnmounted(closeSettings);
           最近检测 {{ selectedCheckTime }}
         </span>
         <span>
-          <LiveIcon name="video" />
-          录制内容保存在本机
-        </span>
-        <span>
           <LiveIcon name="settings" />
           {{
             selected.auto_record ? "开播自动录制已开启" : "开播不自动录制"
@@ -465,7 +515,35 @@ onUnmounted(closeSettings);
             <small>{{ item.hint }}</small>
           </span>
         </label>
+        <div class="mt-2 border-t border-base-300 px-1.5 pt-2">
+          <button type="button" class="btn btn-sm w-full justify-start" aria-haspopup="dialog"
+            :disabled="busy" @click="openBinding(settingsMonitor)">
+            {{ settingsMonitor.product_platform ? "修改绑定" : "绑定平台" }}
+          </button>
+        </div>
       </div>
+      <dialog v-if="bindingMonitor" ref="bindingDialog" class="modal" :aria-labelledby="bindingTitleId"
+        @cancel.prevent="closeBinding" @close="resetBinding">
+        <div class="modal-box max-w-sm">
+          <h2 :id="bindingTitleId" class="mb-4 text-lg font-semibold">
+            {{ bindingMonitor.product_platform ? "修改绑定" : "绑定平台" }} · {{ bindingMonitor.name || "抖音直播间" }}
+          </h2>
+          <form @submit.prevent="saveBinding">
+            <fieldset :disabled="savingBinding">
+              <RoomPlatformFields v-model="bindingDraft" />
+            </fieldset>
+            <p v-if="bindingError" class="mt-3 text-sm text-error" role="alert">{{ bindingError }}</p>
+            <div class="modal-action">
+              <button type="button" class="btn btn-sm" :disabled="savingBinding" @click="closeBinding">取消</button>
+              <button class="btn btn-primary btn-sm"
+                :disabled="savingBinding || (bindingDraft?.platform === 'daduoduo' && !bindingDraft.ip_id.trim())">保存绑定</button>
+            </div>
+          </form>
+        </div>
+        <form method="dialog" class="modal-backdrop" @submit.prevent="closeBinding">
+          <button :disabled="savingBinding" aria-label="关闭平台绑定弹窗">关闭</button>
+        </form>
+      </dialog>
     </Teleport>
   </section>
 </template>

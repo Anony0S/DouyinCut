@@ -27,7 +27,14 @@ const empty = { render: () => null }
 let timers = new Map(), timerId = 0
 const setTimer = callback => { timers.set(++timerId, callback); return timerId }
 const clearTimer = id => timers.delete(id)
-global.window = Object.assign(new EventTarget(), { setTimeout: setTimer, clearTimeout: clearTimer })
+const sidebarViewport = Object.assign(new EventTarget(), { matches: false })
+global.window = Object.assign(new EventTarget(), {
+  setTimeout: setTimer, clearTimeout: clearTimer,
+  matchMedia(query) {
+    assert.equal(query, '(max-width: 1100px)')
+    return sidebarViewport
+  },
+})
 function compile(relative, mocks, development = false) {
   let source = fs.readFileSync(path.resolve(__dirname, '../src', relative), 'utf8')
   source = compileScript(parse(source).descriptor, { id: relative, inlineTemplate: true }).content
@@ -55,26 +62,39 @@ async function tickStatus() {
 
 async function verifyUpdateRow() {
   const commands = [], events = []
+  const notes = [
+    '## 修复',
+    '- **直播监控**支持 `最近讲解`。',
+    '- [参考链接](https://example.com) ![图片说明](https://example.com/image.png)',
+    '',
+    '<script>unsafe</script>',
+  ].join('\n')
   let status = { phase: 'idle', currentVersion: '0.2.137', latestVersion: null, hasUpdate: false,
     notes: '', downloadedBytes: 0, totalBytes: 100, message: '' }, pending = null
   const internals = { async invoke(command) {
     assert.equal(this, internals, 'Preserves the native bridge receiver')
     commands.push(command)
     if (command === 'get_update_status') return pending ? pending.promise : { ...status }
-    if (command === 'check_for_update') status = { ...status, phase: 'available', latestVersion: '0.3.0', hasUpdate: true, notes: '<script>unsafe</script>', message: '发现新版本' }
+    if (command === 'check_for_update') status = { ...status, phase: 'available', latestVersion: '0.3.0', hasUpdate: true, notes, message: '发现新版本' }
     if (command === 'download_update') status = { ...status, phase: 'downloading', downloadedBytes: 25, message: '下载中' }
     if (command === 'cancel_update_download') status = { ...status, phase: 'error', message: '下载已取消' }
   } }
   window.__TAURI_INTERNALS__ = internals
   const service = modules().load('services/updates.ts')
-  const component = compile('components/SoftwareUpdate.vue', { '../services/updates': service })
+  const mocks = { '../services/updates': service, 'markdown-it': { default: require('markdown-it') } }
+  const component = compile('components/SoftwareUpdate.vue', mocks)
   const handler = () => events.push('install-request')
   window.addEventListener('douyincut-update-request', handler)
   let mounted = await mount(component)
   assert.deepEqual(commands, ['get_update_status'], 'Opening settings does not auto-check GitHub')
   await click(mounted.root, '检查更新'); await tickStatus()
   assert.ok(button(mounted.root, '下载 v0.3.0'))
-  assert.equal(all(mounted.root, el => el.type === 'script').length, 0, 'Release notes are text, never executable HTML')
+  const renderedNotes = all(mounted.root, el => typeof el.props.innerHTML === 'string')[0]?.props.innerHTML
+  assert.match(renderedNotes, /<h2>修复<\/h2>\s*<ul>/)
+  assert.match(renderedNotes, /<strong>直播监控<\/strong>支持 <code>最近讲解<\/code>/)
+  assert.match(renderedNotes, /参考链接 图片说明/)
+  assert.match(renderedNotes, /&lt;script&gt;unsafe&lt;\/script&gt;/)
+  assert.doesNotMatch(renderedNotes, /<(?:script|a|img)\b/i, 'Release notes cannot execute HTML, navigate or load images')
   await click(mounted.root, '下载 v0.3.0'); await tickStatus()
   assert.ok(text(mounted.root).includes('25%'))
   assert.equal(button(mounted.root, '检查更新').props.disabled, true)
@@ -92,7 +112,7 @@ async function verifyUpdateRow() {
   mounted.app.unmount(); pending.resolve(status); await inFlight
   assert.equal(timers.size, 0, 'Late responses cannot restart polling after unmount')
   pending = null
-  mounted = await mount(compile('components/SoftwareUpdate.vue', { '../services/updates': service }, true))
+  mounted = await mount(compile('components/SoftwareUpdate.vue', mocks, true))
   assert.equal(button(mounted.root, '退出并安装').props.disabled, true, 'Development cannot install')
   mounted.app.unmount(); window.removeEventListener('douyincut-update-request', handler)
   delete window.__TAURI_INTERNALS__
@@ -118,6 +138,23 @@ async function verifyExitCoordination() {
   }
   window.__TAURI_INTERNALS__ = { async invoke(command) { native.push(command); if (nativeError) throw new Error('installer refused') } }
   const mounted = await mount(compile('App.vue', mocks))
+  const sidebarToggle = () => all(mounted.root, el => el.props['aria-controls'] === 'sidebar-navigation')[0]
+  const tooltipLabels = () => all(mounted.root, el => el.props['data-tip']).map(el => el.props['data-tip'])
+  assert.equal(sidebarToggle().props['aria-expanded'], true)
+  assert.deepEqual(tooltipLabels(), [])
+  sidebarToggle().props.onClick(); await settle()
+  assert.equal(sidebarToggle().props['aria-expanded'], false)
+  assert.deepEqual(tooltipLabels(), ['直播监控', '素材与粗剪', '视频项目', '后台任务', '外观', '云端设置', '本地设置', '运行日志'])
+  const workspaceLink = all(mounted.root, el => el.props['aria-label'] === '素材与粗剪')[0]
+  assert.equal(workspaceLink.props.disabled, true)
+  sidebarToggle().props.onClick(); await settle()
+  assert.equal(sidebarToggle().props['aria-expanded'], true)
+  for (const matches of [true, false]) {
+    sidebarViewport.matches = matches
+    sidebarViewport.dispatchEvent(Object.assign(new Event('change'), { matches }))
+    await settle()
+    assert.equal(sidebarToggle().props['aria-expanded'], !matches)
+  }
   const request = async () => { window.dispatchEvent(new Event('douyincut-update-request')); await settle() }
   const recording = { record_requested: false, sessions: [{ status: 'recording' }] }
   project.planDirty = true
@@ -144,6 +181,11 @@ async function verifyExitCoordination() {
   assert.deepEqual(native, ['install_update', 'install_update'])
   assert.ok(!native.includes('complete_exit'), 'Update uses the installation handoff')
   mounted.app.unmount(); assert.equal(timers.size, 0)
+  sidebarViewport.matches = true
+  const narrow = await mount(compile('App.vue', mocks))
+  assert.equal(all(narrow.root, el => el.props['aria-controls'] === 'sidebar-navigation')[0].props['aria-expanded'], false)
+  narrow.app.unmount()
+  sidebarViewport.matches = false
 }
 
 ;(async () => {

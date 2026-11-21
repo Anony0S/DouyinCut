@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MarkdownIt from 'markdown-it'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { desktopUpdatesAvailable, updateCommand, type UpdateStatus } from '../services/updates'
 
@@ -10,6 +11,14 @@ const status = ref<UpdateStatus | null>(null), error = ref(''), commandBusy = re
 const busy = computed(() => commandBusy.value || ['checking', 'downloading', 'installing'].includes(status.value?.phase || ''))
 const percent = computed(() => status.value?.totalBytes ? Math.min(100, Math.floor(status.value.downloadedBytes / status.value.totalBytes * 100)) : 0)
 const canDownload = computed(() => status.value?.hasUpdate && !busy.value && status.value.phase !== 'ready')
+const notesMarkdown = new MarkdownIt({ html: false, breaks: true })
+// Keep release notes readable without navigating the workbench or loading remote media.
+notesMarkdown.renderer.rules.link_open = () => ''
+notesMarkdown.renderer.rules.link_close = () => ''
+notesMarkdown.renderer.rules.image = (tokens, index, options, env, renderer) =>
+  notesMarkdown.utils.escapeHtml(renderer.renderInlineAsText(tokens[index].children ?? [], options, env))
+const notes = computed(() => status.value?.hasUpdate ? status.value.notes : '')
+const notesHtml = computed(() => notesMarkdown.render(notes.value))
 let stopped = false, timer: ReturnType<typeof setTimeout> | undefined
 
 async function refresh() {
@@ -62,10 +71,23 @@ onUnmounted(() => { stopped = true; if (timer !== undefined) clearTimeout(timer)
         <progress class="progress mt-2 w-full" :value="status.downloadedBytes" :max="status.totalBytes || 1" aria-label="安装包下载进度"></progress>
         <p>{{ percent }}% · {{ megabytes(status.downloadedBytes) }} / {{ megabytes(status.totalBytes) }} MB</p>
       </template>
-      <details v-if="status?.hasUpdate && status.notes" class="mt-3">
-        <summary class="cursor-pointer">v{{ status.latestVersion }} 更新说明</summary>
-        <p class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{{ status.notes }}</p>
+      <details v-if="notes.trim()" class="mt-3">
+        <summary class="cursor-pointer">v{{ status?.latestVersion }} 更新说明</summary>
+        <div class="update-notes mt-2 max-h-64 overflow-auto rounded-box bg-base-200 p-3 text-sm" v-html="notesHtml"></div>
       </details>
     </div>
   </li>
 </template>
+
+<style scoped>
+.update-notes { overflow-wrap: anywhere; }
+.update-notes :deep(:is(h1, h2, h3, h4, h5, h6)) { margin: 0; font-size: 1em; font-weight: 650; }
+.update-notes > :deep(* + *) { margin-block-start: .65rem; }
+.update-notes :deep(ul) { list-style: disc; padding-inline-start: 1.3em; }
+.update-notes :deep(ol) { list-style: decimal; padding-inline-start: 1.3em; }
+.update-notes :deep(li + li) { margin-block-start: .25rem; }
+.update-notes :deep(blockquote) { border-inline-start: 2px solid var(--color-base-300); padding-inline-start: .75rem; }
+.update-notes :deep(pre) { overflow-x: auto; padding: .5rem; background: var(--color-base-100); border-radius: var(--radius-field); }
+.update-notes :deep(:not(pre) > code) { padding: .1em .3em; background: var(--color-base-100); border-radius: var(--radius-field); }
+.update-notes :deep(:is(th, td)) { padding: .25rem .5rem; border: 1px solid var(--color-base-300); }
+</style>

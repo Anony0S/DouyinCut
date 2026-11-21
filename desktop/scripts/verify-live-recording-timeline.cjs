@@ -26,7 +26,9 @@ const session = (id, started, ended, index) => ({
   product_periods: [{id: `period-${id}`, session_id: id, promotion_id: id, product_name: `讲解-${id}`, started, ended, sources: [], mapping_error: '', clip_job: null}],
   current_product: { promotion_id: id, product_name: `讲解-${id}`, event_time: started, received_at: started },
   segments: [{ id: `segment-${id}`, path: `${id}.ts`, segment_index: index, status: 'completed', size_bytes: 100, duration_us: 1e6, asset_id: null, import_job_id: null, splitting: false }],
-  product_clips: [{ id: `clip-${id}`, segment_id: `segment-${id}`, segment_index: index, promotion_id: id, product_name: `片段-${id}`, start: 0, end: 1, path: `${id}.mp4`, status: 'completed', size_bytes: 100, duration_us: 1e6, asset_id: null, import_job_id: null, error: '' }],
+  product_clips: [{ id: `clip-${id}`, segment_id: `segment-${id}`, segment_index: index, promotion_id: id,
+    product_name: `片段-${id}`, start: 0, end: 1, path: `${id}.mp4`, status: 'completed', size_bytes: 100,
+    duration_us: 1e6, asset_id: null, import_job_id: null, error: '', clip_kind: 'single', source_periods: [] }],
 })
 const monitor = (id, sessions) => ({ id, sessions, name: `直播间-${id}`, url: `https://live.douyin.com/${id}`, auto_record: false, notify_live: false, live_state: 'offline', is_live: false, live_checked: null, error: null })
 let response = [monitor('一', [session('历史', now - 18000, now - 10800, 7), session('当前', now - 3600, null, 8)])]
@@ -138,7 +140,9 @@ async function verify() {
     assert.equal(lastWindow.get('window_start'), '1792684800', 'today starts at local midnight')
     assert.equal(lastWindow.get('window_end'), '1792771200', 'today includes its unused evening hours')
     assert.equal(lastWindow.get('include_end_recording'), 'false', 'exclude the following midnight from the selected day')
-    assert.equal(all(root, el => el.type === 'select').length, 0, 'timeline replaces the dropdown')
+    const [timeline] = all(root, el => el.props['aria-label'] === '录制时间线')
+    assert.ok(timeline)
+    assert.equal(all(timeline, el => el.type === 'select').length, 0, 'timeline replaces the recording dropdown')
     assert.ok(text(root).includes('讲解-当前'), 'recording is selected before finished sessions')
     assert.ok(text(root).includes('片段-当前'))
     const productClipRow = all(root, el => el.type === 'article' && el.props.class?.includes('live-product-clip-row'))[0]

@@ -12,7 +12,7 @@ export type ProductPlatformStatus = {
   last_validated_at: number | null
 }
 
-export type XingdouProduct = {
+export type PlatformProduct = {
   id: string | null
   platform_product_id: string | null
   title: string | null
@@ -27,7 +27,20 @@ export type XingdouProduct = {
   has_live: boolean | null
   has_ai_live: boolean | null
   listing_time: string | null
+  last_explained_at?: string | null
+  yesterday_sales?: string | null
 }
+
+export type RoomPlatformBinding = { platform: 'xingdou' | 'daduoduo'; ip_id: string }
+export type CatalogStatus = {
+  state: 'idle' | 'queued' | 'running' | 'failed'; downloaded: number; total: number | null
+  count: number; synced_at: number | null; error: string
+}
+export type DaduoduoSettings = {
+  rooms: (CatalogStatus & {id: string; name: string})[]
+}
+
+const roomCatalogPath = (id: string) => `/live/monitors/${encodeURIComponent(id)}/product-catalog`
 
 export const productPlatformApi = {
   status: () => api<ProductPlatformStatus>('/product-platform/status'),
@@ -35,9 +48,16 @@ export const productPlatformApi = {
   login: (mobile: string, smsCode: string) => api<ProductPlatformStatus>('/product-platform/login', 'POST', {mobile, sms_code: smsCode}),
   logout: () => api<ProductPlatformStatus>('/product-platform/logout', 'POST'),
   selectScope: (mainIpId: string) => api<ProductPlatformStatus>('/product-platform/scope', 'POST', {main_ip_id: mainIpId}),
-  search: (keyword: string) => api<{product: XingdouProduct | null; scope_name: string}>('/product-platform/products/search', 'POST', {keyword}),
+  search: (keyword: string, context: {monitor_id: string} | {asset_id: string}) =>
+    api<{product: PlatformProduct | null; scope_name: string; can_add_to_showcase: boolean}>(
+      '/product-platform/products/search', 'POST', {keyword, ...context}),
   images: (assetId:string, productId: string, refresh=false) => api<{images:{id:string;url:string}[];cached:boolean}>('/product-platform/products/images', 'POST', {asset_id:assetId,product_id:productId,refresh}),
-  addToShowcase: (platformProductId: string) => api<{added: boolean}>('/product-platform/products/add-to-showcase', 'POST', {platform_product_id: platformProductId}),
+  addToShowcase: (platformProductId: string, monitorId: string) =>
+    api<{added: boolean}>('/product-platform/products/add-to-showcase', 'POST',
+      {platform_product_id: platformProductId, monitor_id: monitorId}),
+  daduoduoSettings: () => api<DaduoduoSettings>('/product-platform/daduoduo'),
+  catalogStatus: (id: string) => api<CatalogStatus>(roomCatalogPath(id)),
+  updateCatalog: (id: string) => api<CatalogStatus>(roomCatalogPath(id), 'POST'),
 }
 
 export function isProductPlatformAuthError(error: unknown): boolean {

@@ -15,21 +15,21 @@ import {
 } from "../services/liveMonitoring";
 import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
+import LiveRoomPlatform from "../components/live/LiveRoomPlatform.vue";
+import RoomPlatformFields from "../components/product/RoomPlatformFields.vue";
+import type { RoomPlatformBinding } from "../services/productPlatform";
 import { readRoomOrder, sortRooms } from "../components/live/roomOrder";
 import LiveSessionPanel from "../components/live/LiveSessionPanel.vue";
 import LiveRecordingTimeline from "../components/live/LiveRecordingTimeline.vue";
 import LiveProductTimeline from "../components/live/LiveProductTimeline.vue";
-import {
-  formatLiveTime,
-  formatOffset,
-  monitorNeedsAttention,
-} from "../components/live/presentation";
+import { formatLiveTime, formatOffset } from "../components/live/presentation";
 import "../styles/live-monitoring.css";
 
 const session = useSessionStore(),
   workspace = useWorkspace();
 const { busy, connected } = storeToRefs(session);
 const monitors = ref<LiveMonitor[]>([]);
+const newProductPlatform = ref<RoomPlatformBinding | null>(null);
 const url = ref(""),
   name = ref(""),
   loading = ref(false),
@@ -126,16 +126,6 @@ function focusPeriod(id: string) {
 function viewSelectedDate() {
   if (selectedSession.value) void changeDate(localDate(new Date(selectedSession.value.started * 1000)));
 }
-const recordingCount = computed(
-  () => monitors.value.filter((item) => item.live_state === "recording").length,
-);
-const liveCount = computed(
-  () => monitors.value.filter((item) => item.is_live === true).length,
-);
-const attentionCount = computed(
-  () => monitors.value.filter(monitorNeedsAttention).length,
-);
-
 watch(showCreate, async (value) => {
   await nextTick();
   if (value) {
@@ -238,10 +228,12 @@ async function addMonitor() {
     const created = await liveMonitoringApi.create(
       url.value.trim(),
       name.value.trim(),
+      newProductPlatform.value,
     );
     selectedId.value = created.id;
     url.value = "";
     name.value = "";
+    newProductPlatform.value = null;
     showCreate.value = false;
     session.message = "直播间已加入监控，开播后按设置自动录制或提醒";
     await refresh();
@@ -383,57 +375,6 @@ onUnmounted(() => {
 
 <template>
   <section class="live-page" aria-label="直播监控工作台">
-    <div
-      class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 live-overview">
-      <div class="card card-border bg-base-100 live-metric">
-        <div class="card-body flex-row items-center gap-6 p-4">
-          <LiveIcon name="rooms" class="live-metric-icon shrink-0 text-info" />
-          <div class="live-metric-copy">
-            <span class="text-lg text-base-content">直播间总数</span>
-          </div>
-          <strong class="text-2xl font-bold leading-none">
-            {{ monitors.length }}
-          </strong>
-        </div>
-      </div>
-      <div class="card card-border bg-base-100 live-metric">
-        <div class="card-body flex-row items-center gap-6 p-4">
-          <LiveIcon name="record" class="live-metric-icon shrink-0 text-error" />
-          <div class="live-metric-copy">
-            <span class="text-lg text-base-content">正在录制</span>
-          </div>
-          <strong class="text-2xl font-bold leading-none">
-            {{ recordingCount }}
-          </strong>
-        </div>
-      </div>
-      <div class="card card-border bg-base-100 live-metric">
-        <div class="card-body flex-row items-center gap-6 p-4">
-          <LiveIcon name="radio" class="live-metric-icon shrink-0 text-success" />
-          <div class="live-metric-copy">
-            <span class="text-lg text-base-content">正在直播</span>
-          </div>
-          <strong class="text-2xl font-bold leading-none">
-            {{ liveCount }}
-          </strong>
-        </div>
-      </div>
-      <div class="card card-border bg-base-100 live-metric">
-        <div class="card-body flex-row items-center gap-6 p-4">
-          <LiveIcon
-            :name="attentionCount ? 'alert' : 'check'"
-            class="live-metric-icon shrink-0"
-            :class="attentionCount ? 'text-warning' : 'text-success'" />
-          <div class="live-metric-copy">
-            <span class="text-lg text-base-content">需要关注</span>
-          </div>
-          <strong class="text-2xl font-bold leading-none">
-            {{ attentionCount }}
-          </strong>
-        </div>
-      </div>
-    </div>
-
     <div class="live-toolbar">
       <p>
         <span
@@ -507,6 +448,7 @@ onUnmounted(() => {
                 maxlength="200"
                 placeholder="例如：独束官方旗舰店" />
             </label>
+            <RoomPlatformFields v-model="newProductPlatform" />
           </div>
           <div class="modal-action">
             <button class="btn btn-ghost btn-sm" type="button" @click="closeCreate">
@@ -514,7 +456,7 @@ onUnmounted(() => {
             </button>
             <button
               class="btn btn-primary btn-sm"
-              :disabled="busy || !connected || !url.trim()">
+              :disabled="busy || !connected || !url.trim() || (newProductPlatform?.platform === 'daduoduo' && !newProductPlatform.ip_id.trim())">
               <LiveIcon name="plus" />
               开始监控
             </button>
@@ -535,6 +477,7 @@ onUnmounted(() => {
         @select="selectMonitor"
         @open-url="openExternalUrl"
         @settings="updateSettings"
+        @platform-saved="refresh"
         @record="record"
         :on-remove="remove" />
 
@@ -598,11 +541,20 @@ onUnmounted(() => {
           :on-retry-product-listener="retryProductListener"
           @select-period="selectedPeriodId = $event"
           @update:merge-period-ids="mergePeriodIds = $event"
-          @open-file="openClipFile" />
+          @open-file="openClipFile">
+          <template #catalog>
+            <LiveRoomPlatform v-if="selectedMonitor.product_platform?.platform === 'daduoduo'"
+              :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
+          </template>
+        </LiveSessionPanel>
         <div v-else class="live-content-columns">
           <section v-for="title in ['商品讲解', '商品视频片段']" :key="title"
             class="card card-border bg-base-100 live-content-card">
             <div class="live-content-card-heading"><h3>{{ title }}</h3></div>
+            <div v-if="title === '商品讲解' && selectedMonitor.product_platform?.platform === 'daduoduo'" class="live-subheading">
+              <span>讲解列表</span>
+              <LiveRoomPlatform :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
+            </div>
             <div class="live-card-empty"><strong>{{ cardEmptyMessage }}</strong></div>
           </section>
         </div>

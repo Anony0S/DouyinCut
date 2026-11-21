@@ -31,6 +31,24 @@ let nextToastId=0
 const workspace=createWorkspace(router)
 provideWorkspace(workspace)
 const {fileInput,selectFile}=provideVideoImport(workspace)
+const sidebarViewport = window.matchMedia('(max-width: 1100px)')
+const sidebarCollapsed = ref(sidebarViewport.matches)
+const sidebarToggleLabel = computed(() => sidebarCollapsed.value ? '展开侧边栏' : '收起侧边栏')
+const sidebarItems = [
+  { route: 'live-monitoring', label: '直播监控', icon: 'radio', open: () => workspace.go('live-monitoring') },
+  { route: 'workspace', label: '素材与粗剪', icon: 'video', open: () => workspace.goEditor() },
+  { route: 'projects', label: '视频项目', icon: 'folder', open: () => workspace.goProjects() },
+  { route: 'jobs', label: '后台任务', icon: 'clock', open: () => workspace.go('jobs') },
+  { route: 'appearance', label: '外观', icon: 'palette', open: () => workspace.go('appearance') },
+  { route: 'settings', label: '云端设置', icon: 'settings', open: () => workspace.go('settings') },
+  { route: 'local-settings', label: '本地设置', icon: 'server', open: () => workspace.go('local-settings') },
+  { route: 'logs', label: '运行日志', icon: 'document', open: () => workspace.go('logs') },
+] as const
+function onSidebarViewportChange(event: MediaQueryListEvent) {
+  sidebarCollapsed.value = event.matches
+}
+onMounted(() => sidebarViewport.addEventListener('change', onSidebarViewportChange))
+onUnmounted(() => sidebarViewport.removeEventListener('change', onSidebarViewportChange))
 function dismissToast(id:number) {
   toasts.value=toasts.value.filter(item=>item.id!==id)
   const timer=toastTimers.get(id)
@@ -115,34 +133,23 @@ onMounted(()=>{
 onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitRequest);window.removeEventListener('douyincut-update-request',onUpdateRequest);workspace.stop();for(const timer of toastTimers.values()) window.clearTimeout(timer);toastTimers.clear()})
 </script>
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <aside class="sidebar">
       <div class="brand"><span class="brand-icon">D</span><div>DouyinCut<small>服装直播剪辑工作台</small></div></div>
       <div class="nav-label">工作空间</div>
-      <button class="sidebar-link" :class="{active:route.name==='live-monitoring'}" :disabled="busy" @click="workspace.go('live-monitoring')">
-        <LiveIcon name="radio"/><span class="nav-text">直播监控</span>
-      </button>
-      <button class="sidebar-link" :class="{active:route.name==='workspace'}" :disabled="!project.assetId || busy" @click="workspace.goEditor()">
-        <LiveIcon name="video"/><span class="nav-text">素材与粗剪</span><span class="nav-badge">01</span>
-      </button>
-      <button class="sidebar-link" :class="{active:route.name==='projects'}" :disabled="busy" @click="workspace.goProjects()">
-        <LiveIcon name="folder"/><span class="nav-text">视频项目</span>
-      </button>
-      <button class="sidebar-link" :class="{active:route.name==='jobs'}" :disabled="busy" @click="workspace.go('jobs')">
-        <LiveIcon name="clock"/><span class="nav-text">后台任务</span><span class="nav-badge">{{ activeJobs }}</span>
-      </button>
-      <button class="sidebar-link" :class="{active:route.name==='appearance'}" :disabled="busy" @click="workspace.go('appearance')">
-        <LiveIcon name="palette"/><span class="nav-text">外观</span>
-      </button>
-      <button class="sidebar-link" :class="{active:route.name==='settings'}" :disabled="busy" @click="workspace.go('settings')">
-        <LiveIcon name="settings"/><span class="nav-text">云端设置</span>
-      </button>
-      <button class="sidebar-link" :class="{active:route.name==='local-settings'}" :disabled="busy" @click="workspace.go('local-settings')">
-        <LiveIcon name="server"/><span class="nav-text">本地设置</span>
-      </button>
-      <button class="sidebar-link" :class="{active:route.name==='logs'}" :disabled="busy" @click="workspace.go('logs')">
-        <LiveIcon name="document"/><span class="nav-text">运行日志</span>
-      </button>
+      <nav id="sidebar-navigation" class="sidebar-navigation" aria-label="工作空间">
+        <div v-for="item in sidebarItems" :key="item.route"
+          :class="{ 'tooltip tooltip-right': sidebarCollapsed }" :data-tip="sidebarCollapsed ? item.label : undefined">
+          <button type="button" class="sidebar-link" :class="{ active: route.name === item.route }"
+            :aria-current="route.name === item.route ? 'page' : undefined" :aria-label="sidebarCollapsed ? item.label : undefined"
+            :disabled="busy || (item.route === 'workspace' && !project.assetId)" @click="item.open">
+            <LiveIcon :name="item.icon" />
+            <span class="nav-text">{{ item.label }}</span>
+            <span v-if="item.route === 'workspace'" class="nav-badge">01</span>
+            <span v-else-if="item.route === 'jobs'" class="nav-badge">{{ activeJobs }}</span>
+          </button>
+        </div>
+      </nav>
       <div class="sidebar-bottom">
         <span
           class="connection-status"
@@ -153,6 +160,12 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
           <LiveIcon name="server" :class="{online:connected}"/>
         </span>
         <span class="app-version">v{{ appVersion }}</span>
+        <button type="button" class="btn btn-ghost btn-square btn-xs sidebar-toggle"
+          :aria-label="sidebarToggleLabel" :title="sidebarToggleLabel"
+          :aria-expanded="!sidebarCollapsed" aria-controls="sidebar-navigation"
+          @click="sidebarCollapsed = !sidebarCollapsed">
+          <LiveIcon :name="sidebarCollapsed ? 'sidebar-expand' : 'sidebar-collapse'" />
+        </button>
       </div>
     </aside>
 

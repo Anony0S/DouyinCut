@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -34,7 +35,9 @@ from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveProductMerge, L
                               LiveMonitorSettings, LiveRecordingAction, LiveStore)
 from .product_platform import ProductPlatformService
 from .product_platform.client import ProductPlatformError
-from .product_platform.schemas import AddToShowcaseRequest, LoginRequest, MobileRequest, ScopeRequest, SearchRequest
+from .product_platform.daduoduo import DaduoduoCatalog
+from .product_platform.schemas import (AddToShowcaseRequest, LoginRequest, MobileRequest,
+                                       RoomPlatformRequest, ScopeRequest, SearchRequest)
 
 
 class ExportRequest(Model):
@@ -84,7 +87,17 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     # Cookies are host-scoped, not port-scoped: a fixed name lets another
     # loopback session replace the credential used by <video> range requests.
     session_cookie = f"douyincut_session_{settings.port}"
-    app = FastAPI(title="DouyinCut", version="0.1.0")
+    catalog = DaduoduoCatalog(store)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        try:
+            await asyncio.to_thread(catalog.start)
+            yield
+        finally:
+            catalog.close()
+
+    app = FastAPI(title="DouyinCut", version="0.1.0", lifespan=lifespan)
     app.state.store, app.state.settings, app.state.live_store = store, settings, live_store
     app.state.product_platform = ProductPlatformService(store)
     allowed = {f"http://127.0.0.1:{settings.port}"}
@@ -212,9 +225,44 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     def product_platform_logout():
         return app.state.product_platform.logout()
 
+    @app.get("/api/v1/product-platform/daduoduo")
+    def daduoduo_settings():
+        return catalog.settings()
+
+    @app.get("/api/v1/live/monitors/{monitor_id}/product-catalog")
+    def daduoduo_catalog_status(monitor_id: str):
+        return catalog.status(monitor_id)
+
+    @app.post("/api/v1/live/monitors/{monitor_id}/product-catalog", status_code=202)
+    def update_daduoduo_catalog(monitor_id: str):
+        return catalog.update(monitor_id)
+
+    def resolve_product_platform(monitor_id=None, asset_id=None, *, reference_images=False):
+        if monitor_id is not None and asset_id is not None:
+            raise HTTPException(422, "请只传直播间或项目 ID")
+        if asset_id is not None:
+            monitor_id = store.get("asset", asset_id).get("source_monitor_id")
+        if monitor_id is None:
+            return "xingdou", None
+        try:
+            binding = live_store.monitor(monitor_id)["product_platform"]
+        except KeyError:
+            raise ProductPlatformError("来源直播间已移除，无法查询商品", status=409) from None
+        if binding is None:
+            raise ProductPlatformError("请先为直播间绑定商品平台", code="ROOM_PLATFORM_REQUIRED", status=409)
+        platform = binding["platform"]
+        if reference_images and platform != "xingdou":
+            raise ProductPlatformError("该直播间绑定的平台暂不支持获取参考图",
+                                       code="REFERENCE_IMAGES_UNSUPPORTED", status=409)
+        return platform, monitor_id
+
     @app.post("/api/v1/product-platform/products/search")
     def product_platform_search(body: SearchRequest):
-        return app.state.product_platform.search(body.keyword)
+        platform, monitor_id = resolve_product_platform(body.monitor_id, body.asset_id,
+                                                        reference_images=body.asset_id is not None)
+        if platform == "daduoduo":
+            return catalog.search(monitor_id, body.keyword)
+        return {**app.state.product_platform.search(body.keyword), "can_add_to_showcase": True}
 
     @app.post("/api/v1/product-platform/products/images")
     def product_platform_product_images(body: ProductImagesRequest):
@@ -222,10 +270,11 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         from .core.domain import new_id
         if not body.asset_id.startswith("asset_") or not body.asset_id[6:].isalnum():
             raise HTTPException(422, "项目标识无效")
-        store.get("asset", body.asset_id)
+        platform, _ = resolve_product_platform(asset_id=body.asset_id, reference_images=True)
         references = settings.data_dir / "covers" / body.asset_id / "references"
         references.mkdir(parents=True, exist_ok=True)
-        cache_path = references / f"{hashlib.sha256(body.product_id.encode('utf-8')).hexdigest()}.json"
+        cache_key = hashlib.sha256(f"{platform}:{body.product_id}".encode("utf-8")).hexdigest()
+        cache_path = references / f"{cache_key}.json"
         if not body.refresh and cache_path.is_file():
             try:
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -283,6 +332,9 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
 
     @app.post("/api/v1/product-platform/products/add-to-showcase")
     def product_platform_add_to_showcase(body: AddToShowcaseRequest):
+        platform, _ = resolve_product_platform(body.monitor_id)
+        if platform != "xingdou":
+            raise ProductPlatformError("该直播间绑定的平台暂不支持添加橱窗", status=409)
         return app.state.product_platform.add_to_showcase(body.platform_product_id)
 
     @app.get("/api/v1/live/monitors")
@@ -319,7 +371,11 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
 
     @app.post("/api/v1/live/monitors", status_code=201)
     def create_live_monitor(body: LiveMonitorRequest):
-        return live_store.create_monitor(body.url, body.name)
+        return live_store.create_monitor(body.url, body.name, body.product_platform)
+
+    @app.patch("/api/v1/live/monitors/{monitor_id}/product-platform")
+    def update_room_product_platform(monitor_id: str, body: RoomPlatformRequest):
+        return live_store.set_product_platform(monitor_id, body.binding)
 
     @app.patch("/api/v1/live/monitors/{monitor_id}")
     def change_live_monitor(monitor_id: str, body: LiveMonitorSettings):

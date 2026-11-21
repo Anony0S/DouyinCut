@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import { duration } from "../../api";
 import type { LiveSession, LiveProductPeriod } from "../../services/liveMonitoring";
 import LiveIcon from "./LiveIcon.vue";
@@ -98,20 +98,31 @@ function productColorStyle(promotionId: string) {
 const listenerStatus = computed(
   () => props.session.product_listener?.status || "",
 );
+const listenerHasError = computed(
+  () => listenerStatus.value === "error" || Boolean(props.session.product_catalog_error),
+);
+const listenerNeedsAttention = computed(
+  () => listenerHasError.value || Boolean(props.session.product_listener?.silent),
+);
+const listenerBadgeClass = computed(() => {
+  if (listenerHasError.value) return "badge-soft badge-error";
+  if (listenerNeedsAttention.value) return "badge-soft badge-warning";
+  return listenerBadgeClasses[listenerStatus.value] || "badge-soft badge-neutral";
+});
+const listenerTooltipId = useId();
 const canRetryProductListener = computed(
   () => props.session.status === "recording"
     && !props.busy
     && listenerStatus.value !== "retrying"
-    && (listenerStatus.value === "error" || Boolean(props.session.product_catalog_error)),
+    && listenerHasError.value,
 );
-// Connected but silent, an ended session's summary, and real errors all need one line;
-// the silent case used to render nothing at all.
 const listenerNote = computed(() => {
   const listener = props.session.product_listener;
   if (listener?.silent && listener.silent_detail) return listener.silent_detail;
-  if (!listener?.detail) return "";
-  if (listenerStatus.value === "error") return listener.detail;
-  return listener.detail === "商品消息连接已建立" ? "" : listener.detail;
+  if (listener?.detail && (listenerStatus.value === "error" || listener.detail !== "商品消息连接已建立")) {
+    return listener.detail;
+  }
+  return props.session.product_catalog_error ? "商品列表获取失败" : "";
 });
 </script>
 
@@ -120,7 +131,7 @@ const listenerNote = computed(() => {
     <div class="live-content-columns">
       <section
         class="card card-border bg-base-100 w-full live-content-card live-events-card">
-        <div class="live-content-card-heading">
+        <div class="live-content-card-heading relative">
           <div>
             <span class="live-section-icon"><LiveIcon name="bag" /></span>
             <h3>商品讲解</h3>
@@ -128,13 +139,17 @@ const listenerNote = computed(() => {
               {{ periods.length }}
             </span>
           </div>
-          <span
-            :class="[
-              'badge',
-              'badge-sm',
-              listenerBadgeClasses[listenerStatus] || 'badge-soft badge-neutral',
-            ]">
-            {{ listenerNames[listenerStatus] || "商品监听未启动" }}
+          <span class="ml-auto" :class="{ 'tooltip tooltip-bottom tooltip-end live-listener-tooltip': listenerNote }">
+            <span v-if="listenerNote" :id="listenerTooltipId" class="tooltip-content" role="tooltip">
+              {{ listenerNote }}
+            </span>
+            <span
+              class="badge badge-sm"
+              :class="[listenerBadgeClass, { 'live-listener-attention': listenerNeedsAttention }]"
+              :tabindex="listenerNote ? 0 : undefined"
+              :aria-describedby="listenerNote ? listenerTooltipId : undefined">
+              {{ listenerNames[listenerStatus] || "商品监听未启动" }}
+            </span>
           </span>
         </div>
         <details v-if="session.product_catalog_error" class="live-catalog-error">
@@ -156,16 +171,9 @@ const listenerNote = computed(() => {
           <LiveIcon name="refresh" />
           重试商品连接
         </button>
-        <p
-          v-if="listenerNote"
-          class="live-listener-note pl-4 pt-2"
-          :class="{ 'is-error': listenerStatus === 'error' }">
-          <LiveIcon :name="listenerStatus === 'error' ? 'alert' : 'radio'" />
-          {{ listenerNote }}
-        </p>
         <div class="live-subheading">
           <span>讲解列表</span>
-          <span>最新在前</span>
+          <slot name="catalog" />
         </div>
         <div v-if="periods.length" class="live-product-event-list">
           <article
@@ -215,7 +223,7 @@ const listenerNote = computed(() => {
                   </label>
                   <button type="button" class="btn btn-soft btn-sm h-8 min-h-8"
                     :disabled="busy || !period.product_name.trim()"
-                    :title="period.product_name.trim() ? '查询星斗商品平台中的商品信息' : '暂无商品名称，无法查询'"
+                    :title="period.product_name.trim() ? '查询商品信息' : '暂无商品名称，无法查询'"
                     @click.stop="queryProductName = period.product_name.trim()"><LiveIcon name="search" />查询商品</button>
                 </div>
               </div>
@@ -225,11 +233,6 @@ const listenerNote = computed(() => {
         <div v-else class="live-card-empty">
           <LiveIcon name="clock" />
           <strong>还没有商品讲解记录</strong>
-          <p>获取到讲解商品后自动记录，首次讲解也会出现在这里。</p>
-        </div>
-        <div class="live-card-foot">
-          <LiveIcon name="clock" />
-          时间为本场录制内的位置；每次只切所选讲解的已封存部分。
         </div>
       </section>
 
@@ -395,14 +398,9 @@ const listenerNote = computed(() => {
         <div v-else class="live-card-empty">
           <LiveIcon name="layers" />
           <strong>还没有商品视频片段</strong>
-          <p>在商品讲解轨中选择范围并切分商品；原始录制内容会保留。</p>
-        </div>
-        <div class="live-card-foot">
-          <LiveIcon name="video" />
-          切点受关键帧精度限制，导入后可在粗剪中微调。
         </div>
       </section>
     </div>
-    <ProductSearchDialog v-if="queryProductName" :keyword="queryProductName" @close="queryProductName = ''" />
+    <ProductSearchDialog v-if="queryProductName" :keyword="queryProductName" :monitor-id="monitorId" @close="queryProductName = ''" />
   </div>
 </template>

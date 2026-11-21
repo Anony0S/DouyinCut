@@ -1,4 +1,5 @@
 import { api, type Job } from '../api'
+import type { RoomPlatformBinding } from './productPlatform'
 
 export type LiveClipJob = { id:string; state:string; error:string|null }
 export type LiveSegment = { id:string; path:string; segment_index:number; status:string; size_bytes:number; duration_us:number|null; asset_id:string|null; import_job_id:string|null; splitting:boolean }
@@ -17,14 +18,17 @@ export type LiveSession = { id:string; status:string; started:number; ended:numb
 export type LiveSessionSummary = { id:string; status:string; started:number; ended:number|null; end_time_source:'observed'|'recovery_check'|null; product_error:boolean }
 export type LiveSessionDeleteResult = { deleted_session_id:string; deleted_segments:number; deleted_product_clips:number; deleted_files:number; bytes_reclaimed:number; retained_files:number }
 export type LiveMonitorSettings = { auto_record?:boolean; notify_live?:boolean; notify_offline?:boolean; notify_split_complete?:boolean }
-export type LiveMonitor = { id:string; url:string; name:string; auto_record:boolean; notify_live:boolean; notify_offline:boolean; notify_split_complete:boolean; record_requested:boolean; record_held:boolean; retry_blocked:boolean; live_state:string; is_live:boolean|null; live_checked:number|null; last_checked:number|null; error:string|null; sessions:LiveSessionSummary[] }
+export type LiveMonitor = { id:string; url:string; name:string; auto_record:boolean; notify_live:boolean; notify_offline:boolean; notify_split_complete:boolean; record_requested:boolean; record_held:boolean; retry_blocked:boolean; live_state:string; is_live:boolean|null; live_checked:number|null; last_checked:number|null; error:string|null; sessions:LiveSessionSummary[]; product_platform:RoomPlatformBinding|null }
 
 export const liveMonitoringApi = {
   session: (monitorId: string, sessionId: string) => api<LiveSession | null>(`/live/monitors/${encodeURIComponent(monitorId)}/sessions/${encodeURIComponent(sessionId)}`),
   retryProductListener: (monitorId: string, sessionId: string) => api<{session_id:string;state:'retrying'}>(`/live/monitors/${encodeURIComponent(monitorId)}/sessions/${encodeURIComponent(sessionId)}/product-listener/retry`,'POST'),
   deleteSession: (monitorId: string, sessionId: string) => api<LiveSessionDeleteResult>(`/live/monitors/${encodeURIComponent(monitorId)}/sessions/${encodeURIComponent(sessionId)}`,'DELETE'),
   list: (window: { start: number; end: number; includeEndRecording: boolean }) => api<LiveMonitor[]>(`/live/monitors?window_start=${window.start}&window_end=${window.end}&include_end_recording=${window.includeEndRecording}`),
-  create: (url:string,name:string) => api<LiveMonitor>('/live/monitors','POST',{url,name}),
+  create: (url:string,name:string,productPlatform:RoomPlatformBinding|null) =>
+    api<LiveMonitor>('/live/monitors','POST',{url,name,product_platform:productPlatform}),
+  setProductPlatform: (id:string,binding:RoomPlatformBinding|null) =>
+    api<LiveMonitor>(`/live/monitors/${encodeURIComponent(id)}/product-platform`,'PATCH',{binding}),
   updateSettings: (id:string,settings:LiveMonitorSettings) => api<LiveMonitor>(`/live/monitors/${encodeURIComponent(id)}`,'PATCH',settings),
   setRecording: (id:string,action:'start'|'stop') => api<LiveMonitor>(`/live/monitors/${encodeURIComponent(id)}/recording`,'POST',{action}),
   remove: (id:string) => api<{deleted_monitor_id:string;recordings_retained:boolean}>(`/live/monitors/${encodeURIComponent(id)}`,'DELETE'),

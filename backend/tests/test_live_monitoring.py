@@ -1349,7 +1349,7 @@ class LiveMonitoringTests(unittest.TestCase):
 
     def test_generated_product_clip_can_be_imported_and_reused(self):
 
-        _monitor, session_id, (first, _second) = self._two_segment_session("room-import-product-clip")
+        monitor, session_id, (first, _second) = self._two_segment_session("room-import-product-clip")
         with (
             patch("app.media.processing.run_process", side_effect=fake_media_process),
             patch("app.media.processing.probe", return_value={"duration_us": 5_000_000}),
@@ -1363,6 +1363,7 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(first.json()["payload"]["live_product_clip_id"], clip_id)
         self.assertEqual(first.json()["payload"]["product_name"], "针织开衫")
+        self.assertEqual(first.json()["payload"]["source_monitor_id"], monitor["id"])
 
     def test_product_clip_delete_removes_unimported_file_and_retains_imported_project_file(self):
 

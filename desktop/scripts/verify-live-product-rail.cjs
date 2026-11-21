@@ -90,8 +90,10 @@ async function verify() {
   const distinctColors = new Set(Array.from({ length: 30 }, (_, index) => productPeriodColor(`product-${index}`)))
   assert.ok(distinctColors.size >= 29, 'many product IDs receive distinct colors without a small repeating palette')
   const { default: Component } = load(path.join(src, 'components/live/LiveProductTimeline.vue'))
+  const mergeProps = { mergePeriodIds: [], onMerge: async () => ({ state: 'noop', message: 'done' }) }
   const root = makeNode('root')
   const app = renderer.createApp(Component, {
+    ...mergeProps,
     session, selectedPeriodId: 'period', busy: false,
     onSplit: async () => ({ state: 'noop', message: 'done' }),
     onViewSource: (id, offset) => viewedSources.push({ id, offset }),
@@ -207,6 +209,7 @@ async function verify() {
   let submittedRange = null
   const longRoot = makeNode('root')
   const longApp = renderer.createApp(Component, {
+    ...mergeProps,
     session: longSession, selectedPeriodId: 'long-period', busy: false,
     onSplit: async (_id, _confirmed, range) => { submittedRange = range; return { state: 'noop', message: 'done' } },
   })
@@ -255,7 +258,7 @@ async function verify() {
   const sessionPanel = fs.readFileSync(path.join(src, 'components/live/LiveSessionPanel.vue'), 'utf8')
   const liveStyles = fs.readFileSync(path.resolve(src, '../src/styles/live-monitoring.css'), 'utf8')
   assert.match(sessionPanel, /:style="productColorStyle\(period\.promotion_id\)"/, 'lecture list entries use the shared product color')
-  assert.match(sessionPanel, /<span v-if="clipPeriodTime\(clip\.period_id\)" class="live-clip-period-time" :style="productColorStyle\(clip\.promotion_id\)">/, 'clip lecture labels use the shared product color in the metadata row')
+  assert.match(sessionPanel, /<span v-else-if="clipPeriodTime\(clip\.period_id\)" class="live-clip-period-time" :style="productColorStyle\(clip\.promotion_id\)">/, 'clip lecture labels use the shared product color in the metadata row')
   assert.match(liveStyles, /\.live-event-time time \{ color: var\(--period-color\)/, 'lecture timestamps display their product color')
   assert.match(liveStyles, /\.live-clip-period-time \{ color: var\(--period-color\)/, 'clip lecture labels display their product color')
 
@@ -263,6 +266,7 @@ async function verify() {
   session.status = 'stopped'
   const endedRoot = makeNode('root')
   const endedApp = renderer.createApp(Component, {
+    ...mergeProps,
     session, selectedPeriodId: 'period', busy: false,
     onSplit: async () => ({ state: 'noop', message: 'done' }),
   })

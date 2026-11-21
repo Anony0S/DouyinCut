@@ -8,7 +8,8 @@ const { createPinia, setActivePinia } = require('pinia')
 const src = path.resolve(__dirname, '../src')
 const cache = new Map(), navigation = [], calls = []
 const route = vue.reactive({ query: { cloudTab: 'product-platform' } })
-const router = { useRoute: () => route, useRouter: () => ({ push: async target => navigation.push(target) }) }
+const router = { useRoute: () => route, useRouter: () => ({ push: async target => navigation.push(target) }),
+  RouterLink: { setup: (_props, { slots }) => () => vue.h('a', slots.default?.()) } }
 const vShow = { beforeMount(el, { value }) { el.hidden = !value }, updated(el, { value }) { el.hidden = !value } }
 function load(file) {
   file = path.resolve(src, file)
@@ -29,6 +30,7 @@ function load(file) {
 }
 const node = type => ({ type, props: {}, children: [], parent: null, text: '', open: false,
   showModal() { this.open = true }, close() { this.open = false }, focus() {},
+  getBoundingClientRect() { return { bottom: 44, right: 300, height: 340 } },
 })
 const body = node('body')
 const renderer = vue.createRenderer({ createElement: node, createComment: node,
@@ -71,7 +73,7 @@ async function verifyLogin() {
   }
   const mounted = await mount('views/SettingsView.vue')
   try {
-    const tab = button(mounted.root, '星斗平台')
+    const tab = button(mounted.root, '平台')
     assert.equal(tab.props['aria-selected'], true, 'Deep link selects the product platform tab')
     assert.ok(button(mounted.root, '点击登录'))
     await click(button(mounted.root, '点击登录'))
@@ -107,6 +109,7 @@ async function verifyLectureButton() {
     product_clips: [], product_periods: [period, { ...period, id: 'lecture-b', product_name: '   ' }],
     current_product: null, product_events: [], product_listener: null, product_catalog_error: null }
   const mounted = await mount('components/live/LiveSessionPanel.vue', { session, monitorId: 'monitor', busy: false,
+    selectedPeriodId: '', mergePeriodIds: [],
     onDeleteProductClip: async () => {}, onSplit: async () => {}, onRetryProductListener: async () => {}, })
   try {
     const actions = all(mounted.root, el => el.type === 'button' && text(el).trim() === '查询商品')
@@ -118,8 +121,71 @@ async function verifyLectureButton() {
     const requests = calls.filter(call => call.url.endsWith('/products/search'))
     assert.equal(requests.length, before + 1)
     assert.equal(requests.at(-1).body.keyword, '完整商品名称')
+    assert.equal(requests.at(-1).body.monitor_id, 'monitor')
     await click(button(body, '关闭商品查询'))
     assert.equal(all(body, el => el.type === 'dialog').length, 0)
+  } finally { mounted.app.unmount() }
+}
+
+async function verifyDaduoduoControls() {
+  const room = { id: 'monitor-a', name: '直播间 A', state: 'idle', count: 0, synced_at: null,
+    downloaded: 0, total: null, error: '' }
+  respond = (url, options) => {
+    if (url.endsWith('/settings/cloud')) return { config: {}, secrets: {}, secret_previews: {} }
+    if (url.endsWith('/status')) return status
+    if (url.endsWith('/daduoduo')) return { rooms: [room] }
+    if (url.endsWith('/monitor-b/product-platform') && options.method === 'PATCH') {
+      return { id: 'monitor-b', product_platform: options.body.binding }
+    }
+    if (url.endsWith('/product-catalog')) return options.method === 'POST'
+      ? { ...room, state: 'running', downloaded: 50, total: 295 }
+      : room
+    throw new Error(`Unexpected request ${url}`)
+  }
+  let mounted = await mount('views/SettingsView.vue')
+  try {
+    await click(button(mounted.root, '达多多'))
+    assert.ok(text(mounted.root).includes('前往直播监控'))
+    assert.ok(text(mounted.root).includes('直播间 A'))
+    assert.ok(!button(mounted.root, '保存凭据'))
+  } finally { mounted.app.unmount() }
+
+  let saved = 0
+  mounted = await mount('components/live/LiveRoomList.vue', {
+    monitors: [{ id: 'monitor-b', name: '直播间 B', url: 'https://live.douyin.com/b', sessions: [], product_platform: null }],
+    selectedId: 'monitor-a', loading: false, busy: false, onRemove: async () => {},
+    onPlatformSaved: () => saved++,
+  })
+  try {
+    await click(button(mounted.root, '直播间 B设置'))
+    await click(button(body, '绑定平台'))
+    const [dialog] = all(body, el => el.type === 'dialog')
+    assert.ok(dialog.open)
+    assert.ok(text(dialog).includes('直播间 B'))
+    const [select] = all(dialog, el => el.type === 'select')
+    select.props.onChange({ target: { value: 'daduoduo' } }); await settle()
+    assert.ok(button(dialog, '保存绑定').props.disabled)
+    const fields = all(dialog, el => el.type === 'input')
+    assert.equal(fields.length, 1)
+    fields[0].props['onUpdate:modelValue']('test-ip')
+    await settle()
+    assert.ok(!button(dialog, '保存绑定').props.disabled)
+    const [form] = all(dialog, el => el.type === 'form')
+    await form.props.onSubmit({ preventDefault() {} }); await settle()
+    assert.deepEqual(calls.find(call => call.url.endsWith('/monitor-b/product-platform')).body,
+      { binding: { platform: 'daduoduo', ip_id: 'test-ip' } })
+    assert.equal(dialog.open, false)
+    assert.equal(saved, 1)
+  } finally { mounted.app.unmount() }
+
+  mounted = await mount('components/live/LiveRoomPlatform.vue', {
+    monitor: { id: 'monitor-a', product_platform: { platform: 'daduoduo', ip_id: 'i' } },
+    busy: false,
+  })
+  try {
+    await click(button(mounted.root, '更新商品'))
+    assert.ok(text(mounted.root).includes('已拉取 50 / 295 条'))
+    assert.ok(button(mounted.root, '更新中…').props.disabled)
   } finally { mounted.app.unmount() }
 }
 
@@ -127,12 +193,15 @@ async function verifySearch() {
   const firstProduct = { title: '测试商品', price: 0, stock: '0', commission_ratio: 0, platform_product_id: 'p1', has_live: false, has_ai_live: false,
     listing_time: '2026-11-16 15:27:24',
     cover: 'javascript:alert(1)' }
-  respond = () => ({ product: firstProduct, scope_name: '店铺 A' })
-  let mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: ' 测试商品 ' })
+  const xingdouResult = { product: firstProduct, scope_name: '店铺 A', can_add_to_showcase: true }
+  respond = () => xingdouResult
+  const mountSearch = keyword => mount('components/product/ProductSearchDialog.vue', { keyword, monitorId: 'monitor' })
+  let mounted = await mountSearch(' 测试商品 ')
   try {
     assert.ok(text(body).includes('测试商品'))
     assert.ok(text(body).includes('上架时间'))
     assert.ok(text(body).includes('2026-11-16 15:27:24'), 'Listing timestamp retains seconds')
+    assert.ok(!text(body).includes('最近讲解'))
     assert.ok(!text(body).includes('活动时间'))
     assert.ok(text(body).includes('¥0.00'), 'Zero prices are displayed without treating them as missing')
     assert.ok(text(body).includes('0%'))
@@ -142,30 +211,40 @@ async function verifySearch() {
     await click(button(body, '添加橱窗'))
     assert.ok(text(body).includes('已添加到当前合作范围的橱窗。'))
     assert.ok(button(body, '已添加橱窗').props.disabled)
-    assert.ok(calls.some(call => call.url.endsWith('/products/add-to-showcase') && call.body.platform_product_id === 'p1'))
+    assert.ok(calls.some(call => call.url.endsWith('/products/add-to-showcase')
+      && call.body.platform_product_id === 'p1' && call.body.monitor_id === 'monitor'))
   } finally { mounted.app.unmount() }
 
+  respond = () => ({ product: { ...firstProduct, yesterday_sales: '31', listing_time: '2026-11-20', last_explained_at: '11/21 21:15' },
+    scope_name: '', can_add_to_showcase: false })
+  mounted = await mountSearch('测试商品')
+  assert.ok(text(body).includes('近 1 日销量'))
+  assert.ok(text(body).includes('上架时间2026-11-20'))
+  assert.ok(all(body, el => el.type === 'dl' && text(el).includes('上架时间2026-11-20最近讲解11/21 21:15')).length)
+  assert.ok(!button(body, '添加橱窗'))
+  mounted.app.unmount()
+
   respond = () => ({ product: null, scope_name: '店铺 A' })
-  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '不存在' })
+  mounted = await mountSearch('不存在')
   assert.ok(text(body).includes('未查询到商品')); mounted.app.unmount()
 
   const authRequired = { status: 401, body: { detail: { code: 'PRODUCT_PLATFORM_AUTH_REQUIRED', message: '未登录' } } }
   respond = () => authRequired
-  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '测试商品' })
+  mounted = await mountSearch('测试商品')
   assert.deepEqual(navigation.at(-1), { path: '/settings', query: { cloudTab: 'product-platform' } })
   mounted.app.unmount()
 
   const before = navigation.length
   const pending = deferred(); respond = () => pending.promise
-  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '测试商品' })
+  mounted = await mountSearch('测试商品')
   mounted.app.unmount(); pending.resolve(authRequired); await settle()
   assert.equal(navigation.length, before, 'Late authentication failures after close cannot navigate')
 
   const searchRequest = deferred(); respond = () => searchRequest.promise
-  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '重试商品' })
+  mounted = await mountSearch('重试商品')
   searchRequest.resolve({ status: 503, body: { detail: '网络暂时不可用' } }); await settle()
   assert.ok(text(body).includes('网络暂时不可用'))
-  respond = () => ({ product: firstProduct, scope_name: '店铺 A' })
+  respond = () => xingdouResult
   await click(button(body, '重试'))
   assert.ok(text(body).includes('测试商品')); mounted.app.unmount()
 
@@ -173,9 +252,9 @@ async function verifySearch() {
   let customSearch = false
   respond = (_url, options) => {
     if (options.body.keyword === initialKeyword && !customSearch) return { product: null, scope_name: '店铺 A' }
-    return { product: firstProduct, scope_name: '店铺 A' }
+    return xingdouResult
   }
-  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: initialKeyword })
+  mounted = await mountSearch(initialKeyword)
   try {
     const queryField = all(body, el => el.type === 'input' && el.props['aria-label'] === '商品查询词')[0]
     assert.ok(queryField)
@@ -195,14 +274,14 @@ async function verifySearch() {
 async function main() {
   const originalFetch = global.fetch
   const originalWindow = global.window
-  global.window = { addEventListener() {}, removeEventListener() {} }
+  global.window = { innerHeight: 768, innerWidth: 1024, addEventListener() {}, removeEventListener() {} }
   global.fetch = async (url, options) => {
     calls.push({ url, body: options.body ? JSON.parse(options.body) : undefined })
     const result = await respond(url, options)
     return new Response(JSON.stringify(result?.body ?? result), { status: result?.status ?? 200, headers: { 'Content-Type': 'application/json' } })
   }
   try {
-    await verifyLogin(); await verifySearch(); await verifyLectureButton()
+    await verifyLogin(); await verifySearch(); await verifyLectureButton(); await verifyDaduoduoControls()
     assert.ok(calls.every(call => call.url.startsWith('/api/v1/')), 'The frontend only calls its authenticated local API')
     console.log('Product platform UI checks passed: settings deep link, SMS cooldown, login, product card, empty/error results, auth redirect and stale response guard.')
   } finally { global.fetch = originalFetch; global.window = originalWindow }

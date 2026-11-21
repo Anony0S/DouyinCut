@@ -32,6 +32,7 @@ class Asset(Model):
     video_start_us: int = 0
     audio_start_us: int = 0
     session_start_us: int = Field(default=0, ge=0)
+    source_monitor_id: str | None = None
 
 
 class Span(Model):

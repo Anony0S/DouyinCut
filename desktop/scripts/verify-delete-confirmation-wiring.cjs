@@ -133,6 +133,12 @@ async function verify() {
     onRetryProductListener: async (monitorId, sessionId) => retryCalls.push([monitorId, sessionId]),
   })
   assert.ok(text(retryPanel.root).includes('商品消息连接已建立') === false, 'error state does not show the connected label')
+  const [listenerTooltip] = all(retryPanel.root, el => el.props.role === 'tooltip' && text(el) === '连接失败')
+  assert.ok(listenerTooltip, 'connection errors are shown in the listener tooltip')
+  const [listenerBadge] = all(retryPanel.root, el => el.props['aria-describedby'] === listenerTooltip.props.id)
+  assert.equal(text(listenerBadge), '商品连接中断')
+  assert.equal(listenerBadge.props.tabindex, 0, 'keyboard focus can reveal the listener tooltip')
+  assert.ok(listenerBadge.props.class.includes('live-listener-attention'))
   await click(button(retryPanel.root, '重试商品连接'))
   assert.deepEqual(retryCalls, [['monitor', liveSession.id]])
   const noRetry = await mount('components/live/LiveSessionPanel.vue', {
@@ -141,10 +147,11 @@ async function verify() {
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   assert.equal(button(noRetry.root, '重试商品连接'), undefined, 'healthy product listener has no manual retry')
-  assert.equal(all(noRetry.root, el => el.props.class?.includes('live-listener-note')).length, 0,
-    'the connected detail is not repeated below the product listener badge')
+  assert.equal(all(noRetry.root, el => el.props.class?.includes('live-listener-tooltip')).length, 0,
+    'a healthy product listener needs no tooltip repeating its connected state')
   assert.equal((text(noRetry.root).match(/商品消息连接已建立/g) || []).length, 1,
     'a healthy product listener shows its connected state once')
+  assert.equal(all(noRetry.root, el => el.props.class?.includes('live-listener-attention')).length, 0)
   retryPanel.app.unmount(); noRetry.app.unmount()
 
   const timelineSessions = [

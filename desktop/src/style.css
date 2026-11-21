@@ -180,20 +180,24 @@ small {
 }
 
 .app-shell {
+  --sidebar-width: 230px;
+  --sidebar-transition: 180ms ease-in-out;
   display:flex;
   min-height:100vh
 }
 
 .sidebar {
   background:var(--sidebar);
-  width:230px;
+  width:var(--sidebar-width);
   padding:31px 22px;
   position:fixed;
   inset:0 auto 0 0;
+  z-index:20;
   color:var(--sidebar-text);
   border-right:1px solid var(--sidebar-border);
   display:flex;
-  flex-direction:column
+  flex-direction:column;
+  transition:width var(--sidebar-transition), padding var(--sidebar-transition);
 }
 
 .brand {
@@ -205,7 +209,14 @@ small {
   letter-spacing:-.5px
 }
 
+.brand > div {
+  min-width:0;
+  overflow:hidden;
+  white-space:nowrap;
+}
+
 .brand small {
+  display:block;
   font-size:10px;
   letter-spacing:1px;
   font-weight:400;
@@ -218,6 +229,7 @@ small {
   border-radius:9px;
   width:38px;
   height:42px;
+  flex:none;
   display:grid;
   place-items:center;
   font-size:27px
@@ -230,7 +242,12 @@ small {
   letter-spacing:2px
 }
 
-.sidebar>button {
+.sidebar-navigation {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar-link {
   text-align:left;
   display:flex;
   align-items:center;
@@ -241,31 +258,32 @@ small {
   background:transparent;
   border-radius:7px;
   padding:14px;
-  margin:4px 0
 }
 
-.sidebar>button .live-icon {
+.sidebar-link .live-icon {
   width:18px;
   height:18px;
   flex:none;
 }
 
-.sidebar>button .nav-text {
+.sidebar-link .nav-text {
   flex:1;
   min-width:0;
+  overflow:hidden;
+  white-space:nowrap;
 }
 
-.sidebar>button.active {
+.sidebar-link.active {
   color:var(--text);
   background:var(--sidebar-active)
 }
 
-.sidebar>button:hover:not(:disabled):not(.active) {
+.sidebar-link:hover:not(:disabled):not(.active) {
   color:var(--text);
   background:var(--surface-soft)
 }
 
-.sidebar>button .nav-badge {
+.sidebar-link .nav-badge {
   margin-left:auto;
   font-size:11px;
   color:var(--sidebar-muted)
@@ -274,12 +292,16 @@ small {
 .sidebar-bottom {
   margin-top:auto;
   display:flex;
+  flex:none;
   align-items:center;
   gap:10px;
   font-size:13px;
   color:var(--sidebar-muted);
-  padding:22px 10px 0
+  padding:22px 0 0
 }
+
+.sidebar-toggle { flex: none; margin-left: auto; }
+.sidebar-toggle .live-icon { width: 16px; height: 16px; }
 
 .connection-status {
   display:inline-flex;
@@ -300,6 +322,9 @@ small {
 }
 
 .app-version {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
   white-space:nowrap;
   font-size:13px;
   line-height:1;
@@ -319,10 +344,11 @@ small {
 }
 
 main {
-  margin-left:230px;
+  margin-left:var(--sidebar-width);
   padding:38px 35px;
-  width:calc(100% - 230px);
-  min-width:0
+  width:calc(100% - var(--sidebar-width));
+  min-width:0;
+  transition:margin-left var(--sidebar-transition), width var(--sidebar-transition);
 }
 
 header {
@@ -1048,13 +1074,11 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
   grid-column:1/-1
 }
 
-.sidebar {
-  width:205px
+.app-shell {
+  --sidebar-width: 205px;
 }
 
 main {
-  margin-left:205px;
-  width:calc(100% - 205px);
   padding:30px 24px
 }
 
@@ -1071,53 +1095,34 @@ main {
   }
 }
 
+.app-shell.sidebar-collapsed { --sidebar-width: 104px; }
+.sidebar-collapsed .sidebar { padding: 22px 10px; }
+.sidebar-collapsed .brand > div,
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed .nav-text,
+.sidebar-collapsed .nav-badge { display: none; }
+.sidebar-collapsed .brand-icon { margin: auto; }
+.sidebar-collapsed .sidebar-navigation { margin-top: 22px; }
+.sidebar-collapsed .sidebar-link { justify-content: center; padding: 12px 5px; }
+.sidebar-collapsed .sidebar-bottom { gap: 4px; }
+.sidebar-collapsed .connection-status,
+.sidebar-collapsed .connection-status .live-icon { width: 13px; height: 13px; }
+.sidebar-collapsed .app-version { font-size: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell { --sidebar-transition: 0s; }
+}
+
+@media (max-height: 720px) {
+  .sidebar { padding-block: 18px; }
+  .sidebar .nav-label { margin-top: 22px; }
+  .sidebar .sidebar-navigation { gap: 4px; }
+  .sidebar .sidebar-link { padding-block: 10px; }
+  .sidebar .sidebar-bottom { padding-top: 14px; }
+}
+
 @media(max-width:1100px) {
-  .sidebar {
-  width:72px;
-  padding:22px 10px
-}
-
-.brand>div,.brand small,.nav-label {
-  display:none
-}
-
-.sidebar>button {
-  padding:12px 5px;
-  font-size:10px
-}
-
-.sidebar>button .nav-text,
-.sidebar>button .nav-badge {
-  display:none;
-}
-
-.sidebar>button .live-icon {
-  margin:auto;
-}
-
-.sidebar-bottom {
-  justify-content:center;
-  gap:5px;
-  padding:18px 0 0;
-}
-
-.connection-status,
-.connection-status .live-icon {
-  width:13px;
-  height:13px;
-}
-
-.app-version {
-  font-size:9px;
-}
-
-.brand-icon {
-  margin:auto
-}
-
 main {
-  margin-left:72px;
-  width:calc(100% - 72px);
   padding:25px 16px
 }
 

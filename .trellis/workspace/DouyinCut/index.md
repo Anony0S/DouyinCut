@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 42
-- **Last Active**: 2026-11-20
+- **Total Sessions**: 44
+- **Last Active**: 2026-11-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1140 | Active |
+| `journal-1.md` | ~1194 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 44 | 2026-11-21 | 修正 ASR 末词轻微越界 | - | `master` |
+| 43 | 2026-11-20 | 粗剪方案按首次创建顺序编号 | - | `master` |
 | 42 | 2026-11-20 | 隔离开发版与正式版 Windows 凭据 | - | `master` |
 | 41 | 2026-11-20 | 统一表单控件焦点样式 | - | `master` |
 | 40 | 2026-11-20 | 压缩粗剪模型的转写输入 | - | `master` |

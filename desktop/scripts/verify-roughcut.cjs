@@ -219,6 +219,9 @@ async function verifyEditingControls() {
   const componentModule={exports:{}}
   const split={setup(_, {slots}) { return ()=>vue.h('div',[slots.left?.(),slots.right?.()]) }}
   const empty={render(){return null}}
+  const confirm={props:['title'],setup(props,{slots}){
+    return ()=>vue.h('div',{'data-confirm-title':props.title},slots.default?.({}))
+  }}
   new Function('require','module','exports',code)(name=>{
     if(name==='vue') return {...vue,vModelText:{},vModelSelect:{},vModelCheckbox:{}}
     if(name==='vue-router') return {...require(name),useRoute:()=>router.currentRoute.value,useRouter:()=>router}
@@ -230,6 +233,7 @@ async function verifyEditingControls() {
     if(name==='../composables/useVideoImport') return {useVideoImport:()=>({chooseNewVideo(){}})}
     if(name.startsWith('../services/')) return loaded.load(name.slice(3)+'.ts')
     if(name.endsWith('WorkspaceSplit.vue')) return {__esModule:true,default:split}
+    if(name.endsWith('ConfirmPopover.vue')) return {__esModule:true,default:confirm}
     if(name.endsWith('.vue')) return {__esModule:true,default:empty}
     return require(name)
   },componentModule,componentModule.exports)
@@ -250,6 +254,17 @@ async function verifyEditingControls() {
   const paidBefore=requests.filter(url=>url.endsWith('/analyze')).length
   try {
     app.use(pinia);app.mount(root);await settle()
+    const oldPlan = copy(project.plans[0])
+    const newPlan = {...oldPlan, id:'newer-plan', revision:1}
+    project.plans = [newPlan, oldPlan]
+    await settle()
+    const planRows = all(root, el => el.props.class === 'saved-plan-row')
+    assert.deepEqual(planRows.map(row => text(row).trim().match(/^方案 (\d+)/)?.[1]), ['2', '1'])
+    assert.deepEqual(all(root, el => /^删除方案 \d+$/.test(el.props['aria-label'])).map(el => el.props['aria-label']),
+      ['删除方案 2', '删除方案 1'])
+    assert.deepEqual(all(root, el => /^删除方案 \d/.test(el.props['data-confirm-title']))
+      .map(el => el.props['data-confirm-title']), ['删除方案 2（修订 1）？', `删除方案 1（修订 ${oldPlan.revision}）？`])
+    project.plans = [oldPlan]
     project.jobs = ['running', 'succeeded', 'failed', 'paused', 'cancelled'].map(state => ({
       id: state, kind: 'analyze', state, progress: 0.4, payload: { asset_id: project.assetId },
     }))

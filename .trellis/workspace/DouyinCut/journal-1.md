@@ -1138,3 +1138,57 @@ Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 43: 粗剪方案按首次创建顺序编号
+<!-- trellis-session: v=2 fp=64d8915ce951c1ff -->
+
+**Date**: 2026-11-20
+**Task**: 粗剪方案按首次创建顺序编号
+**Branch**: `master`
+
+### Summary
+
+粗剪方案最新创建的置顶，现存方案从最早创建的方案起编号。方案修订保留原排序，删除确认使用列表编号。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、粗剪及删除交互测试通过，13 项项目后端测试通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 44: 修正 ASR 末词轻微越界
+<!-- trellis-session: v=2 fp=e3cde2b0804f946e -->
+
+**Date**: 2026-11-21
+**Task**: 修正 ASR 末词轻微越界
+**Branch**: `master`
+
+### Summary
+
+用户确认将音频段尾 50 毫秒以内的轻微词尾越界截到可用整毫秒。截图中的 120022 ms 修正为 120000 ms。详细规则见关联规格。
+Topics: [.trellis/spec/project/roughcut.md](../../spec/project/roughcut.md)
+
+### Main Changes
+
+- 更新 ASR 解析和越界诊断，添加截图时间戳、容差边界和缓存复用回归测试。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端 415 项测试及 117 个子测试通过。决策任务恢复测试出现 1 条后台线程警告。真实云端未重跑。
+
+### Status
+
+[OK] **Completed**

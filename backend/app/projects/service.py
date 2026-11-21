@@ -144,8 +144,12 @@ def project_detail(store, asset_id):
                              (asset_id,)).fetchone()
         if asset is None:
             raise KeyError(asset_id)
-        plans = [json.loads(r[0]) for r in conn.execute(LATEST +
-                 "SELECT body FROM source_plans WHERE asset_id=? ORDER BY created DESC,id DESC", (asset_id,))]
+        plans = [json.loads(r[0]) for r in conn.execute(LATEST + """
+                 SELECT p.body FROM source_plans p WHERE p.asset_id=?
+                 ORDER BY (SELECT first.created FROM objects first
+                           WHERE first.kind='plan' AND first.id=p.id ORDER BY first.revision LIMIT 1) DESC,
+                          p.id DESC
+                 """, (asset_id,))]
         candidates = [json.loads(r[0]) for r in conn.execute(LATEST +
                       "SELECT body FROM latest WHERE kind='candidate' AND json_extract(body,'$.source_asset_id')=?",
                       (asset_id,))]

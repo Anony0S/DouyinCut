@@ -18,7 +18,10 @@ const project=useProjectStore(),session=useSessionStore(),workspace=useWorkspace
 const {busy,connected,pendingImportId}=storeToRefs(session)
 const {assetId,activeAsset,productName,instructions,targetSeconds,toleranceSeconds,refreshAsr,analyzingAsset,
  latestAnalysis,transcript,transcriptVisible,assetJobs,selectedPlan,previewArtifact,assetPlans,planDirty}=storeToRefs(project)
-const orderedPlans=computed(()=>assetPlans.value)
+const numberedPlans = computed(() => assetPlans.value.map((plan, index) => ({
+  plan,
+  number: assetPlans.value.length - index,
+})))
 const {analyze,loadTranscript,saveProjectInfo,savePlan,deletePlan,createJianyingDraft,moveClip,moveClipTo}=project
 const filterShortFillers = ref(false)
 const fillerMaxChars = ref<number | ''>(5)
@@ -156,8 +159,8 @@ function selectPlan(plan: Plan) {
   if(planDirty.value&&!window.confirm('当前方案有未保存的片段调整，切换后将丢失这些调整。继续切换吗？')) return
   selectedPlan.value=JSON.parse(JSON.stringify(plan))
 }
-function planDeleteTitle(plan: Plan) {
-  return `删除方案 ${assetPlans.value.findIndex(item=>item.id===plan.id)+1}（修订 ${plan.revision}）？`
+function planDeleteTitle(plan: Plan, number: number) {
+  return `删除方案 ${number}（修订 ${plan.revision}）？`
 }
 function planDeleteMessage(plan: Plan) {
   const dirty=planDirty.value&&selectedPlan.value?.id===plan.id
@@ -323,7 +326,22 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
                 </section>
                 </div>
                 <div v-if="selectedPlan?.warnings.length" class="preview-warnings"><p v-for="warning in selectedPlan.warnings" :key="warning" class="hint">{{ warning }}</p></div>
-                <details v-if="orderedPlans.length" class="saved-plans" open><summary>粗剪方案 · {{ orderedPlans.length }}</summary><div class="saved-plan-list"><div v-for="(plan,index) in orderedPlans" :key="plan.id" class="saved-plan-row"><button class="secondary saved-plan" :class="{'saved-plan-selected':plan.id===selectedPlan?.id}" :aria-pressed="plan.id===selectedPlan?.id" :disabled="busy" @click="selectPlan(plan)">方案 {{ index+1 }} · {{ seconds(plan.clips.reduce((sum,c)=>sum+c.source_end_us-c.source_start_us,0)) }} 秒 · 修订 {{ plan.revision }}</button><ConfirmPopover :title="planDeleteTitle(plan)" :message="planDeleteMessage(plan)" :confirm-action="() => deletePlan(plan.id)" :disabled="busy" v-slot="{ open, expanded, popoverId }"><button class="danger-button saved-plan-delete" :aria-label="`删除方案 ${index+1}`" title="删除方案" :disabled="busy" :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog" @click="open">删除</button></ConfirmPopover></div></div></details>
+                <details v-if="numberedPlans.length" class="saved-plans" open>
+                  <summary>粗剪方案 · {{ numberedPlans.length }}</summary>
+                  <div class="saved-plan-list">
+                    <div v-for="{ plan, number } in numberedPlans" :key="plan.id" class="saved-plan-row">
+                      <button class="secondary saved-plan" :class="{ 'saved-plan-selected': plan.id === selectedPlan?.id }"
+                        :aria-pressed="plan.id === selectedPlan?.id" :disabled="busy" @click="selectPlan(plan)">
+                        方案 {{ number }} · {{ seconds(plan.clips.reduce((sum, clip) => sum + clip.source_end_us - clip.source_start_us, 0)) }} 秒 · 修订 {{ plan.revision }}
+                      </button>
+                      <ConfirmPopover :title="planDeleteTitle(plan, number)" :message="planDeleteMessage(plan)"
+                        :confirm-action="() => deletePlan(plan.id)" :disabled="busy" v-slot="{ open, expanded, popoverId }">
+                        <button class="danger-button saved-plan-delete" :aria-label="`删除方案 ${number}`" title="删除方案"
+                          :disabled="busy" :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog" @click="open">删除</button>
+                      </ConfirmPopover>
+                    </div>
+                  </div>
+                </details>
               </div>
               <div class="roughcut-editor">
                 <div class="clip-list-heading"><h3>入选片段 <span v-if="selectedPlan">{{ selectedPlan.clips.length }}</span></h3><span>从上到下依次拼接 · 可拖动排序</span></div>

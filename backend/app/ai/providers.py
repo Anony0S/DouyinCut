@@ -485,6 +485,7 @@ def upload_audio(audio: Path, config: CloudConfig, object_id: str, *, operation=
 
 ASR_CHUNK_US = 120_000_000
 ASR_MIN_CHUNK_US = 1_000_000
+ASR_WORD_TAIL_TOLERANCE_MS = 50
 
 
 def qwen_audio_payload(model: str, audio_url: str) -> dict:
@@ -564,19 +565,28 @@ def word_timed_sentences(sentence, asset_id, start_us, end_us):
         return None
     if not isinstance(words, list):
         raise ProviderError("ASR 词级时间戳格式无效")
+    chunk_end_ms = (end_us - start_us) // 1000
     tokens = []
-    for word in words:
+    for word_index, word in enumerate(words, start=1):
         if not isinstance(word, dict):
             raise ProviderError("ASR 词级时间戳格式无效")
         begin, end = word.get("begin_time"), word.get("end_time")
         text, punctuation = word.get("text"), word.get("punctuation", "")
         if (type(begin) is not int or type(end) is not int or not 0 <= begin < end
-                or end * 1000 > end_us - start_us or not isinstance(text, str)
-                or not isinstance(punctuation, str) or (tokens and begin < tokens[-1][1])):
+                or not isinstance(text, str) or not isinstance(punctuation, str)
+                or (tokens and begin < tokens[-1][1])):
             raise ProviderError("ASR 词级时间戳无效、重叠或超出音频段范围")
         if word.get("fixed", True) is not True:
             raise ProviderError("ASR 返回未完成的词级结果")
-        if text.strip():
+        has_text = bool(text.strip())
+        if end > chunk_end_ms:
+            overflow_ms = end - chunk_end_ms
+            if (word_index != len(words) or not has_text or begin >= chunk_end_ms
+                    or overflow_ms > ASR_WORD_TAIL_TOLERANCE_MS):
+                raise ProviderError(f"ASR 词级时间戳超出音频段范围（句内第 {word_index} 个词，"
+                                    f"返回 {begin}–{end} ms，超过段尾 {chunk_end_ms} ms 共 {overflow_ms} ms）")
+            end = chunk_end_ms
+        if has_text:
             tokens.append((begin, end, text + (punctuation if not text.endswith(punctuation) else "")))
     # Never replace a full paragraph with an incomplete words list.
     normalize = lambda value: re.sub(r"[\W_]", "", value, flags=re.UNICODE).casefold()

@@ -13,7 +13,7 @@ overrides.set(path.join(src, 'workspace.ts'), { useWorkspace: () => workspace })
 overrides.set(path.join(src, 'composables/useVideoImport.ts'), { useVideoImport: () => ({ chooseNewVideo() {} }) })
 overrides.set(path.join(src, 'components/WorkspaceSplit.vue'), { __esModule: true, default: { setup(_, { slots }) { return () => vue.h('div', [slots.left?.(), slots.right?.()]) } } })
 for (const file of ['components/JobErrorDetails.vue', 'components/live/LiveIcon.vue']) overrides.set(path.join(src, file), stub)
-const router = { useRoute: () => ({ query: {}, params: { id: 'video' } }) }
+const router = { useRoute: () => ({ query: {}, params: { id: 'video' } }), useRouter: () => ({}) }
 const calls = []
 let fail = false
 const clip = id => ({ candidate_id: id, source_asset_id: 'video', source_start_us: 0, source_end_us: 2e6, timeline_start_us: 0 })
@@ -106,15 +106,15 @@ async function verify() {
   project.selectedPlan = plan('one'); await settle()
   await click(button(editor.root, '移除片段 1')); project.selectedPlan = plan('two'); await settle()
   assert.equal(dialog(), undefined, 'switching plans cancels the previous clip confirmation')
-  await checkConfirmation(editor.root, '删除方案 1', '/plans/one', '源视频、ASR 对话')
+  await checkConfirmation(editor.root, '删除方案 2', '/plans/one', '源视频、ASR 对话')
   editor.app.unmount()
 
   const liveSession = { id: 's', started: 1, status: 'completed', product_events: [], product_periods: [], product_clips: [
-    { id: 'c', status: 'completed', product_name: '商品一', promotion_id: 'p' },
-    { id: 'i', status: 'imported', product_name: '商品二', promotion_id: 'q' },
-    { id: 'busy', status: 'processing', product_name: '生成中', promotion_id: 'r' },
+    { id: 'c', status: 'completed', product_name: '商品一', promotion_id: 'p', source_periods: [] },
+    { id: 'i', status: 'imported', product_name: '商品二', promotion_id: 'q', source_periods: [] },
+    { id: 'busy', status: 'processing', product_name: '生成中', promotion_id: 'r', source_periods: [] },
   ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, splitting: true }] }
-  const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, monitorId: 'monitor', busy: false, selectedPeriodId: '',
+  const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, monitorId: 'monitor', busy: false, selectedPeriodId: '', mergePeriodIds: [],
     onDeleteProductClip: async id => calls.push(`/clips/${id}`),
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
@@ -128,7 +128,7 @@ async function verify() {
   const retryPanel = await mount('components/live/LiveSessionPanel.vue', {
     session: {...liveSession, status: 'recording', product_listener: {status: 'error', detail: '连接失败', updated: 1},
       product_catalog_error: {detail: {summary: '商品列表获取失败'}, updated: 1}},
-    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDeleteProductClip: async () => {},
+    monitorId: 'monitor', busy: false, selectedPeriodId: '', mergePeriodIds: [], onDeleteProductClip: async () => {},
     onSplit: async () => ({state: 'noop', message: ''}),
     onRetryProductListener: async (monitorId, sessionId) => retryCalls.push([monitorId, sessionId]),
   })
@@ -137,7 +137,7 @@ async function verify() {
   assert.deepEqual(retryCalls, [['monitor', liveSession.id]])
   const noRetry = await mount('components/live/LiveSessionPanel.vue', {
     session: {...liveSession, status: 'recording', product_listener: {status: 'listening', detail: '商品消息连接已建立', updated: 1}, product_catalog_error: null},
-    monitorId: 'monitor', busy: false, selectedPeriodId: '', onDeleteProductClip: async () => {},
+    monitorId: 'monitor', busy: false, selectedPeriodId: '', mergePeriodIds: [], onDeleteProductClip: async () => {},
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   assert.equal(button(noRetry.root, '重试商品连接'), undefined, 'healthy product listener has no manual retry')

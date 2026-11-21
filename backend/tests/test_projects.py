@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -98,6 +99,19 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(project_detail(self.store, 'b')['draft']['product_name'], '另一个商品')
         with self.assertRaises(KeyError):
             save_draft(self.store, 'missing', saved)
+
+    def test_workspace_lists_plans_by_first_creation_but_returns_latest_revision(self):
+        self.asset('a')
+        clips = [{'source_asset_id': 'a'}]
+        with patch('app.core.storage.time.time', side_effect=[100, 200, 300]):
+            self.store.put('plan', {'id': 'older', 'revision': 1, 'clips': clips})
+            self.store.put('plan', {'id': 'newer', 'revision': 1, 'clips': clips})
+            self.store.next_revision('plan', 'older', {'id': 'older', 'clips': clips})
+
+        response = self.client.get('/api/v1/projects/a', headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([(p['id'], p['revision']) for p in response.json()['plans']],
+                         [('newer', 1), ('older', 2)])
 
     def test_workspace_layout_is_saved_with_the_work_directory_and_survives_a_new_app(self):
         url = '/api/v1/settings/workspace-layout'

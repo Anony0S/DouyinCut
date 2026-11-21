@@ -280,6 +280,46 @@ class QwenAudioTests(unittest.TestCase):
         for payload in (sample["output"], {"output": sample["output"]}, {"sentence": sample["sentence"]}):
             self.assertEqual(audio_segments(payload, self.asset.id, 20_000_000, 24_000_000), rows)
 
+    def test_tail_word_overflow_is_clamped_and_cached_without_another_request(self):
+        self.asset = self.asset.model_copy(update={"duration_us": 120_000_000})
+        words = [{"begin_time": 119440, "end_time": 119560, "text": "勾"},
+                 {"begin_time": 119560, "end_time": 119720, "text": "引"},
+                 {"begin_time": 119720, "end_time": 120022, "text": "别人", "punctuation": "。"}]
+        self.network.return_value = {"output": {"sentence": {
+            "text": "勾引别人。", "begin_time": 119440, "end_time": 120022, "words": words}}}
+        with patch("app.ai.providers.ASR_CHUNK_US", 120_000_000):
+            rows = self.transcribe()
+            self.assertEqual(self.transcribe(), rows)
+        self.assertEqual([(t.start_us, t.end_us, t.text) for t in rows],
+                         [(119_440_000, 120_000_000, "勾引别人。")])
+        cached = self.store.cached(self.cache_key(end=120_000_000))
+        self.assertEqual(cached["status"], "succeeded")
+        self.assertEqual(cached["response"]["output"]["sentence"]["words"][-1]["end_time"], 120022)
+        self.network.assert_called_once()
+
+    def test_tail_word_tolerance_uses_segment_duration_and_keeps_other_checks(self):
+        def parse(first_end, last_begin, last_end, *, fixed=True, text="面料柔软。"):
+            words = [{"begin_time": 20, "end_time": first_end, "text": "面料"},
+                     {"begin_time": last_begin, "end_time": last_end, "text": "柔软", "fixed": fixed}]
+            return audio_segments({"sentence": {"text": text, "words": words}}, self.asset.id,
+                                  120_000_000, 124_000_999)
+
+        rows = parse(200, 3900, 4050)
+        self.assertEqual([(row.start_us, row.end_us, row.text) for row in rows],
+                         [(120_020_000, 120_200_000, "面料"), (123_900_000, 124_000_000, "柔软")])
+        with self.assertRaisesRegex(ProviderError, r"第 2 个词.*3900–4051 ms.*51 ms"):
+            parse(200, 3900, 4051)
+        with self.assertRaisesRegex(ProviderError, r"第 1 个词.*4010 ms"):
+            parse(4010, 3900, 4022)
+        with self.assertRaisesRegex(ProviderError, r"第 2 个词.*4000–4022 ms"):
+            parse(200, 4000, 4022)
+        with self.assertRaisesRegex(ProviderError, "重叠"):
+            parse(3910, 3900, 4022)
+        with self.assertRaisesRegex(ProviderError, "未完成"):
+            parse(200, 3900, 4022, fixed=False)
+        with self.assertRaisesRegex(ProviderError, "完整转写不一致"):
+            parse(200, 3900, 4022, text="面料柔软透气。")
+
     def test_sentence_arrays_are_sorted_and_deduplicated(self):
         first = {"begin_time": 600, "end_time": 1500, "text": "第一句", "sentence_end": True}
         second = {"begin_time": 2000, "end_time": 3834, "text": "第二句", "sentence_end": True}

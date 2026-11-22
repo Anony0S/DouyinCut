@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useRoute } from "vue-router";
-import type { CloudConfig } from "../api";
+import { scanDouyinLogin, type CloudConfig } from "../api";
 import { cloudApi, type ModelConnectionTestResult, type OssConnectionTestResult } from "../services/cloud";
 import { useSessionStore } from "../stores/session";
 import SecretInput from "../components/SecretInput.vue";
@@ -97,6 +97,9 @@ const asrKeyPreview = computed(() =>
   asrKeyConfigured.value ? secretPreviews.value.asr_api_key || "" : "",
 );
 const douyinCookie = ref("");
+const desktopDouyinLogin = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const scanningDouyin = ref(false);
+const douyinScanMessage = ref("");
 const modelKeyConfigured = computed(() => Boolean(secrets.value.llm_api_key));
 const modelKeyPreview = computed(() =>
   modelKeyConfigured.value ? secretPreviews.value.llm_api_key || "" : "",
@@ -289,6 +292,7 @@ async function saveImageConnection() {
   });
 }
 async function saveDouyinCookie() {
+  if (scanningDouyin.value) return;
   await session.act(async () => {
     const value = douyinCookie.value.trim();
     if (!value) return;
@@ -299,6 +303,28 @@ async function saveDouyinCookie() {
     session.message =
       "抖音登录 Cookie 已保存到应用设置；停止并恢复监控后生效，当前场次会先完成收尾";
   });
+}
+
+async function openDouyinScan() {
+  if (!desktopDouyinLogin || scanningDouyin.value || busy.value || !connected.value) return;
+  scanningDouyin.value = true;
+  douyinScanMessage.value = "";
+  try {
+    const result = await scanDouyinLogin();
+    if (disposed) return;
+    if (result.state === "cancelled") {
+      douyinScanMessage.value = "已取消扫码登录";
+      return;
+    }
+    secrets.value.douyin_cookie = true;
+    secretPreviews.value.douyin_cookie = result.preview;
+    douyinCookie.value = "";
+    douyinScanMessage.value = "抖音登录状态已保存，停止并恢复监控后生效。";
+  } catch (cause) {
+    if (!disposed) session.report(cause);
+  } finally {
+    scanningDouyin.value = false;
+  }
 }
 
 onMounted(() => {
@@ -574,33 +600,45 @@ onUnmounted(() => {
         role="tabpanel"
         aria-labelledby="settings-tab-douyin"
         class="card card-border bg-base-100 settings-card">
-        <p class="hint">
-          商品详情接口需要登录态。粘贴浏览器开发者工具中该请求的完整 Cookie
-          请求头；内容保存到本机应用设置。留空时保留原值。
-        </p>
-        <form class="secret-field" @submit.prevent="saveDouyinCookie">
-          <label for="douyin-cookie">
-            抖音登录 Cookie
+        <div class="settings-card-heading">
+          <h2 class="card-title">
+            抖音登录
             <span class="secret-field-status">
               {{ secrets.douyin_cookie ? "已配置" : "未配置" }}
             </span>
-          </label>
-          <div class="secret-field-controls">
-            <SecretInput
-              id="douyin-cookie"
-              v-model="douyinCookie"
-              :saved="Boolean(secrets.douyin_cookie)"
-              secret-name="douyin_cookie"
-              :preview="secretPreviews.douyin_cookie || ''"
-              :disabled="busy"
-              placeholder="粘贴 Cookie 请求头内容" />
-            <button
-              class="btn btn-primary"
-              :disabled="busy || !connected || !douyinCookie.trim()">
-              保存 Cookie
-            </button>
+          </h2>
+          <p>{{ desktopDouyinLogin ? "用手机抖音扫描官方页面上的二维码，登录状态会自动保存。" : "请在 Windows 桌面应用中扫码，也可手动填写 Cookie。" }}</p>
+        </div>
+        <div v-if="desktopDouyinLogin">
+          <button type="button" class="btn btn-primary" :disabled="busy || !connected || scanningDouyin" @click="openDouyinScan">
+            <span v-if="scanningDouyin" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+            {{ scanningDouyin ? "等待扫码…" : secrets.douyin_cookie ? "重新扫码登录" : "扫码登录" }}
+          </button>
+          <p v-if="scanningDouyin || douyinScanMessage" class="hint mt-2" role="status">
+            {{ scanningDouyin ? "请在抖音官网窗口扫码，关闭该窗口可取消。" : douyinScanMessage }}
+          </p>
+        </div>
+        <details class="collapse collapse-arrow rounded-box border border-base-300" :open="!desktopDouyinLogin || undefined">
+          <summary class="collapse-title font-medium">手动填写 Cookie</summary>
+          <div class="collapse-content">
+            <form class="secret-field" @submit.prevent="saveDouyinCookie">
+              <label for="douyin-cookie">抖音登录 Cookie</label>
+              <div class="secret-field-controls">
+                <SecretInput
+                  id="douyin-cookie"
+                  v-model="douyinCookie"
+                  :saved="Boolean(secrets.douyin_cookie)"
+                  secret-name="douyin_cookie"
+                  :preview="secretPreviews.douyin_cookie || ''"
+                  :disabled="busy || scanningDouyin"
+                  placeholder="粘贴 Cookie 请求头内容" />
+                <button class="btn" :disabled="busy || scanningDouyin || !connected || !douyinCookie.trim()">
+                  保存 Cookie
+                </button>
+              </div>
+            </form>
           </div>
-        </form>
+        </details>
       </section>
       <section
         v-if="activeCloudSection === 'product-platform'"

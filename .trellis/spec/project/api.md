@@ -56,6 +56,7 @@
 | `POST /settings/cloud/test-model` | 本地认证后按 body.config 中的 Base URL、planner_model、chat_timeout_seconds 与可选 api_key 测试文本生成；空密钥使用已保存 llm_api_key。只发一次请求，成功与可预期测试失败返回 ok、model、elapsed_ms、message，不保存设置或密钥；非法配置返回 422，未授权返回 401 |
 | `POST /settings/cloud/test-oss` | 本地认证后按 body.config 的 oss_endpoint、oss_bucket 与可选 access_key_id / access_key_secret 测试小对象上传；两项空密钥分别使用已保存凭据。返回 ok、elapsed_ms、message，不保存表单或创建任务；总等待不超过 30 秒及进程清理时间，未授权返回 401 |
 | `POST /settings/secrets/{name}/reveal` | 显式获取完整密钥，禁止缓存 |
+| Tauri `scan_douyin_login` | 仅限本机工作台发起。独立官方抖音窗口扫码后，原生层使用现有会话令牌调用 `POST /settings/secrets` 保存 `douyin_cookie`，返回 `saved` 及掩码预览或 `cancelled`。 |
 | `GET /product-platform/status` | 只返回星斗本机登录状态、脱敏账号和所选合作范围，不返回令牌 |
 | `POST /product-platform/send-code`、`login` | body.mobile；登录另外包含 sms_code，验证码不持久化；发送成功后本服务会话内限制 60 秒再次发送 |
 | `POST /product-platform/scope`、`logout` | 选择关联范围 main_ip_id，或清理本机登录；不登出用户其他浏览器 |
@@ -63,7 +64,8 @@
 | `POST /product-platform/products/search` | body.keyword 为非空商品名称。直播商品查询传 monitor_id，项目参考图搜索传 asset_id。按直播间绑定查星斗或达多多。返回 product、scope_name 和 can_add_to_showcase。直播间未绑定或尚无达多多本地目录时返回 409 |
 | `POST /product-platform/products/add-to-showcase` | 直播间调用传 monitor_id 和星斗平台商品 ID（platform_product_id）。后端检查当前绑定并从所选合作范围读取 `ipId` 与 `memberTalentId` 执行单商品添加。返回 `{added: true}`，星斗登录失效返回 401，平台不支持或缺少范围或达人关联时返回 409 |
 | `GET/PUT /settings/workspace-layout` | 素材与粗剪页的布局偏好：left_width 为左侧卡片宽度（像素，230–10000）或 null（默认宽度）；随工作目录保存，只保留最新值 |
-| `POST /settings/cleanup-unused-files` | 用户确认后清理超过七天且未被项目 / 任务记录引用的应用生成产物，以及已知的过期导出 staging / 封面转换临时文件；保护活动任务、已引用产物和用户数据，跳过符号链接。返回 deleted_files、deleted_directories、retained_files、bytes_reclaimed、cutoff_timestamp |
+| `GET /settings/cleanup-unused-files` | 只读统计可清理文件，接受 `include_referenced`（默认 false）和 `retention_days`（默认 7，正整数）。返回 `file_count`、`directory_count`、`estimated_bytes` 和 `preview_id`。 |
+| `POST /settings/cleanup-unused-files` | 确认后提交 `include_referenced`、`retention_days` 和 `preview_id`。按选项、天数和当前可清理文件重新核对预览，变化时返回 409，需重新统计并确认。返回 `deleted_files`、`deleted_directories`、`retained_files`、`bytes_reclaimed`、`cutoff_timestamp`。 |
 | `GET /health`（无前缀）、`GET /diagnostics` | 服务存活检查与本机环境诊断 |
 | `GET /logs` | 返回 files（非空日志文件：category=runtime / task、name、size、modified，任务日志另含 group、group_type=job / product_clip、job_kind、product_name）与 runtime_available；应用运行日志在前，任务日志按修改时间倒序 |
 | `GET /logs/{category}/{name}?after=…` | 读取日志内容。不带 after 时返回末尾最多 512 KB 并从整行开始；带 after（字节偏移）时返回其后的新增内容。返回 text、start、next（下次读取的偏移）、size、truncated、reset（文件短于 after，已改为返回新内容末尾）。只接受两处日志目录内的 `.log` 文件名，运行日志仅限当前与上一份；名称无效返回 422，文件不存在返回 404 |

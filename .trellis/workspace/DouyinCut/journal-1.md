@@ -1590,3 +1590,127 @@ Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 61: 验证抖音官网的 WebView2 加载
+<!-- trellis-session: v=2 fp=bb97abc5406cc9a7 -->
+
+**Date**: 2026-11-22
+**Task**: 验证抖音官网的 WebView2 加载
+
+### Summary
+
+独立 InPrivate 窗口成功加载抖音官网。记录 Cargo example 必须补 Common Controls 6.0 清单的复现与修复。
+Topics: [.trellis/research/douyin-webview-login.md](../../research/douyin-webview-login.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] Windows 下对照两份 EXE 的清单，并通过窗口无障碍树确认官方首页加载。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 62: 验证抖音扫码登录态可查询直播商品
+<!-- trellis-session: v=2 fp=4880e134ca1974c7 -->
+
+**Date**: 2026-11-22
+**Task**: 验证抖音扫码登录态可查询直播商品
+
+### Summary
+
+用户完成官网扫码；Tauri 原生读取直播商品路径所需 Cookie，并通过本机管道调用现有商品接口。
+Topics: [.trellis/research/douyin-webview-login.md](../../research/douyin-webview-login.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 带 Cookie 单页成功并返回当前讲解商品，接口报告 371 条；同房间不带 Cookie 的响应无法解析。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 63: 在 Windows 设置页接入抖音扫码登录
+<!-- trellis-session: v=2 fp=b23b5eb18f371d2e -->
+
+**Date**: 2026-11-22
+**Task**: 在 Windows 设置页接入抖音扫码登录
+
+### Summary
+
+独立抖音官网窗口扫码后由原生层提交登录 Cookie，本机沿用现有认证和设置存储，保留手动填写入口。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Main Changes
+
+- 接入扫码按钮、单窗口控制、取消和五分钟超时。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、设置与路由测试、Rust 登录及本机保存测试、后端凭据测试通过。Windows 隔离工作台实测打开官网并取消。真实扫码查询验证来自此前的独立原型。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 64: 增加清理文件预览与引用文件选项
+<!-- trellis-session: v=2 fp=7bfcef971c973949 -->
+
+**Date**: 2026-11-22
+**Task**: 增加清理文件预览与引用文件选项
+
+### Summary
+
+清理前统计文件数、目录数和空间。默认排除已引用产物，手动勾选后纳入超过七天的预览、导出和封面。确认时重新校验清理范围。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 31 个后端测试、7 个子测试、前端构建与本地设置验证脚本通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 65: 清理文件支持自定义天数
+<!-- trellis-session: v=2 fp=e8a95c78fd2bda6a -->
+
+**Date**: 2026-11-22
+**Task**: 清理文件支持自定义天数
+
+### Summary
+
+清理弹窗每次默认七天，支持输入正整数天数。预览和确认使用同一天数，旧预览不能用于新的天数。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 31 项后端测试、7 项子测试、前端构建和本地设置验证通过。
+
+### Status
+
+[OK] **Completed**

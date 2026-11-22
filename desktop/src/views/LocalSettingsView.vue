@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref } from "vue";
-import { api } from "../api";
+import { computed, nextTick, onUnmounted, ref } from "vue";
+import { api, ApiError } from "../api";
 import SoftwareUpdate from "../components/SoftwareUpdate.vue";
 
 type TauriInternals = {
@@ -12,9 +12,17 @@ function tauri(): TauriInternals {
   if (!internals) throw new Error("此操作需要在桌面应用中使用");
   return internals;
 }
-type DialogState = { title: string; message: string; kind: "confirm" | "info" | "error"; action?: () => Promise<void | DialogState> };
+type DialogState = { title: string; message: string; kind: "confirm" | "cleanup" | "info" | "error"; action?: () => Promise<void | DialogState> };
 const dialog = ref<DialogState | null>(null);
 const dialogBusy = ref(false);
+const DEFAULT_RETENTION_DAYS = 7;
+const retentionDays = ref(DEFAULT_RETENTION_DAYS);
+const validRetentionDays = computed(() => Number.isSafeInteger(retentionDays.value) && retentionDays.value >= 1);
+const includeReferenced = ref(false);
+const cleanupPreview = ref<CleanupPreview | null>(null);
+const cleanupPreviewLoading = ref(false);
+const cleanupPreviewError = ref("");
+let cleanupPreviewRequest = 0;
 
 function openDialog(state: DialogState) {
   dialog.value = state;
@@ -31,7 +39,11 @@ async function runDialogAction() {
   try {
     dialog.value = await dialog.value.action() ?? null;
   } catch (error) {
-    dialog.value = { title: "操作失败", message: String(error), kind: "error" };
+    if (dialog.value?.kind === "cleanup" && error instanceof ApiError && error.status === 409) {
+      await refreshCleanupPreview("清理范围已变化，请核对重新统计的结果。");
+    } else {
+      dialog.value = { title: "操作失败", message: String(error), kind: "error" };
+    }
   } finally {
     dialogBusy.value = false;
   }
@@ -41,7 +53,10 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") closeDialog();
 }
 window.addEventListener("keydown", onKeydown);
-onUnmounted(() => window.removeEventListener("keydown", onKeydown));
+onUnmounted(() => {
+  cleanupPreviewRequest++;
+  window.removeEventListener("keydown", onKeydown);
+});
 
 function changeWorkDirectory() {
   openDialog({
@@ -63,6 +78,13 @@ async function openWorkDirectory() {
   }
 }
 
+type CleanupPreview = {
+  preview_id: string;
+  file_count: number;
+  directory_count: number;
+  estimated_bytes: number;
+};
+
 type CleanupResult = {
   deleted_files: number;
   deleted_directories: number;
@@ -77,13 +99,45 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+async function refreshCleanupPreview(message = "") {
+  const request = ++cleanupPreviewRequest;
+  cleanupPreview.value = null;
+  cleanupPreviewError.value = message;
+  const days = retentionDays.value;
+  if (!validRetentionDays.value) {
+    cleanupPreviewLoading.value = false;
+    return;
+  }
+  cleanupPreviewLoading.value = true;
+  try {
+    const query = new URLSearchParams({
+      include_referenced: String(includeReferenced.value),
+      retention_days: String(days),
+    });
+    const preview = await api<CleanupPreview>(`/settings/cleanup-unused-files?${query}`);
+    if (request === cleanupPreviewRequest) cleanupPreview.value = preview;
+  } catch (error) {
+    if (request === cleanupPreviewRequest) cleanupPreviewError.value = String(error);
+  } finally {
+    if (request === cleanupPreviewRequest) cleanupPreviewLoading.value = false;
+  }
+}
+
 function confirmCleanup() {
+  retentionDays.value = DEFAULT_RETENTION_DAYS;
+  includeReferenced.value = false;
   openDialog({
-    title: "清理七天前未使用的文件",
-    message: "将清理应用生成目录中超过七天且已无项目或任务引用的文件，以及超期的未完成临时文件。原始视频、直播录制、仍被引用的导出和封面、日志、数据库与设置都会保留。此操作无法撤销。",
-    kind: "confirm",
+    title: "清理应用生成文件",
+    message: "活动任务、原始视频、直播录制及应用数据受保护。删除后无法撤销。",
+    kind: "cleanup",
     action: async () => {
-      const result = await api<CleanupResult>("/settings/cleanup-unused-files", "POST");
+      const preview = cleanupPreview.value;
+      if (!preview || !(preview.file_count || preview.directory_count)) return dialog.value ?? undefined;
+      const result = await api<CleanupResult>("/settings/cleanup-unused-files", "POST", {
+        include_referenced: includeReferenced.value,
+        retention_days: retentionDays.value,
+        preview_id: preview.preview_id,
+      });
       return {
         title: "清理完成",
         message: `已删除 ${result.deleted_files} 个文件和 ${result.deleted_directories} 个目录，释放 ${formatBytes(result.bytes_reclaimed)}。${result.retained_files ? `另有 ${result.retained_files} 个文件因占用或权限原因保留。` : ""}`,
@@ -91,6 +145,7 @@ function confirmCleanup() {
       };
     },
   });
+  void refreshCleanupPreview();
 }
 </script>
 
@@ -118,7 +173,7 @@ function confirmCleanup() {
       <li class="list-row">
         <div class="local-setting-copy">
           <h2>清理未使用文件</h2>
-          <p>清理应用生成目录中超过七天且没有项目或任务引用的文件，释放本机空间。</p>
+          <p>按文件存放天数清理应用生成文件，默认清理超过 7 天且未被引用的文件。</p>
         </div>
         <div class="local-setting-actions">
           <button class="btn btn-outline" type="button" @click="confirmCleanup">清理文件</button>
@@ -137,15 +192,50 @@ function confirmCleanup() {
         aria-describedby="local-settings-dialog-message">
         <h2 id="local-settings-dialog-title">{{ dialog.title }}</h2>
         <p id="local-settings-dialog-message">{{ dialog.message }}</p>
+        <template v-if="dialog.kind === 'cleanup'">
+          <label class="label mt-4 flex w-fit whitespace-normal text-base-content">
+            清理超过
+            <input
+              class="input input-sm w-20"
+              type="number"
+              min="1"
+              step="1"
+              :aria-invalid="!validRetentionDays"
+              :value="Number.isNaN(retentionDays) ? '' : retentionDays"
+              :disabled="dialogBusy"
+              @input="retentionDays = ($event.target as HTMLInputElement).valueAsNumber; refreshCleanupPreview()" />
+            天的文件
+          </label>
+          <label class="label mt-4 flex w-fit whitespace-normal text-base-content">
+            <input
+              type="checkbox"
+              class="checkbox checkbox-sm"
+              :checked="includeReferenced"
+              :disabled="dialogBusy"
+              @change="includeReferenced = ($event.target as HTMLInputElement).checked; refreshCleanupPreview()" />
+            同时清理项目或任务引用的文件
+          </label>
+          <p v-if="includeReferenced">删除后，相关项目或历史任务中的预览、导出或封面可能无法打开。</p>
+          <p v-if="cleanupPreviewError" role="status">{{ cleanupPreviewError }}</p>
+          <div class="mt-4 rounded-box bg-base-200 p-3 text-sm text-base-content" role="status" aria-live="polite">
+            <span v-if="!validRetentionDays" class="text-error">请输入大于或等于 1 的整数天数。</span>
+            <span v-else-if="cleanupPreviewLoading">正在统计可清理文件…</span>
+            <span v-else-if="cleanupPreview">
+              预计清理 <strong>{{ cleanupPreview.file_count }}</strong> 个文件、{{ cleanupPreview.directory_count }} 个目录，
+              释放 <strong>{{ formatBytes(cleanupPreview.estimated_bytes) }}</strong>
+            </span>
+            <button v-else class="btn btn-sm" type="button" @click="refreshCleanupPreview()">重新统计</button>
+          </div>
+        </template>
         <div class="modal-action">
-          <button v-if="dialog.kind === 'confirm'" class="btn btn-ghost" type="button" :disabled="dialogBusy" @click="closeDialog">取消</button>
+          <button v-if="dialog.action" class="btn btn-ghost" type="button" :data-autofocus="dialog.kind === 'cleanup' || undefined" :disabled="dialogBusy" @click="closeDialog">取消</button>
           <button
-            v-if="dialog.kind === 'confirm'"
+            v-if="dialog.action"
             class="btn btn-error"
             type="button"
-            data-autofocus
-            :disabled="dialogBusy"
-            @click="runDialogAction">{{ dialogBusy ? "处理中…" : "确认" }}</button>
+            :data-autofocus="dialog.kind === 'confirm' || undefined"
+            :disabled="dialogBusy || (dialog.kind === 'cleanup' && !(cleanupPreview?.file_count || cleanupPreview?.directory_count))"
+            @click="runDialogAction">{{ dialogBusy ? "处理中…" : dialog.kind === "cleanup" ? "确认清理" : "确认" }}</button>
           <button v-else class="btn btn-primary" type="button" data-autofocus @click="closeDialog">知道了</button>
         </div>
       </section>

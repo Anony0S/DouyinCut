@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 60
+- **Total Sessions**: 65
 - **Last Active**: 2026-11-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1592 | Active |
+| `journal-1.md` | ~1716 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,11 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 65 | 2026-11-22 | 清理文件支持自定义天数 | - | `-` |
+| 64 | 2026-11-22 | 增加清理文件预览与引用文件选项 | - | `-` |
+| 63 | 2026-11-22 | 在 Windows 设置页接入抖音扫码登录 | - | `-` |
+| 62 | 2026-11-22 | 验证抖音扫码登录态可查询直播商品 | - | `-` |
+| 61 | 2026-11-22 | 验证抖音官网的 WebView2 加载 | - | `-` |
 | 60 | 2026-11-22 | 版本更新说明显示 Markdown | - | `-` |
 | 59 | 2026-11-22 | 修复侧栏折叠布局和动画 | - | `-` |
 | 58 | 2026-11-22 | 达多多商品查询显示最近讲解 | - | `master` |

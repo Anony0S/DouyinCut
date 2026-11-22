@@ -6,6 +6,7 @@ mod appearance_preferences;
 mod window_preferences;
 mod workspace;
 mod updates;
+mod douyin_login;
 
 fn main() {
     use tauri::Manager;
@@ -35,6 +36,7 @@ fn main() {
             updates::download_update,
             updates::cancel_update_download,
             updates::install_update,
+            douyin_login::scan_douyin_login,
             session::complete_exit,
             appearance_preferences::get_appearance_preference,
             appearance_preferences::set_appearance_preference,

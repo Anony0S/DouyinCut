@@ -21,6 +21,11 @@ description = "允许窗口读取和保存外观主题"
 commands.allow = ["get_appearance_preference", "set_appearance_preference"]
 
 [[permission]]
+identifier = "allow-douyin-login"
+description = "允许本机工作台打开抖音扫码登录窗口"
+commands.allow = ["scan_douyin_login"]
+
+[[permission]]
 identifier = "allow-local-maintenance"
 description = "允许工作台执行本地目录和版本维护操作"
 commands.allow = ["delete_workspace_config", "relaunch", "check_for_update", "get_update_status", "download_update", "cancel_update_download", "install_update"]

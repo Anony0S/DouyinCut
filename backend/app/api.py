@@ -18,7 +18,7 @@ from pydantic import Field
 from .core.config import Settings
 from .core.logs import LogLibrary, configure_logging
 from .core.credentials import read_secret, secret_preview, storage_status, write_secret
-from .cleanup import cleanup_unused_files
+from .cleanup import DEFAULT_RETENTION_DAYS, CleanupPreviewChanged, cleanup_unused_files
 from .core.domain import Asset, Candidate, Model, Plan, Product, Transcript
 from .media.editing import make_batches, remap_subtitles, validate_plan
 from .media.processing import diagnostics, probe_stream_timing
@@ -70,6 +70,15 @@ class LogLocation(Model):
 class SecretRequest(Model):
     name: Literal["llm_api_key", "image_generation_api_key", "asr_api_key", "oss_access_key_id", "oss_access_key_secret", "douyin_cookie"]
     value: str = Field(max_length=20000)
+
+
+MAX_RETENTION_DAYS = 2**53 - 1
+
+
+class CleanupRequest(Model):
+    include_referenced: bool = False
+    retention_days: int = Field(DEFAULT_RETENTION_DAYS, ge=1, le=MAX_RETENTION_DAYS)
+    preview_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 def create_app(settings: Settings | None = None, token: str | None = None, *, frontend_dir: Path | None = None):
@@ -182,9 +191,20 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             raise HTTPException(409, f"打开工作目录失败：{exc}") from None
         return {"opened": True}
 
+    @app.get("/api/v1/settings/cleanup-unused-files")
+    def preview_cleanup(include_referenced: bool = False,
+                        retention_days: int = Query(DEFAULT_RETENTION_DAYS, ge=1, le=MAX_RETENTION_DAYS)):
+        return cleanup_unused_files(store, settings.data_dir, retention_days=retention_days,
+                                    include_referenced=include_referenced, preview=True)
+
     @app.post("/api/v1/settings/cleanup-unused-files")
-    def cleanup_old_unused_files():
-        return cleanup_unused_files(store, settings.data_dir)
+    def cleanup_old_unused_files(body: CleanupRequest):
+        try:
+            return cleanup_unused_files(store, settings.data_dir, retention_days=body.retention_days,
+                                        include_referenced=body.include_referenced,
+                                        preview_id=body.preview_id)
+        except CleanupPreviewChanged:
+            raise HTTPException(409, "可清理的文件已变化，请确认重新统计的结果。") from None
 
     @app.get("/api/v1/logs")
     def list_logs():

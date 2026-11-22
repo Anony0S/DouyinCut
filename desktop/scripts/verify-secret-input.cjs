@@ -195,6 +195,7 @@ async function verifySettings() {
     if (name === 'vue-router') return { useRoute: () => ({ query: {} }) }
     if (name === '../components/product/ProductPlatformLoginCard.vue' || name === '../components/product/DaduoduoSettingsCard.vue') return { __esModule: true, default: {} }
     if (name === '../services/cloud') return loaded.load('services/cloud.ts')
+    if (name === '../api') return { api: settingsApi }
     if (name === '../stores/session') return loaded.load('stores/session.ts')
     if (name === '../exit-guards') return loaded.load('exit-guards.ts')
     if (name === './events') return { subscribeJobEvents: () => () => {} }
@@ -351,6 +352,7 @@ async function verifyModelTestButton() {
     if(name==='vue-router') return { useRoute: () => ({ query: {} }) }
     if(name==='../components/product/ProductPlatformLoginCard.vue' || name==='../components/product/DaduoduoSettingsCard.vue') return {__esModule:true,default:{}}
     if(name==='../services/cloud') return loaded.load('services/cloud.ts')
+    if(name==='../api') return {api:testApi}
     if(name==='../stores/session') return loaded.load('stores/session.ts')
     if(name==='../exit-guards') return loaded.load('exit-guards.ts')
     if(name==='../components/SecretInput.vue') return {__esModule:true,default:component}

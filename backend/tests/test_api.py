@@ -1,5 +1,7 @@
 import importlib.util
+import os
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -26,6 +28,45 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/assets',headers=self.headers).status_code,200)
         self.assertEqual(self.client.get('/api/v1/assets',headers={**self.headers,'Origin':'https://untrusted.example'}).status_code,401)
         self.assertEqual(self.client.get('/api/v1/assets/unknown/media',headers=self.headers).status_code,404)
+
+    def test_cleanup_requires_current_preview_for_the_selected_scope(self):
+        from app.cleanup import SECONDS_PER_DAY
+
+        url = '/api/v1/settings/cleanup-unused-files'
+        output = Path(self.temp.name) / 'exports' / 'export_referenced'
+        output.mkdir()
+        video = output / 'video.mp4'
+        video.write_bytes(b'example')
+        old = time.time() - 4 * SECONDS_PER_DAY
+        for path in (output, video):
+            os.utime(path, (old, old))
+        self.app.state.store.put('export', {'id': output.name, 'path': str(output)})
+
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.assertEqual(self.client.post(url, headers=self.headers).status_code, 422)
+        default = self.client.get(url, headers=self.headers).json()
+        self.assertEqual(default['file_count'], 0)
+        params = {'include_referenced': 'true'}
+        self.assertEqual(self.client.get(url, headers=self.headers, params=params).json()['file_count'], 0)
+        for days in (0, -1, 1.5):
+            self.assertEqual(self.client.get(url, headers=self.headers,
+                             params={**params, 'retention_days': days}).status_code, 422)
+        preview = self.client.get(url, headers=self.headers, params={**params, 'retention_days': 3}).json()
+        self.assertEqual((preview['file_count'], preview['estimated_bytes']), (1, 7))
+        self.assertTrue(video.exists())
+        body = {'include_referenced': True, 'retention_days': 3, 'preview_id': default['preview_id']}
+        self.assertEqual(self.client.post(url, headers=self.headers, json=body).status_code, 409)
+        self.assertTrue(video.exists())
+        body['preview_id'] = preview['preview_id']
+        self.assertEqual(self.client.post(url, headers=self.headers,
+                         json={**body, 'retention_days': 0}).status_code, 422)
+        self.assertEqual(self.client.post(url, headers=self.headers,
+                         json={**body, 'retention_days': 2}).status_code, 409)
+        self.assertTrue(video.exists())
+        result = self.client.post(url, headers=self.headers, json=body)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json()['deleted_files'], 1)
+        self.assertFalse(video.exists())
 
     def test_health_requires_auth_without_querying_business_data(self):
         with patch.object(self.app.state.store, 'connection', side_effect=AssertionError('Health queried storage')):

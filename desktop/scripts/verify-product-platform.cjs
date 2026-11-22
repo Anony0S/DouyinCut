@@ -271,6 +271,52 @@ async function verifySearch() {
   } finally { mounted.app.unmount() }
 }
 
+async function verifyDouyinScan() {
+  route.query = { cloudTab: 'douyin' }
+  respond = url => {
+    assert.ok(url.endsWith('/settings/cloud'))
+    return {
+      config: { base_url: '', planner_model: '', oss_endpoint: '', oss_bucket: '' },
+      secrets: {}, secret_previews: {},
+    }
+  }
+  let scan = deferred()
+  let scanCalls = 0
+  window.__TAURI_INTERNALS__ = { invoke(command, args) {
+    assert.equal(command, 'scan_douyin_login')
+    assert.deepEqual(args, { sessionToken: 'isolated-local-session' })
+    scanCalls++
+    return scan.promise
+  } }
+  const mounted = await mount('views/SettingsView.vue')
+  try {
+    mounted.session.connected = true
+    await settle()
+    const settings = all(mounted.root, el => el.props.id === 'settings-panel-douyin')[0]
+    assert.ok(button(settings, '保存 Cookie'))
+    const cancelled = button(settings, '扫码登录').props.onClick()
+    await settle()
+    assert.equal(button(settings, '等待扫码…').props.disabled, true)
+    await button(settings, '等待扫码…').props.onClick()
+    assert.equal(scanCalls, 1)
+    scan.resolve({ state: 'cancelled' })
+    await cancelled
+    await settle()
+    assert.match(text(settings), /已取消扫码登录/)
+    assert.match(text(settings), /未配置/)
+    scan = deferred()
+    const saved = button(settings, '扫码登录').props.onClick()
+    scan.resolve({ state: 'saved', preview: 'sess*****test' })
+    await saved
+    await settle()
+    assert.ok(button(settings, '重新扫码登录'))
+    assert.match(text(settings), /抖音登录状态已保存/)
+  } finally {
+    mounted.app.unmount()
+    delete window.__TAURI_INTERNALS__
+  }
+}
+
 async function main() {
   const originalFetch = global.fetch
   const originalWindow = global.window
@@ -283,7 +329,8 @@ async function main() {
   try {
     await verifyLogin(); await verifySearch(); await verifyLectureButton(); await verifyDaduoduoControls()
     assert.ok(calls.every(call => call.url.startsWith('/api/v1/')), 'The frontend only calls its authenticated local API')
-    console.log('Product platform UI checks passed: settings deep link, SMS cooldown, login, product card, empty/error results, auth redirect and stale response guard.')
+    await verifyDouyinScan()
+    console.log('Product platform UI checks passed: settings deep link, SMS login, Douyin QR login, product cards, auth redirect and stale response guard.')
   } finally { global.fetch = originalFetch; global.window = originalWindow }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

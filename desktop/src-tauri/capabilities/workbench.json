@@ -11,6 +11,7 @@
     "allow-complete-exit",
     "allow-window-preferences",
     "allow-appearance-preferences",
+    "allow-douyin-login",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

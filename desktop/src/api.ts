@@ -20,6 +20,16 @@ declare global {
 const sessionToken = globalThis.__DOUYINCUT_SESSION_TOKEN__ || import.meta.env.VITE_SESSION_TOKEN || ''
 delete globalThis.__DOUYINCUT_SESSION_TOKEN__
 
+type DouyinLoginOutcome = { state: 'saved'; preview: string } | { state: 'cancelled' }
+
+export function scanDouyinLogin(): Promise<DouyinLoginOutcome> {
+  const internals = (window as Window & {
+    __TAURI_INTERNALS__?: { invoke: (command: string, args: Record<string, unknown>) => Promise<DouyinLoginOutcome> }
+  }).__TAURI_INTERNALS__
+  if (!internals) return Promise.reject(new Error('请在 Windows 桌面应用中使用扫码登录'))
+  return internals.invoke('scan_douyin_login', { sessionToken })
+}
+
 export function apiRequest(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers)
   if (sessionToken) headers.set('X-Session-Token', sessionToken)

@@ -12,8 +12,8 @@ import { useVideoImport } from '../composables/useVideoImport'
 import WorkspaceSplit from '../components/WorkspaceSplit.vue'
 import JobErrorDetails from '../components/JobErrorDetails.vue'
 import ConfirmPopover from '../components/ConfirmPopover.vue'
-import { projectsApi } from '../services/projects'
-import { productPlatformApi, isProductPlatformAuthError, type PlatformProduct } from '../services/productPlatform'
+import { projectsApi, type CoverReference } from '../services/projects'
+import { productPlatformApi, isProductPlatformAuthError } from '../services/productPlatform'
 const project=useProjectStore(),session=useSessionStore(),workspace=useWorkspace(),route=useRoute(),router=useRouter()
 const {busy,connected,pendingImportId}=storeToRefs(session)
 const {assetId,activeAsset,productName,instructions,targetSeconds,toleranceSeconds,refreshAsr,analyzingAsset,
@@ -38,11 +38,21 @@ function submitAnalysis() {
 }
 const {chooseNewVideo}=useVideoImport()
 const controlJob=workspace.controlJob
-const productImages=ref<{id:string;url:string}[]>([]), selectedReferenceId=ref('')
+const productImages=ref<CoverReference[]>([]), selectedReferenceId=ref('')
+const uploadedImages=ref<CoverReference[]>([])
+const coverReferences=computed(()=>[
+  ...uploadedImages.value.map(image=>({...image, uploaded:true})),
+  ...productImages.value.map(image=>({...image, uploaded:false})),
+])
 const productImageStates=ref<Record<string,'loading'|'loaded'|'error'>>({})
-const platformProduct=ref<PlatformProduct|null>(null), platformScopeName=ref('')
+const matchedProductTitle=ref('')
+const coverImageKeyword=ref('')
 const coverPrompt=ref('')
-const coverError=ref(''), coverBusy=ref(false), searchingCoverProduct=ref(false), loadingCoverImages=ref(false)
+const coverError=ref(''), coverBusy=ref(false), loadingCoverImages=ref(false)
+const platformImageError=ref(''), platformLoginRequired=ref(false), uploadingCoverImage=ref(false)
+const loadingUploadedImages=ref(false), deletingCoverImage=ref('')
+const coverUploadInput=ref<HTMLInputElement|null>(null)
+let coverDialogVersion=0
 const coverDialog=ref<HTMLDialogElement|null>(null)
 const originalDialog=ref<HTMLDialogElement|null>(null)
 const originalState=ref<'loading'|'loaded'|'error'>('loading')
@@ -60,53 +70,129 @@ async function openOriginal() { originalState.value='loading'; originalJobId.val
 function closeOriginal() { originalDialog.value?.close(); originalJobId.value='' }
 function markCoverPreviewLoaded() { coverPreviewState.value='loaded' }
 function markCoverPreviewFailed() { coverPreviewState.value='error' }
-async function handleCoverPlatformError(error:unknown) {
-  if(isProductPlatformAuthError(error)) await router.push({path:'/settings',query:{cloudTab:'product-platform'}})
-}
-function setCoverPrompt() {
-  const original=productName.value.trim()
-  coverPrompt.value=`${coverPromptBase}\n商品名称：${original}`
+const canGenerateCover=computed(()=>Boolean(connected.value&&selectedPlan.value&&activeAsset.value&&coverPrompt.value.trim()&&
+  productImageStates.value[selectedReferenceId.value]==='loaded'&&
+  !planDirty.value&&!activeCoverJob.value&&!coverBusy.value&&!uploadingCoverImage.value&&!deletingCoverImage.value))
+function handleCoverPlatformError(error:unknown, message:string) {
+  platformImageError.value=error instanceof Error?error.message:message
+  platformLoginRequired.value=isProductPlatformAuthError(error)
 }
 async function openCoverDraftDialog() {
   const plan=selectedPlan.value
-  if(!plan||planDirty.value||!activeAsset.value||!connected.value||!productName.value.trim()) return
-  coverError.value=''; platformProduct.value=null; platformScopeName.value=''; productImages.value=[]; selectedReferenceId.value=''
-  setCoverPrompt()
-  await nextTick(); coverDialog.value?.showModal()
-  searchingCoverProduct.value=true
-  const productRequest=productPlatformApi.search(productName.value.trim(), {asset_id: assetId.value}).then(async result=>{
-    platformProduct.value=result.product; platformScopeName.value=result.scope_name
-    if(!result.product) {coverError.value='星斗未查询到匹配商品'; return}
-    await loadCoverImages()
-  }).catch(async error=>{coverError.value=error instanceof Error?error.message:'商品查询失败，请重试';await handleCoverPlatformError(error)}).finally(()=>{searchingCoverProduct.value=false})
-  await productRequest
+  const asset=activeAsset.value
+  if(!plan||planDirty.value||!asset||!connected.value||coverBusy.value) return
+  const version=++coverDialogVersion
+  coverError.value=''; matchedProductTitle.value=''; productImages.value=[]; selectedReferenceId.value=''
+  platformImageError.value=''; platformLoginRequired.value=false; loadingCoverImages.value=false
+  uploadedImages.value=[]; productImageStates.value={}; uploadingCoverImage.value=false
+  deletingCoverImage.value=''; loadingUploadedImages.value=true
+  const original=productName.value.trim()
+  coverImageKeyword.value=original
+  coverPrompt.value=original?`${coverPromptBase}\n商品名称：${original}`:coverPromptBase
+  await nextTick()
+  if(version!==coverDialogVersion) return
+  coverDialog.value?.showModal()
+  await Promise.all([loadUploadedCoverImages(asset.id,version),loadCoverImages(false)])
 }
-function closeCoverDraftDialog() { if(coverBusy.value) return; coverDialog.value?.close() }
+function closeCoverDraftDialog() {
+  if(coverBusy.value) return
+  coverDialogVersion++
+  coverDialog.value?.close()
+}
+watch([assetId,()=>selectedPlan.value?.id,()=>selectedPlan.value?.revision],()=>{
+  coverDialogVersion++
+  if(coverDialog.value?.open) coverDialog.value.close()
+},{flush:'sync'})
 async function loadCoverImages(refresh=false) {
-  const id=platformProduct.value?.id
-  if(!id) { coverError.value='商品缺少平台商品 ID'; return }
-  coverError.value=''; loadingCoverImages.value=true
+  const keyword=coverImageKeyword.value.trim()
+  const currentAsset=assetId.value
+  if(!keyword||!currentAsset||loadingCoverImages.value) return
+  const version=coverDialogVersion
+  platformImageError.value=''; platformLoginRequired.value=false; loadingCoverImages.value=true
+  matchedProductTitle.value=''
+  for(const image of productImages.value) delete productImageStates.value[image.id]
+  productImages.value=[]
+  selectAvailableCoverReference()
   try {
-    const result=await productPlatformApi.images(assetId.value,id,refresh)
+    const match=await productPlatformApi.search(keyword,{asset_id:currentAsset})
+    if(version!==coverDialogVersion) return
+    if(!match.product?.id) {platformImageError.value='平台未查询到可取图的商品';return}
+    const result=await productPlatformApi.images(currentAsset,match.product.id,refresh)
+    if(version!==coverDialogVersion) return
+    matchedProductTitle.value=match.product.title||''
     productImages.value=result.images
-    productImageStates.value=Object.fromEntries(result.images.map(image=>[image.id,'loading']))
-    if(!result.images.some(image=>image.id===selectedReferenceId.value)) selectedReferenceId.value=result.images[0]?.id||''
-    if(!result.images.length) coverError.value='该商品没有可用图片'
+    selectAvailableCoverReference()
+    if(!result.images.length) platformImageError.value='该商品没有可用图片'
   } catch(error) {
-    coverError.value=error instanceof Error?error.message:'获取商品图片失败，请重试'
-    await handleCoverPlatformError(error)
-  } finally { loadingCoverImages.value=false }
+    if(version===coverDialogVersion) handleCoverPlatformError(error,'获取商品图片失败，请重试')
+  } finally {
+    if(version===coverDialogVersion) loadingCoverImages.value=false
+  }
+}
+function selectAvailableCoverReference() {
+  const usable=coverReferences.value.filter(image=>productImageStates.value[image.id]!=='error')
+  if(!usable.some(image=>image.id===selectedReferenceId.value)) selectedReferenceId.value=usable[0]?.id||''
+}
+async function loadUploadedCoverImages(currentAsset:string,version:number) {
+  try {
+    const result=await projectsApi.uploadedCoverReferences(currentAsset)
+    if(version!==coverDialogVersion) return
+    uploadedImages.value=result.images
+    selectAvailableCoverReference()
+  } catch(error) {
+    if(version===coverDialogVersion) coverError.value=error instanceof Error?error.message:'无法读取已上传的图片'
+  } finally {
+    if(version===coverDialogVersion) loadingUploadedImages.value=false
+  }
+}
+async function uploadCoverImage(event:Event) {
+  const input=event.target as HTMLInputElement
+  const file=input.files?.[0]
+  input.value=''
+  if(!file||!assetId.value||uploadingCoverImage.value||loadingUploadedImages.value||deletingCoverImage.value||coverBusy.value) return
+  if(file.size>20*1024*1024) {coverError.value='参考图片不能超过 20 MB';return}
+  const version=coverDialogVersion
+  uploadingCoverImage.value=true
+  coverError.value=''
+  try {
+    const image=await projectsApi.uploadCoverReference(assetId.value,file)
+    if(version!==coverDialogVersion) return
+    if(!uploadedImages.value.some(item=>item.id===image.id)) uploadedImages.value.unshift(image)
+    selectedReferenceId.value=image.id
+  } catch(error) {
+    if(version===coverDialogVersion) coverError.value=error instanceof Error?error.message:'上传参考图失败，请重试'
+  } finally {
+    if(version===coverDialogVersion) uploadingCoverImage.value=false
+  }
+}
+async function deleteCoverImage(imageId:string) {
+  if(deletingCoverImage.value||coverBusy.value||uploadingCoverImage.value) return
+  const version=coverDialogVersion
+  deletingCoverImage.value=imageId
+  coverError.value=''
+  try {
+    await projectsApi.deleteCoverReference(assetId.value,imageId)
+    if(version!==coverDialogVersion) return
+    uploadedImages.value=uploadedImages.value.filter(image=>image.id!==imageId)
+    delete productImageStates.value[imageId]
+    selectAvailableCoverReference()
+  } catch(error) {
+    if(version===coverDialogVersion) coverError.value=error instanceof Error?error.message:'删除图片失败，请重试'
+  } finally {
+    if(version===coverDialogVersion) deletingCoverImage.value=''
+  }
 }
 function markProductImageLoaded(id:string) { productImageStates.value[id]='loaded' }
 function markProductImageFailed(id:string) {
   productImageStates.value[id]='error'
   if(selectedReferenceId.value===id) {
-    selectedReferenceId.value=productImages.value.find(image=>image.id!==id&&productImageStates.value[image.id]!=='error')?.id||''
+    selectAvailableCoverReference()
+    if(uploadedImages.value.some(image=>image.id===id)) coverError.value='上传的图片无法打开，请换一张参考图'
   }
 }
 async function generateCover() {
   const plan=selectedPlan.value
-  if(!plan||!activeAsset.value||!selectedReferenceId.value||planDirty.value||activeCoverJob.value||coverBusy.value) return
+  if(!plan||!activeAsset.value||!canGenerateCover.value) return
   coverBusy.value=true;coverError.value=''
   try {
     await projectsApi.generateCover(activeAsset.value.id,plan.id,plan.revision,selectedReferenceId.value,coverPrompt.value.trim())
@@ -232,7 +318,7 @@ function moveClipWithKey(index: number,event: KeyboardEvent) {
 }
 watch(assetId,id=>{stopSourcePlayback();mediaUrl.value=id ? `/api/v1/assets/${id}/media` : ''},{immediate:true})
 watch(()=>selectedPlan.value?.id,()=>finishClipDrag(false))
-onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
+onUnmounted(()=>{coverDialogVersion++;stopSourcePlayback();finishClipDrag(false)})
 </script>
 <template><template v-if="activeAsset?.id===route.params.id">
         <div class="workspace-project-bar"><button class="secondary" :disabled="busy" @click="workspace.goProjects()">← 返回视频项目</button><div class="workspace-project-name"><strong :title="activeAsset.name">{{ activeAsset.name }}</strong><small>{{ duration(activeAsset.duration_us) }} · {{ activeAsset.width }} × {{ activeAsset.height }}</small></div><button class="secondary" :disabled="busy||!connected||Boolean(pendingImportId)" @click="chooseNewVideo">{{ pendingImportId?'正在导入…':'新建视频项目' }}</button><button class="secondary" :disabled="busy" @click="saveProjectInfo">保存项目设置</button></div>
@@ -354,7 +440,7 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
                       <div class="clip-edit-row"><div class="clip-time-fields"><label :for="`clip-start-${clip.candidate_id}`" title="开始时间，单位：秒">开始<input :id="`clip-start-${clip.candidate_id}`" :value="clip.source_start_us/1e6" type="number" step="0.1" @change="clip.source_start_us=Math.round(Number(($event.target as HTMLInputElement).value)*1e6)"/></label><label :for="`clip-end-${clip.candidate_id}`" title="结束时间，单位：秒">结束<input :id="`clip-end-${clip.candidate_id}`" :value="clip.source_end_us/1e6" type="number" step="0.1" @change="clip.source_end_us=Math.round(Number(($event.target as HTMLInputElement).value)*1e6)"/></label></div><div class="roughcut-clip-actions"><button class="secondary" :disabled="index===0" :aria-label="`上移片段 ${index+1}`" title="上移" @click="moveClip(index,-1)">↑</button><button class="secondary" :disabled="index===selectedPlan.clips.length-1" :aria-label="`下移片段 ${index+1}`" title="下移" @click="moveClip(index,1)">↓</button><ConfirmPopover :title="`移除片段 ${index+1}？`" :message="clipRemoveMessage(index)" confirm-label="确定移除" :confirm-action="() => removeClip(index)" :disabled="busy || selectedPlan.clips.length===1" v-slot="{ open, expanded, popoverId }"><button class="secondary clip-remove" :disabled="busy || selectedPlan.clips.length===1" :aria-label="`移除片段 ${index+1}`" :aria-expanded="expanded" :aria-controls="popoverId" aria-haspopup="dialog" @click="open">移除</button></ConfirmPopover></div></div>
                     </article>
                   </div>
-                  <div class="roughcut-editor-footer"><p class="hint" :class="{'unsaved-hint':planDirty}">{{ planDirty?'有未保存的调整，保存后会重新生成预览。':'可调整切点、顺序，或移除不需要的片段。' }}</p><div class="roughcut-save-actions"><button class="secondary" :disabled="busy||!selectedPlan.clips.length" @click="savePlan">保存并重新预览</button><button class="secondary" :disabled="busy||planDirty||!selectedPlan.clips.length" @click="createJianyingDraft(selectedPlan)">生成剪映草稿</button><button class="primary" :disabled="busy||planDirty||!selectedPlan.clips.length||!connected||!productName.trim()" @click="openCoverDraftDialog">生成带封面剪映草稿</button></div></div>
+                  <div class="roughcut-editor-footer"><p class="hint" :class="{'unsaved-hint':planDirty}">{{ planDirty?'有未保存的调整，保存后会重新生成预览。':'可调整切点、顺序，或移除不需要的片段。' }}</p><div class="roughcut-save-actions"><button class="secondary" :disabled="busy||!selectedPlan.clips.length" @click="savePlan">保存并重新预览</button><button class="secondary" :disabled="busy||planDirty||!selectedPlan.clips.length" @click="createJianyingDraft(selectedPlan)">生成剪映草稿</button><button class="primary" :disabled="busy||planDirty||!selectedPlan.clips.length||!connected" @click="openCoverDraftDialog">生成带封面剪映草稿</button></div></div>
                 </template>
                 <div v-else class="empty editor-empty">填写商品资料和剪辑要求<br/>分析完成后，入选片段会显示在这里</div>
               </div>
@@ -368,32 +454,46 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
 <dialog ref="coverDialog" class="modal" aria-labelledby="cover-dialog-title" @cancel.prevent="closeCoverDraftDialog">
   <div class="modal-box cover-dialog-box">
     <h3 id="cover-dialog-title">生成带封面剪映草稿</h3>
-    <p class="hint">先选择商品参考图，再生成草稿列表封面。</p>
-    <div class="cover-dialog-product">
-      <strong>商品：{{ productName }}</strong>
-      <span v-if="platformProduct?.title">星斗匹配：{{ platformProduct.title }}</span>
-      <span v-if="platformScopeName" class="hint">{{ platformScopeName }}</span>
-    </div>
-    <div class="cover-dialog-image-heading">
-      <label>商品参考图</label>
-      <button v-if="platformProduct" type="button" class="btn btn-sm" :disabled="loadingCoverImages||Boolean(activeCoverJob)" @click="loadCoverImages(true)">
-        <span v-if="loadingCoverImages" class="loading loading-spinner loading-xs" aria-hidden="true"></span>重新获取
+    <form class="cover-image-search" @submit.prevent="loadCoverImages(true)">
+      <label for="cover-image-keyword" class="sr-only">用于获取图片的商品标题</label>
+      <input id="cover-image-keyword" v-model="coverImageKeyword" class="input input-sm w-full"
+        type="text" maxlength="200" placeholder="输入商品标题" :disabled="loadingCoverImages" />
+      <button type="submit" class="btn btn-sm" :disabled="!coverImageKeyword.trim()||loadingCoverImages||coverBusy">
+        <span v-if="loadingCoverImages" class="loading loading-spinner loading-xs" aria-hidden="true"></span>获取图片
       </button>
-    </div>
-    <div v-if="searchingCoverProduct||(loadingCoverImages&&!productImages.length)" class="cover-dialog-images" aria-label="商品参考图加载中" aria-busy="true">
+      <button type="button" class="btn btn-sm" :disabled="uploadingCoverImage||loadingUploadedImages||coverBusy||Boolean(deletingCoverImage)"
+        @click="coverUploadInput?.click()">
+        <span v-if="uploadingCoverImage" class="loading loading-spinner loading-xs" aria-hidden="true"></span>上传图片
+      </button>
+      <input ref="coverUploadInput" type="file" hidden
+        accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" @change="uploadCoverImage" />
+    </form>
+    <p v-if="matchedProductTitle" class="hint">匹配商品：{{ matchedProductTitle }}</p>
+    <h4 class="cover-dialog-image-heading">商品参考图</h4>
+    <div v-if="!coverReferences.length&&(loadingCoverImages||loadingUploadedImages)" class="cover-dialog-images" aria-label="商品参考图加载中" aria-busy="true">
       <div class="cover-reference-skeleton"><div class="skeleton"></div></div>
     </div>
-    <div v-else-if="productImages.length" class="cover-dialog-images" role="group" aria-label="选择商品参考图">
-      <button v-for="image in productImages" :key="image.id" type="button" class="cover-reference" :class="{'is-selected':selectedReferenceId===image.id}" :aria-pressed="selectedReferenceId===image.id" :disabled="productImageStates[image.id]==='error'" @click="selectedReferenceId=image.id">
-        <div v-if="productImageStates[image.id]!=='loaded'" class="cover-reference-skeleton" :class="{'has-error':productImageStates[image.id]==='error'}" aria-hidden="true">
-          <span v-if="productImageStates[image.id]==='error'">图片暂不可用</span>
-          <div v-else class="skeleton"></div>
-        </div>
-        <img :src="image.url" alt="商品参考图" loading="lazy" :class="{'is-loaded':productImageStates[image.id]==='loaded'}" @load="markProductImageLoaded(image.id)" @error="markProductImageFailed(image.id)" />
-        <span v-if="selectedReferenceId===image.id">已选择</span>
-      </button>
+    <div v-else-if="coverReferences.length" class="cover-dialog-images" role="group" aria-label="选择商品参考图">
+      <div v-for="image in coverReferences" :key="image.id" class="cover-reference-item">
+        <button type="button" class="cover-reference" :class="{'is-selected':selectedReferenceId===image.id}" :aria-pressed="selectedReferenceId===image.id" :disabled="productImageStates[image.id]==='error'" @click="selectedReferenceId=image.id">
+          <div v-if="productImageStates[image.id]!=='loaded'" class="cover-reference-skeleton" :class="{'has-error':productImageStates[image.id]==='error'}" aria-hidden="true">
+            <span v-if="productImageStates[image.id]==='error'">图片暂不可用</span>
+            <div v-else class="skeleton"></div>
+          </div>
+          <img :src="image.url" :alt="image.uploaded?'本地参考图':'平台商品参考图'" :loading="selectedReferenceId===image.id?'eager':'lazy'" :class="{'is-loaded':productImageStates[image.id]==='loaded'}" @load="markProductImageLoaded(image.id)" @error="markProductImageFailed(image.id)" />
+          <span v-if="selectedReferenceId===image.id">已选择</span>
+        </button>
+        <button v-if="image.uploaded" type="button" class="btn btn-circle btn-xs cover-reference-delete"
+          aria-label="删除上传的参考图" title="删除上传的参考图"
+          :disabled="Boolean(deletingCoverImage)||coverBusy||uploadingCoverImage" @click="deleteCoverImage(image.id)">×</button>
+      </div>
     </div>
-    <p v-else class="hint">{{ coverError||'暂未获取到商品图片，请检查星斗登录状态或商品名称。' }}</p>
+    <p v-if="platformImageError" class="hint">
+      {{ platformImageError }}
+      <button v-if="platformLoginRequired" type="button" class="btn btn-link btn-xs"
+        @click="router.push({path:'/settings',query:{cloudTab:'product-platform'}})">打开平台设置</button>
+    </p>
+    <p v-else-if="!coverReferences.length&&!loadingCoverImages&&!loadingUploadedImages" class="hint">获取商品图片，或上传 PNG、JPEG、WebP 图片（最大 20 MB）。</p>
     <div class="cover-dialog-workarea">
       <section class="cover-dialog-prompt">
         <label for="cover-prompt-dialog">生成要求</label>
@@ -418,7 +518,7 @@ onUnmounted(()=>{stopSourcePlayback();finishClipDrag(false)})
     <p v-if="coverError" class="error-text" role="alert">{{ coverError }}</p>
     <div class="modal-action">
       <button type="button" class="btn" :disabled="coverBusy" @click="closeCoverDraftDialog">关闭</button>
-      <button type="button" class="btn btn-primary" :disabled="!selectedPlan||!selectedReferenceId||planDirty||Boolean(activeCoverJob)||coverBusy" @click="generateCover">{{ activeCoverJob?'封面生成中…':coverBusy?'正在提交…':'生成封面' }}</button>
+      <button type="button" class="btn btn-primary" :disabled="!canGenerateCover" @click="generateCover">{{ activeCoverJob?'封面生成中…':coverBusy?'正在提交…':'生成封面' }}</button>
       <button v-if="selectedCoverJob" type="button" class="btn btn-success" :disabled="busy||planDirty" @click="createCoveredDraft">创建带封面草稿</button>
     </div>
   </div>

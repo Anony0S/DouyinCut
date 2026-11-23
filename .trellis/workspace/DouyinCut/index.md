@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 65
-- **Last Active**: 2026-11-22
+- **Total Sessions**: 67
+- **Last Active**: 2026-11-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1716 | Active |
+| `journal-1.md` | ~1764 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 67 | 2026-11-23 | 更正封面参考图搜索与本地图管理 | - | `-` |
+| 66 | 2026-11-23 | 剪映封面支持编辑标题和上传参考图 | - | `-` |
 | 65 | 2026-11-22 | 清理文件支持自定义天数 | - | `-` |
 | 64 | 2026-11-22 | 增加清理文件预览与引用文件选项 | - | `-` |
 | 63 | 2026-11-22 | 在 Windows 设置页接入抖音扫码登录 | - | `-` |

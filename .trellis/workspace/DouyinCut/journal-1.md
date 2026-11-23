@@ -1714,3 +1714,51 @@ Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md), [.t
 ### Status
 
 [OK] **Completed**
+
+
+## Session 66: 剪映封面支持编辑标题和上传参考图
+<!-- trellis-session: v=2 fp=f3e953c36f6db205 -->
+
+**Date**: 2026-11-23
+**Task**: 剪映封面支持编辑标题和上传参考图
+
+### Summary
+
+独立编辑封面商品标题，并允许上传本地参考图。平台查询失败时可继续上传和生图。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建及粗剪、平台、删除联动检查通过；28 项后端测试及 10 项子测试通过，覆盖本地图上传和封面任务排队。真实生图未调用。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 67: 更正封面参考图搜索与本地图管理
+<!-- trellis-session: v=2 fp=7aa2b15a53dca43f -->
+
+**Date**: 2026-11-23
+**Task**: 更正封面参考图搜索与本地图管理
+
+### Summary
+
+商品标题输入只用于平台图片查询，提示词沿用原规则。本地上传图可再次打开选用并单独删除，活动封面任务保护其参考图。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md), [.trellis/spec/project/api.md](../../spec/project/api.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建及粗剪、商品平台回归通过；37 项后端测试和 10 项子测试通过。
+
+### Status
+
+[OK] **Completed**

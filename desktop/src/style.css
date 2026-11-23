@@ -642,13 +642,14 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
 .cover-generate-row .hint { margin: 0; }
 .cover-dialog-box { width: min(760px, calc(100vw - 2rem)); max-width: 760px; }
 .cover-dialog-box h3 { margin: 0; font-size: 18px; }
-.cover-dialog-product { display: grid; gap: 3px; margin: 14px 0 10px; color: var(--text-secondary); font-size: 13px; }
-.cover-dialog-image-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; }
-.cover-dialog-image-heading label { margin: 0; font-size: 12px; }
+.cover-image-search { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; margin: 14px 0 8px; }
+.cover-dialog-image-heading { margin: 12px 0 8px; font-weight: 600; }
 .cover-dialog-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(86px, 1fr)); gap: 9px; max-height: 220px; overflow: auto; padding: 2px; }
 .cover-dialog-images[aria-busy="true"] { display: block; }
 .cover-dialog-images[aria-busy="true"] .cover-reference-skeleton { position: relative; inset: auto; width: 96px; aspect-ratio: 3 / 4; }
 .cover-dialog-images .cover-reference { position: relative; width: 100%; aspect-ratio: 3 / 4; }
+.cover-reference-item { position: relative; }
+.cover-reference-delete { position: absolute; top: 5px; right: 5px; }
 .cover-dialog-images .cover-reference:disabled { cursor: not-allowed; }
 .cover-dialog-images .cover-reference span { position: absolute; right: 3px; bottom: 3px; left: 3px; padding: 3px; border-radius: 4px; background: color-mix(in srgb, var(--color-primary) 85%, transparent); color: white; font-size: 10px; }
 .cover-reference-skeleton { position: absolute; inset: 2px; display: grid; place-items: center; overflow: hidden; border-radius: 4px; background: var(--surface-soft); }

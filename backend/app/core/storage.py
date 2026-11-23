@@ -229,12 +229,14 @@ class Store:
                 conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,?,?,?)",
                              (new_id("job"), kind, json.dumps(payload), state, now, now))
 
-    def enqueue(self, kind: str, payload: dict):
+    def enqueue(self, kind: str, payload: dict, *, required_file: Path | None = None):
         job_id, now = new_id("job"), time.time()
         with self.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute("SELECT 1 FROM runtime_state WHERE key=?", (self._SHUTDOWN_KEY,)).fetchone():
                 raise SessionStopping("桌面会话正在退出，不再接收新任务")
+            if required_file is not None and not required_file.is_file():
+                raise FileNotFoundError(required_file)
             conn.execute("INSERT INTO jobs(id,kind,payload,state,created,updated) VALUES(?,?,?,'queued',?,?)",
                          (job_id, kind, json.dumps(payload, ensure_ascii=False), now, now))
         return self.job(job_id)

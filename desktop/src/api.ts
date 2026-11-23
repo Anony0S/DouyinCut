@@ -48,11 +48,15 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await apiRequest(path, {
+  return apiJson<T>(path, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
+}
+
+export async function apiJson<T>(path: string, options: RequestInit): Promise<T> {
+  const response = await apiRequest(path, options)
   const data = await response.json()
   if (!response.ok) {
     const detail = data?.detail

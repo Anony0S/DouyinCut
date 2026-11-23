@@ -22,7 +22,10 @@
 | `POST /plans/{id}/exports` | 只接受 format=mp4，默认 mp4；当前界面不调用 |
 | `POST /plans/{id}/jianying-drafts` | body 包含 revision 和可选 cover_id；后台生成该已保存修订的剪映工程草稿。cover_id 必须属于同一视频项目、方案和修订，带封面时创建新的草稿目录并返回任务 |
 | `POST /product-platform/products/images` | body 包含 asset_id、product_id 和可选 refresh（默认 false）。按项目来源直播间当前绑定选择平台；手动导入的视频沿用星斗。星斗 product_id 对应详情 `xdBizId`，缓存按项目、平台及商品 ID 隔离。达多多返回 409 / REFERENCE_IMAGES_UNSUPPORTED。返回本地图片 ID、接口地址及 cached 状态，不持久化带签名的原始图片 URL |
-| `GET /assets/{asset_id}/cover-references/{image_id}` | 读取当前项目已下载的商品参考图 |
+| `POST /assets/{asset_id}/cover-references` | 以原始文件内容上传当前项目的本地参考图，支持 PNG、JPEG、WebP，大小上限 20 MiB。返回可用于封面任务的 `id` 和本机预览 `url`。 |
+| `GET /assets/{asset_id}/cover-references` | 返回当前项目本地上传的参考图列表 `images`。 |
+| `GET /assets/{asset_id}/cover-references/{image_id}` | 读取当前项目已获取或上传的参考图 |
+| `DELETE /assets/{asset_id}/cover-references/{image_id}` | 删除当前项目本地上传的参考图。图片被活动封面任务引用时返回 409。 |
 | `POST /assets/{asset_id}/covers` | body 包含 plan_id、revision、reference_id、prompt；校验当前已保存方案修订后排队 `cover` 任务，使用独立 OpenAI Images 兼容服务生成草稿列表封面 |
 | `GET /assets/{asset_id}/covers/{cover_id}/media` | 读取成功封面任务的本地图片结果；封面与方案修订及视频项目绑定 |
 | `GET /assets/{asset_id}/covers/{cover_id}/original` | 读取同项目成功封面任务的生图服务原图；不存在或已删除时返回 410 |

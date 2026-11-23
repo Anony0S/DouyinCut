@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,7 +17,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import Field
 
 from .core.config import Settings
-from .core.logs import LogLibrary, configure_logging
+from .core.logs import ACTIVE_JOB_STATES, LogLibrary, configure_logging
 from .core.credentials import read_secret, secret_preview, storage_status, write_secret
 from .cleanup import DEFAULT_RETENTION_DAYS, CleanupPreviewChanged, cleanup_unused_files
 from .core.domain import Asset, Candidate, Model, Plan, Product, Transcript
@@ -38,6 +39,10 @@ from .product_platform.client import ProductPlatformError
 from .product_platform.daduoduo import DaduoduoCatalog
 from .product_platform.schemas import (AddToShowcaseRequest, LoginRequest, MobileRequest,
                                        RoomPlatformRequest, ScopeRequest, SearchRequest)
+
+
+_UPLOADED_REFERENCE_ID = re.compile(r"coverref_[0-9a-f]{64}")
+_REFERENCE_EXTENSIONS = {".png", ".jpg", ".webp"}
 
 
 class ExportRequest(Model):
@@ -337,6 +342,93 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                                         encoding="utf-8")
         os.replace(temporary_cache_path, cache_path)
         return {"images": result, "cached": False}
+
+    def local_cover_reference_root(asset_id: str) -> Path:
+        if not asset_id.startswith("asset_") or not asset_id[6:].isalnum():
+            raise HTTPException(422, "项目标识无效")
+        references = settings.data_dir.resolve() / "covers" / asset_id / "references"
+        if references.resolve() != references:
+            raise HTTPException(409, "项目参考图目录不可用")
+        return references
+
+    def local_cover_references(references: Path):
+        if not references.is_dir():
+            return
+        for path in references.iterdir():
+            if (path.suffix in _REFERENCE_EXTENSIONS and _UPLOADED_REFERENCE_ID.fullmatch(path.stem)
+                    and not path.is_symlink() and path.is_file()):
+                yield path
+
+    @app.get("/api/v1/assets/{asset_id}/cover-references")
+    def list_uploaded_cover_references(asset_id: str):
+        references = local_cover_reference_root(asset_id)
+        store.get("asset", asset_id)
+        return {"images": [
+            {"id": path.stem, "url": f"/api/v1/assets/{asset_id}/cover-references/{path.stem}"}
+            for path in sorted(local_cover_references(references))
+        ]}
+
+    @app.delete("/api/v1/assets/{asset_id}/cover-references/{image_id}")
+    def delete_uploaded_cover_reference(asset_id: str, image_id: str):
+        if not _UPLOADED_REFERENCE_ID.fullmatch(image_id):
+            raise HTTPException(404, "找不到本地上传的参考图")
+        with store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            references = local_cover_reference_root(asset_id)
+            paths = [path for path in local_cover_references(references) if path.stem == image_id]
+            if not paths:
+                return {"deleted": True}
+            states = ", ".join("?" for _ in ACTIVE_JOB_STATES)
+            if conn.execute(
+                f"SELECT 1 FROM jobs WHERE kind='cover' AND state IN ({states}) "
+                "AND json_extract(payload,'$.reference_path')=? LIMIT 1",
+                (*ACTIVE_JOB_STATES, str(paths[0])),
+            ).fetchone():
+                raise HTTPException(409, "参考图正在被封面任务使用，请在任务结束后删除")
+            try:
+                paths[0].unlink(missing_ok=True)
+            except OSError:
+                raise HTTPException(409, "无法删除参考图，请检查文件是否被占用") from None
+        return {"deleted": True}
+
+    @app.post("/api/v1/assets/{asset_id}/cover-references", status_code=201)
+    async def upload_cover_reference(asset_id: str, request: Request):
+        from .ai.image_generation import MAX_IMAGE_BYTES, image_extension
+
+        if not asset_id.startswith("asset_") or not asset_id[6:].isalnum():
+            raise HTTPException(422, "项目标识无效")
+        await asyncio.to_thread(store.get, "asset", asset_id)
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_IMAGE_BYTES:
+                raise HTTPException(413, "参考图片不能超过 20 MB")
+            data.extend(chunk)
+        extension = image_extension(data)
+        if extension is None:
+            raise HTTPException(422, "请选择 PNG、JPEG 或 WebP 图片")
+
+        image_id = f"coverref_{hashlib.sha256(data).hexdigest()}"
+
+        def save_reference():
+            with store.connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if not conn.execute("SELECT 1 FROM objects WHERE kind='asset' AND id=?",
+                                    (asset_id,)).fetchone():
+                    raise KeyError(asset_id)
+                references = local_cover_reference_root(asset_id)
+                references.mkdir(parents=True, exist_ok=True)
+                path = references / f"{image_id}{extension}"
+                if path.is_symlink() or path.is_junction():
+                    raise HTTPException(409, "项目参考图路径不可用")
+                temporary = references / f".{image_id}-{secrets.token_hex(8)}.partial"
+                try:
+                    temporary.write_bytes(data)
+                    os.replace(temporary, path)
+                finally:
+                    temporary.unlink(missing_ok=True)
+
+        await asyncio.to_thread(save_reference)
+        return {"id": image_id, "url": f"/api/v1/assets/{asset_id}/cover-references/{image_id}"}
 
     @app.get("/api/v1/assets/{asset_id}/cover-references/{image_id}")
     def product_platform_product_image(asset_id: str, image_id: str):
@@ -752,12 +844,16 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         reference_root = (settings.data_dir / "covers" / asset_id / "references").resolve()
         reference_matches = [path for path in reference_root.glob(f"{reference_id}.*") if path.is_file()]
         if len(reference_matches) != 1 or not reference_matches[0].resolve().is_relative_to(reference_root):
-            raise HTTPException(410, "参考图片已移动或删除，请重新获取商品图片")
-        return store.enqueue("cover", {
-            "asset_id": asset.id, "plan_id": plan.id, "revision": plan.revision,
-            "reference_path": str(reference_matches[0].resolve()), "prompt": body.prompt.strip(),
-            "config": config.model_dump(),
-        })
+            raise HTTPException(410, "参考图片已移动或删除，请重新获取或上传参考图")
+        reference_path = reference_matches[0].resolve()
+        try:
+            return store.enqueue("cover", {
+                "asset_id": asset.id, "plan_id": plan.id, "revision": plan.revision,
+                "reference_path": str(reference_path), "prompt": body.prompt.strip(),
+                "config": config.model_dump(),
+            }, required_file=reference_path)
+        except FileNotFoundError:
+            raise HTTPException(410, "参考图片已移动或删除，请重新获取或上传参考图") from None
 
     @app.get("/api/v1/exports")
     def exports():

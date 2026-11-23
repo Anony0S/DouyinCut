@@ -16,6 +16,16 @@ MAX_IMAGE_BYTES = 20 * 1024 * 1024
 PRODUCT_IMAGE_HOSTS = {"p3-aio.ecombdimg.com", "p9-aio.ecombdimg.com"}
 
 
+def image_extension(data: bytes | bytearray) -> str | None:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
 def fetch_product_image(url: str) -> tuple[bytes, str]:
     parsed = urlparse(url)
     if (parsed.scheme != "https" or parsed.hostname not in PRODUCT_IMAGE_HOSTS
@@ -107,7 +117,6 @@ def request_image(config: dict, api_key: str, source_path: str, prompt: str) -> 
         content_type = result_response.headers.get("content-type", "").split(";", 1)[0].lower()
     if not result or len(result) > MAX_IMAGE_BYTES or not content_type.startswith("image/"):
         raise ProviderError("封面生图服务返回的图片格式无效或文件过大")
-    if not (result.startswith(b"\x89PNG\r\n\x1a\n") or result.startswith(b"\xff\xd8\xff")
-            or (len(result) >= 12 and result[:4] == b"RIFF" and result[8:12] == b"WEBP")):
+    if image_extension(result) is None:
         raise ProviderError("封面生图服务返回内容不是有效的 PNG、JPEG 或 WebP 图片")
     return result, content_type

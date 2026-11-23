@@ -14,6 +14,10 @@ let bindings, uploaded, analyzeBody, savedDraft, savedDefaultInstructions
 let failDefaultSave=false
 let releaseOtherProject
 const requests=[]
+const coverSearches=[]
+let coverRequest
+let localCoverReferences=[{id:'local',url:'/reference-local.png'}]
+const networkCoverReference={id:'network',url:'/reference-network.png'}
 const asset = { id: 'video', name: '奶黄千层.mp4', path: 'local.mp4', duration_us: 250e6, width: 160, height: 120 }
 const lists = { '/assets': [], '/products': [], '/candidates': [], '/plans': [], '/jobs': [], '/exports': [] }
 const config = { region: 'cn', base_url: 'https://service.example/v1', planner_model: 'text', asr_model: 'audio',
@@ -22,6 +26,20 @@ const config = { region: 'cn', base_url: 'https://service.example/v1', planner_m
 const api = async (url, method = 'GET', body) => {
   requests.push(url)
   if (url === '/auth') return {}
+  if (url === '/product-platform/products/search') {
+    coverSearches.push(body.keyword)
+    return {product:{id:body.keyword,title:body.keyword}}
+  }
+  if (url === '/product-platform/products/images') return {images:[networkCoverReference]}
+  if (url === '/assets/video/cover-references') return {images:copy(localCoverReferences)}
+  if (url === '/assets/video/cover-references/local' && method === 'DELETE') {
+    localCoverReferences=[]
+    return {deleted:true}
+  }
+  if (url === '/assets/video/covers') {
+    coverRequest=copy(body)
+    return {id:'cover',state:'queued'}
+  }
   if (url === '/jobs-summary') return {active:0}
   if (url.startsWith('/projects?')) return {items:lists['/assets'].map(item=>({...item,product_name:savedDraft?.product_name||'',status:'pending',updated_at:1,plan_id:null,output_duration_us:null})),total:lists['/assets'].length,page:1,page_size:20,pages:1}
   if (url.startsWith('/jobs/') && !url.endsWith('/retry') && !url.endsWith('/transcript')) return copy(lists['/jobs'].find(task=>url===`/jobs/${task.id}`))
@@ -237,7 +255,10 @@ async function verifyEditingControls() {
     if(name.endsWith('.vue')) return {__esModule:true,default:empty}
     return require(name)
   },componentModule,componentModule.exports)
-  const element=type=>({type,props:{},children:[],parent:null,text:''})
+  const element=type=>({
+    type,props:{},children:[],parent:null,text:'',open:false,
+    showModal(){this.open=true},close(){this.open=false},
+  })
   const native=vue.createRenderer({
     createElement:element,createText:text=>({...element('text'),text}),createComment:()=>element('comment'),
     setText(el,text){el.text=text},setElementText(el,text){el.text=text;el.children=[]},
@@ -301,6 +322,33 @@ async function verifyEditingControls() {
     assert.equal(session.error,'默认要求保存失败')
     assert.equal(requests.filter(url=>url.endsWith('/analyze')).length,paidBefore,'Saving requirements never creates paid analysis')
     console.log('Editing controls passed: removed info, real template save button, slider endpoints, isolated persistence and failed-save recovery.')
+    const button=label=>all(root,el=>el.type==='button'&&text(el).trim()===label)[0]
+    await button('生成带封面剪映草稿').props.onClick()
+    await settle()
+    const search=all(root,el=>el.props.id==='cover-image-keyword')[0]
+    const prompt=all(root,el=>el.props.id==='cover-prompt-dialog')[0]
+    const projectName=project.productName
+    prompt.props['onUpdate:modelValue']('原有生成要求')
+    search.props['onUpdate:modelValue']('换一个图片搜索标题')
+    const searchForm=all(root,el=>el.type==='form'&&el.props.class==='cover-image-search')[0]
+    await searchForm.props.onSubmit({preventDefault(){}})
+    await settle()
+    assert.equal(coverSearches.at(-1),'换一个图片搜索标题')
+    assert.deepEqual(all(searchForm,el=>el.type==='button').map(el=>text(el).trim()),['获取图片','上传图片'])
+    const removeReference=()=>all(root,el=>el.props['aria-label']==='删除上传的参考图')
+    assert.equal(removeReference().length,1)
+    await removeReference()[0].props.onClick()
+    await settle()
+    assert.equal(removeReference().length,0)
+    const networkImage=all(root,el=>el.props.src===networkCoverReference.url)[0]
+    networkImage.props.onLoad()
+    await settle()
+    assert.equal(button('生成封面').props.disabled,false)
+    await button('生成封面').props.onClick()
+    assert.equal(coverRequest.reference_id,networkCoverReference.id)
+    assert.equal(coverRequest.prompt,'原有生成要求')
+    assert.equal(project.productName,projectName)
+    console.log('Cover dialog passed: independent search title, action order, local-only deletion and prompt submission.')
   } finally {failDefaultSave=false;app.unmount()}
 }
 verify().then(verifyEditingControls).catch(error => { console.error(error); process.exitCode = 1 })

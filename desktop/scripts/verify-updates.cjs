@@ -144,7 +144,7 @@ async function verifyExitCoordination() {
   assert.deepEqual(tooltipLabels(), [])
   sidebarToggle().props.onClick(); await settle()
   assert.equal(sidebarToggle().props['aria-expanded'], false)
-  assert.deepEqual(tooltipLabels(), ['直播监控', '素材与粗剪', '视频项目', '后台任务', '外观', '云端设置', '本地设置', '运行日志'])
+  assert.deepEqual(tooltipLabels(), ['直播监控', '素材与粗剪', '视频项目', '后台任务', '云端设置', '本地设置', '运行日志'])
   const workspaceLink = all(mounted.root, el => el.props['aria-label'] === '素材与粗剪')[0]
   assert.equal(workspaceLink.props.disabled, true)
   sidebarToggle().props.onClick(); await settle()

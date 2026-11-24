@@ -8,6 +8,7 @@ import { useSessionStore } from "../stores/session";
 import SecretInput from "../components/SecretInput.vue";
 import ProductPlatformLoginCard from "../components/product/ProductPlatformLoginCard.vue";
 import DaduoduoSettingsCard from "../components/product/DaduoduoSettingsCard.vue";
+import XingdongliSettingsCard from "../components/product/XingdongliSettingsCard.vue";
 import { registerExitGuard } from "../exit-guards";
 const session = useSessionStore();
 const { busy, connected, error } = storeToRefs(session);
@@ -20,15 +21,20 @@ const cloudSections = [
   { id: "product-platform", label: "平台" },
 ] as const;
 type CloudSectionId = (typeof cloudSections)[number]["id"];
+const productPlatforms = [
+  { id: "xingdou", label: "星斗" },
+  { id: "daduoduo", label: "达多多" },
+  { id: "xingdongli", label: "星动力" },
+] as const;
 const activeCloudSection = ref<CloudSectionId>("text");
-const activeProductPlatform = ref<"xingdou" | "daduoduo">("xingdou");
+const activeProductPlatform = ref<(typeof productPlatforms)[number]["id"]>("xingdou");
 const route = useRoute();
 watch(() => route.query.cloudTab, (value) => {
   const section = cloudSections.find(section => section.id === value);
   if (section) activeCloudSection.value = section.id;
 }, { immediate: true });
 watch(() => route.query.platform, (value) => {
-  activeProductPlatform.value = value === "daduoduo" ? "daduoduo" : "xingdou";
+  activeProductPlatform.value = value === "daduoduo" || value === "xingdongli" ? value : "xingdou";
 }, { immediate: true });
 function onCloudTabKeydown(event: KeyboardEvent, index: number) {
   const nextIndex =
@@ -609,52 +615,55 @@ onUnmounted(() => {
           </h2>
           <p>{{ desktopDouyinLogin ? "用手机抖音扫描官方页面上的二维码，登录状态会自动保存。" : "请在 Windows 桌面应用中扫码，也可手动填写 Cookie。" }}</p>
         </div>
-        <div v-if="desktopDouyinLogin">
-          <button type="button" class="btn btn-primary" :disabled="busy || !connected || scanningDouyin" @click="openDouyinScan">
-            <span v-if="scanningDouyin" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-            {{ scanningDouyin ? "等待扫码…" : secrets.douyin_cookie ? "重新扫码登录" : "扫码登录" }}
-          </button>
-          <p v-if="scanningDouyin || douyinScanMessage" class="hint mt-2" role="status">
+        <form class="secret-field" @submit.prevent="saveDouyinCookie">
+          <label for="douyin-cookie">抖音登录 Cookie</label>
+          <div class="secret-field-controls flex-col items-stretch! sm:flex-row sm:items-center!">
+            <SecretInput
+              id="douyin-cookie"
+              v-model="douyinCookie"
+              :saved="Boolean(secrets.douyin_cookie)"
+              secret-name="douyin_cookie"
+              :preview="secretPreviews.douyin_cookie || ''"
+              :disabled="busy || scanningDouyin"
+              placeholder="粘贴 Cookie 请求头内容" />
+            <div class="flex shrink-0 flex-wrap gap-2">
+              <button type="submit" class="btn" :disabled="busy || scanningDouyin || !connected || !douyinCookie.trim()">
+                保存 Cookie
+              </button>
+              <button
+                v-if="desktopDouyinLogin"
+                type="button"
+                class="btn btn-primary"
+                :disabled="busy || !connected || scanningDouyin"
+                @click="openDouyinScan">
+                <span v-if="scanningDouyin" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+                {{ scanningDouyin ? "等待扫码…" : secrets.douyin_cookie ? "重新扫码登录" : "扫码登录" }}
+              </button>
+            </div>
+          </div>
+          <p v-if="desktopDouyinLogin && (scanningDouyin || douyinScanMessage)" class="hint mt-2" role="status">
             {{ scanningDouyin ? "请在抖音官网窗口扫码，关闭该窗口可取消。" : douyinScanMessage }}
           </p>
-        </div>
-        <details class="collapse collapse-arrow rounded-box border border-base-300" :open="!desktopDouyinLogin || undefined">
-          <summary class="collapse-title font-medium">手动填写 Cookie</summary>
-          <div class="collapse-content">
-            <form class="secret-field" @submit.prevent="saveDouyinCookie">
-              <label for="douyin-cookie">抖音登录 Cookie</label>
-              <div class="secret-field-controls">
-                <SecretInput
-                  id="douyin-cookie"
-                  v-model="douyinCookie"
-                  :saved="Boolean(secrets.douyin_cookie)"
-                  secret-name="douyin_cookie"
-                  :preview="secretPreviews.douyin_cookie || ''"
-                  :disabled="busy || scanningDouyin"
-                  placeholder="粘贴 Cookie 请求头内容" />
-                <button class="btn" :disabled="busy || scanningDouyin || !connected || !douyinCookie.trim()">
-                  保存 Cookie
-                </button>
-              </div>
-            </form>
-          </div>
-        </details>
+        </form>
       </section>
       <section
         v-if="activeCloudSection === 'product-platform'"
         id="settings-panel-product-platform"
         role="tabpanel"
-        aria-labelledby="settings-tab-product-platform"
-        class="grid items-start gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
-        <nav class="flex flex-wrap gap-2 sm:grid" aria-label="商品平台">
-          <button type="button" class="btn btn-sm justify-start" :class="{ 'btn-active': activeProductPlatform === 'xingdou' }"
-            :aria-pressed="activeProductPlatform === 'xingdou'" @click="activeProductPlatform = 'xingdou'">星斗平台</button>
-          <button type="button" class="btn btn-sm justify-start" :class="{ 'btn-active': activeProductPlatform === 'daduoduo' }"
-            :aria-pressed="activeProductPlatform === 'daduoduo'" @click="activeProductPlatform = 'daduoduo'">达多多</button>
-        </nav>
+        aria-labelledby="settings-tab-product-platform">
         <div class="card card-border bg-base-100 min-w-0">
+          <div class="border-b border-base-300 px-5 py-4 sm:px-7">
+            <nav class="grid w-full max-w-sm grid-cols-3 gap-1 rounded-field bg-base-200 p-1" aria-label="商品平台">
+              <button v-for="platform in productPlatforms" :key="platform.id" type="button"
+                class="btn btn-sm min-w-0 px-2"
+                :class="activeProductPlatform === platform.id ? 'btn-active bg-base-100 text-primary' : 'btn-ghost text-base-content/70'"
+                :aria-pressed="activeProductPlatform === platform.id"
+                @click="activeProductPlatform = platform.id">{{ platform.label }}</button>
+            </nav>
+          </div>
           <ProductPlatformLoginCard v-if="activeProductPlatform === 'xingdou'" />
-          <DaduoduoSettingsCard v-else />
+          <DaduoduoSettingsCard v-else-if="activeProductPlatform === 'daduoduo'" />
+          <XingdongliSettingsCard v-else />
         </div>
       </section>
     </div>

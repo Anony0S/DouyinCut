@@ -16,15 +16,30 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="card-body">
-    <h2 class="card-title">达多多</h2>
-    <p class="text-sm text-base-content/70">打开直播间的齿轮菜单，点击「绑定平台」，选择达多多并填写该直播间的 ipId。</p>
-    <RouterLink class="btn btn-sm self-start" to="/live-monitoring">前往直播监控</RouterLink>
-    <ul v-if="settings?.rooms.length" class="mt-3 grid gap-2 border-t border-base-300 pt-3 text-sm">
-      <li v-for="room in settings.rooms" :key="room.id">
-        {{ room.name }} · {{ room.synced_at ? `${room.count} 条 · ${new Date(room.synced_at * 1000).toLocaleString()}` : '尚未同步' }}
-      </li>
-    </ul>
-    <p v-if="error" class="text-sm text-error" role="alert">{{ error }}</p>
+  <div class="card-body w-full max-w-4xl gap-5 p-5 sm:p-7">
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <div>
+        <h2 class="text-xl! font-semibold">达多多</h2>
+        <p class="mt-1 text-sm text-base-content/70">在直播间的「绑定平台」中填写 ipId。</p>
+      </div>
+      <RouterLink class="btn btn-sm" to="/live-monitoring">前往直播监控</RouterLink>
+    </div>
+    <div v-if="error" class="alert alert-soft alert-error text-sm" role="alert">{{ error }}</div>
+    <p v-else-if="!settings" class="text-sm text-base-content/70" role="status">正在读取商品目录…</p>
+    <div v-else-if="settings.rooms.length" class="overflow-x-auto rounded-box border border-base-300">
+      <table class="table table-sm">
+        <thead class="bg-base-200">
+          <tr><th scope="col">直播间</th><th scope="col">商品数</th><th scope="col">最近同步</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="room in settings.rooms" :key="room.id">
+            <th scope="row" class="font-medium">{{ room.name }}</th>
+            <td>{{ room.synced_at ? room.count : '—' }}</td>
+            <td class="whitespace-nowrap">{{ room.synced_at ? new Date(room.synced_at * 1000).toLocaleString() : '尚未同步' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p v-else class="rounded-box bg-base-200 p-4 text-sm text-base-content/70">暂无直播间绑定达多多。</p>
   </div>
 </template>

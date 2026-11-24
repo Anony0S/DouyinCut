@@ -1,7 +1,8 @@
 import json
+import re
 from unicodedata import category
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import ConfigDict, Field, ValidationError, model_validator
 
 from ..core.domain import Candidate, Model, Transcript
 from .providers import (ProviderError, interruptible_network_call, aggregate_transcript, cloud_json, model_api_key,
@@ -14,10 +15,20 @@ MAX_CLIP_DURATION_US = 10_000_000
 PLANNER_MAX_TOKENS = 16_000
 _MAX_DURATION_CORRECTIONS = 2
 _FILLER_CHARACTERS = frozenset("嗯啊呃唔哦噢")
+_JSON_FENCE = re.compile(r"^[ \t]*`{3}(?:json)?[ \t]*\r?\n(.*?)^[ \t]*`{3}[ \t]*(?=\r?$)",
+                         re.IGNORECASE | re.MULTILINE | re.DOTALL)
+_OUTPUT_FORMAT = (
+    '回复只包含一个 JSON 对象，例如 {"clips":[{"start_ms":600,"end_ms":3834}]}。'
+    "每项只包含整数 start_ms 和 end_ms。不要输出分析、理由、额外字段或 Markdown 围栏。"
+)
 
 
 class _SelectionDurationError(ValueError):
     """A parsed selection can be sent back to the planner to correct its duration."""
+
+
+class _SelectionFormatError(ValueError):
+    """The reply does not identify a single usable JSON document."""
 
 
 class ShortFillerFilter(Model):
@@ -41,9 +52,11 @@ class RoughcutRequest(Model):
 
 
 class TimeClip(Model):
+    # Only timestamps carry meaning. Discard unsolicited metadata on a clip.
+    model_config = ConfigDict(extra="ignore")
+
     start_ms: int = Field(ge=0)
     end_ms: int = Field(gt=0)
-    reason: str = Field(min_length=1, max_length=2000)
 
     @model_validator(mode="after")
     def valid_interval(self):
@@ -54,6 +67,23 @@ class TimeClip(Model):
 
 class TimeSelection(Model):
     clips: list[TimeClip] = Field(min_length=1, max_length=100)
+
+
+def _parse_planner_selection(content: str) -> TimeSelection:
+    try:
+        return TimeSelection.model_validate_json(content)
+    except ValidationError as exc:
+        if exc.errors()[0]["type"] != "json_invalid":
+            raise
+    blocks = _JSON_FENCE.findall(content)
+    if len(blocks) != 1:
+        raise _SelectionFormatError("回复中找不到唯一的选片 JSON，请检查模型返回。")
+    try:
+        return TimeSelection.model_validate_json(blocks[0])
+    except ValidationError as exc:
+        if exc.errors()[0]["type"] != "json_invalid":
+            raise
+        raise _SelectionFormatError("回复中的选片 JSON 不完整或语法有误。") from None
 
 
 def validate_transcripts(transcripts, asset):
@@ -100,8 +130,7 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
         "transcript 按源视频时间排列仅供阅读上下文，不是成片顺序；不要默认按 start_ms 升序排列。"
         "clips 数组必须按最终拼接顺序返回，源视频后面的口播也可以放在成片开头；所有区间须在视频范围内。"
         "优先上身 / 版型 / 面料 / 穿着感受口播，用户要求优先。按给定目标时长选择，控制总时长。"
-        "返回严格 JSON：{\"clips\":[{\"start_ms\":600,\"end_ms\":3834,\"reason\":\"保留理由\"}]}，"
-        "reason 简洁，第一项说明适合作为开头的理由；没有可用内容时 clips 为空。\n"
+        "没有可用内容时返回空的 clips 数组。" + _OUTPUT_FORMAT + "\n"
         + json.dumps({"product_name": request.product_name,
                       "instructions": instructions, "target_duration_ms": request.target_duration_us // 1000,
                       "duration_tolerance_ms": request.duration_tolerance_us // 1000,
@@ -138,9 +167,7 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
             if not raw:
                 raise ProviderError("剪辑决策模型返回了空内容，未给出时间区间 JSON",
                                     parsed_response_details(response, config.chat_url, config.planner_model, key))
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-            selection = TimeSelection.model_validate_json(raw)
+            selection = _parse_planner_selection(raw)
             selection = _split_long_intervals(selection, transcripts)
             validate_selection_duration(selection, request.target_duration_us, request.duration_tolerance_us)
             candidates_from_intervals(selection, transcripts, "validation-product")
@@ -160,7 +187,7 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
                 "单段过长时仅在原转写句子边界拆分，并排除冗余内容。"
                 "继续遵守原商品、用户要求、句子边界、不重叠和不重复约束。"
                 "精简后重新确认最适合开头的口播放在第一项，按成片叙事顺序返回，不要默认按源时间排序。"
-                "重新逐项求和核对上限，返回完整的 clips JSON，不要只返回修改项或解释。\n"
+                "重新逐项求和核对上限，返回全部入选区间。" + _OUTPUT_FORMAT + "\n"
                 + json.dumps({"actual_total_duration_ms": total_ms,
                               "target_duration_ms": request.target_duration_us // 1000,
                               "max_total_duration_ms": limit_ms,
@@ -168,8 +195,11 @@ def select_intervals(transcripts: list[Transcript], request: RoughcutRequest, co
                               "longest_clip_duration_ms": max(durations_ms),
                               "max_clip_duration_ms": MAX_CLIP_DURATION_US // 1000}, ensure_ascii=False)
             )
-            messages = [*messages, {"role": "assistant", "content": raw},
+            messages = [*messages, {"role": "assistant", "content": selection.model_dump_json()},
                         {"role": "user", "content": correction}]
+        except _SelectionFormatError as exc:
+            raise ProviderError(f"剪辑决策模型返回格式无效：{exc}",
+                                parsed_response_details(response, config.chat_url, config.planner_model, key)) from None
         except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
             raise ProviderError("剪辑决策时间区间无效或没有符合要求的片段：" + _error_summary(exc),
                                 parsed_response_details(response, config.chat_url, config.planner_model, key)) from None
@@ -249,7 +279,7 @@ def candidates_from_intervals(selection: TimeSelection, transcripts, product_id)
         if end - start > MAX_CLIP_DURATION_US:
             raise ValueError("单个连续片段最长 10 秒，请拆分后再选择")
         candidates.append(Candidate(product_id=product_id, source_asset_id=sentences[0].source_asset_id,
-                                    start_us=start, end_us=end, reason=clip.reason,
+                                    start_us=start, end_us=end,
                                     evidence="\n".join(t.text for t in sentences)[:4000]))
     return candidates
 

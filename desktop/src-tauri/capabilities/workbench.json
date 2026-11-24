@@ -12,6 +12,7 @@
     "allow-window-preferences",
     "allow-appearance-preferences",
     "allow-douyin-login",
+    "allow-pick-source-video",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

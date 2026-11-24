@@ -41,20 +41,22 @@ class ApiTests(unittest.TestCase):
         for path in (output, video):
             os.utime(path, (old, old))
         self.app.state.store.put('export', {'id': output.name, 'path': str(output)})
+        with self.app.state.store.connection() as conn:
+            conn.execute("UPDATE objects SET created=? WHERE id=?", (old, output.name))
 
         self.assertEqual(self.client.get(url).status_code, 401)
         self.assertEqual(self.client.post(url, headers=self.headers).status_code, 422)
         default = self.client.get(url, headers=self.headers).json()
         self.assertEqual(default['file_count'], 0)
-        params = {'include_referenced': 'true'}
+        params = {'clear_expired_data': 'true'}
         self.assertEqual(self.client.get(url, headers=self.headers, params=params).json()['file_count'], 0)
         for days in (0, -1, 1.5):
             self.assertEqual(self.client.get(url, headers=self.headers,
                              params={**params, 'retention_days': days}).status_code, 422)
         preview = self.client.get(url, headers=self.headers, params={**params, 'retention_days': 3}).json()
-        self.assertEqual((preview['file_count'], preview['estimated_bytes']), (1, 7))
+        self.assertEqual((preview['file_count'], preview['record_count'], preview['estimated_bytes']), (1, 1, 7))
         self.assertTrue(video.exists())
-        body = {'include_referenced': True, 'retention_days': 3, 'preview_id': default['preview_id']}
+        body = {'clear_expired_data': True, 'retention_days': 3, 'preview_id': default['preview_id']}
         self.assertEqual(self.client.post(url, headers=self.headers, json=body).status_code, 409)
         self.assertTrue(video.exists())
         body['preview_id'] = preview['preview_id']
@@ -66,6 +68,7 @@ class ApiTests(unittest.TestCase):
         result = self.client.post(url, headers=self.headers, json=body)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json()['deleted_files'], 1)
+        self.assertEqual(result.json()['deleted_records'], 1)
         self.assertFalse(video.exists())
 
     def test_health_requires_auth_without_querying_business_data(self):
@@ -78,6 +81,21 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()['status'], 'ok')
             self.assertEqual(response.headers['Cache-Control'], 'no-store')
+
+    def test_import_local_records_original_and_copies_to_workspace(self):
+        url = "/api/v1/assets/import-local"
+        source = Path(self.temp.name) / "source.mp4"
+        source.write_bytes(b"video fixture")
+        self.assertEqual(self.client.post(url, json={"path": str(source)}).status_code, 401)
+        self.assertEqual(self.client.post(url, headers=self.headers, json={"path": "relative.mp4"}).status_code, 422)
+        response = self.client.post(url, headers=self.headers, json={"path": str(source)})
+        self.assertEqual(response.status_code, 202)
+        payload = self.app.state.store.job(response.json()["id"])["payload"]
+        copy = Path(payload["path"])
+        self.assertEqual(copy.parent, Path(self.temp.name) / "recordings" / "imports")
+        self.assertEqual(copy.read_bytes(), source.read_bytes())
+        self.assertEqual(payload["original_path"], str(source))
+        self.assertEqual(payload["original_file_id"], [source.stat().st_dev, source.stat().st_ino])
 
     def test_local_cover_reference_can_queue_generation_without_platform_binding(self):
         import base64

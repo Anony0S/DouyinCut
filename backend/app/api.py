@@ -5,6 +5,8 @@ import json
 import os
 import re
 import secrets
+import shutil
+import stat
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -37,12 +39,14 @@ from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveProductMerge, L
 from .product_platform import ProductPlatformService
 from .product_platform.client import ProductPlatformError
 from .product_platform.daduoduo import DaduoduoCatalog
+from .product_platform.xingdongli import XingdongliService
 from .product_platform.schemas import (AddToShowcaseRequest, LoginRequest, MobileRequest,
-                                       RoomPlatformRequest, ScopeRequest, SearchRequest)
+                                       RoomPlatformRequest, ScopeRequest, SearchRequest, XingdongliTokenRequest)
 
 
 _UPLOADED_REFERENCE_ID = re.compile(r"coverref_[0-9a-f]{64}")
 _REFERENCE_EXTENSIONS = {".png", ".jpg", ".webp"}
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".ts", ".m4v"}
 
 
 class ExportRequest(Model):
@@ -81,9 +85,13 @@ MAX_RETENTION_DAYS = 2**53 - 1
 
 
 class CleanupRequest(Model):
-    include_referenced: bool = False
+    clear_expired_data: bool = False
     retention_days: int = Field(DEFAULT_RETENTION_DAYS, ge=1, le=MAX_RETENTION_DAYS)
     preview_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class LocalVideoRequest(Model):
+    path: str = Field(min_length=1, max_length=32767)
 
 
 def create_app(settings: Settings | None = None, token: str | None = None, *, frontend_dir: Path | None = None):
@@ -102,6 +110,9 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     # loopback session replace the credential used by <video> range requests.
     session_cookie = f"douyincut_session_{settings.port}"
     catalog = DaduoduoCatalog(store)
+    xingdongli = XingdongliService(store)
+    active_mutations = 0
+    clearing_data = False
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -124,15 +135,26 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
 
     @app.middleware("http")
     async def local_auth(request: Request, call_next):
+        nonlocal active_mutations
         trace = secrets.token_hex(8)
+        mutating = False
         if request.url.path.startswith("/api/") and request.method != "OPTIONS":
             origin = request.headers.get("origin")
             provided = request.headers.get("x-session-token") or request.cookies.get(session_cookie, "")
             if (origin is not None and origin not in allowed) or not hmac.compare_digest(provided.encode(), token.encode()):
                 return JSONResponse({"detail": "本地会话未授权，请通过项目启动器打开界面"}, status_code=401)
-            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and store.is_shutting_down():
-                return JSONResponse({"detail": "桌面会话正在退出，不再接受新操作"}, status_code=503)
-        response = await call_next(request)
+            mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            if mutating:
+                if clearing_data:
+                    return JSONResponse({"detail": "正在清空本地业务数据，请稍后再试"}, status_code=423)
+                if store.is_shutting_down():
+                    return JSONResponse({"detail": "桌面会话正在退出，不再接受新操作"}, status_code=503)
+                active_mutations += 1
+        try:
+            response = await call_next(request)
+        finally:
+            if mutating:
+                active_mutations -= 1
         response.headers["X-Request-ID"] = trace
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Cache-Control"] = "no-store"
@@ -197,19 +219,27 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         return {"opened": True}
 
     @app.get("/api/v1/settings/cleanup-unused-files")
-    def preview_cleanup(include_referenced: bool = False,
+    def preview_cleanup(clear_expired_data: bool = False,
                         retention_days: int = Query(DEFAULT_RETENTION_DAYS, ge=1, le=MAX_RETENTION_DAYS)):
         return cleanup_unused_files(store, settings.data_dir, retention_days=retention_days,
-                                    include_referenced=include_referenced, preview=True)
+                                    clear_expired_data=clear_expired_data, preview=True)
 
     @app.post("/api/v1/settings/cleanup-unused-files")
-    def cleanup_old_unused_files(body: CleanupRequest):
+    async def cleanup_old_unused_files(body: CleanupRequest):
+        nonlocal clearing_data
+        if body.clear_expired_data:
+            if active_mutations != 1 or clearing_data:
+                raise HTTPException(423, "其他本地操作正在写入数据，请稍后再试。")
+            clearing_data = True
         try:
-            return cleanup_unused_files(store, settings.data_dir, retention_days=body.retention_days,
-                                        include_referenced=body.include_referenced,
-                                        preview_id=body.preview_id)
+            return await asyncio.to_thread(cleanup_unused_files, store, settings.data_dir,
+                                           retention_days=body.retention_days, clear_expired_data=body.clear_expired_data,
+                                           preview_id=body.preview_id)
         except CleanupPreviewChanged:
-            raise HTTPException(409, "可清理的文件已变化，请确认重新统计的结果。") from None
+            raise HTTPException(409, "可清理的文件或记录已变化，请确认重新统计的结果。") from None
+        finally:
+            if body.clear_expired_data:
+                clearing_data = False
 
     @app.get("/api/v1/logs")
     def list_logs():
@@ -254,6 +284,22 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     def daduoduo_settings():
         return catalog.settings()
 
+    @app.get("/api/v1/product-platform/xingdongli")
+    def xingdongli_status():
+        return xingdongli.status()
+
+    @app.post("/api/v1/product-platform/xingdongli/connect")
+    def xingdongli_connect(body: XingdongliTokenRequest):
+        return xingdongli.connect(body.member_token)
+
+    @app.post("/api/v1/product-platform/xingdongli/refresh")
+    def xingdongli_refresh():
+        return xingdongli.connect()
+
+    @app.post("/api/v1/product-platform/xingdongli/logout")
+    def xingdongli_logout():
+        return xingdongli.logout()
+
     @app.get("/api/v1/live/monitors/{monitor_id}/product-catalog")
     def daduoduo_catalog_status(monitor_id: str):
         return catalog.status(monitor_id)
@@ -279,14 +325,18 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if reference_images and platform != "xingdou":
             raise ProductPlatformError("该直播间绑定的平台暂不支持获取参考图",
                                        code="REFERENCE_IMAGES_UNSUPPORTED", status=409)
-        return platform, monitor_id
+        return platform, binding
 
     @app.post("/api/v1/product-platform/products/search")
     def product_platform_search(body: SearchRequest):
-        platform, monitor_id = resolve_product_platform(body.monitor_id, body.asset_id,
-                                                        reference_images=body.asset_id is not None)
+        platform, binding = resolve_product_platform(body.monitor_id, body.asset_id,
+                                                     reference_images=body.asset_id is not None)
+        if platform == "xingdongli":
+            return xingdongli.search(binding["ip_id"], body.keyword, body.start)
+        if not body.keyword:
+            raise HTTPException(422, "商品名称不能为空")
         if platform == "daduoduo":
-            return catalog.search(monitor_id, body.keyword)
+            return catalog.search(body.monitor_id, body.keyword)
         return {**app.state.product_platform.search(body.keyword), "can_add_to_showcase": True}
 
     @app.post("/api/v1/product-platform/products/images")
@@ -483,10 +533,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
 
     @app.post("/api/v1/live/monitors", status_code=201)
     def create_live_monitor(body: LiveMonitorRequest):
+        if body.product_platform and body.product_platform.platform == "xingdongli":
+            xingdongli.scope(body.product_platform.ip_id)
         return live_store.create_monitor(body.url, body.name, body.product_platform)
 
     @app.patch("/api/v1/live/monitors/{monitor_id}/product-platform")
     def update_room_product_platform(monitor_id: str, body: RoomPlatformRequest):
+        if body.binding and body.binding.platform == "xingdongli":
+            xingdongli.scope(body.binding.ip_id)
         return live_store.set_product_platform(monitor_id, body.binding)
 
     @app.patch("/api/v1/live/monitors/{monitor_id}")
@@ -603,7 +657,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     async def upload_file(request: Request, filename: str = Query(min_length=1, max_length=255)):
         display_name = filename.replace("\\", "/").rsplit("/", 1)[-1]
         suffix = Path(display_name).suffix.lower()
-        if suffix not in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".ts", ".m4v"}:
+        if suffix not in _VIDEO_EXTENSIONS:
             raise ValueError("请选择支持的视频文件")
         folder = settings.data_dir / "recordings" / "imports"
         final = folder / (secrets.token_hex(16) + suffix)
@@ -628,6 +682,39 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                     pass  # Cleanup failure must not hide the original write error.
             if isinstance(exc, OSError):
                 raise HTTPException(503, f'视频导入写入失败：{folder}；请检查权限、磁盘空间或文件占用') from None
+            raise
+
+    @app.post("/api/v1/assets/import-local", status_code=202)
+    def import_local_video(body: LocalVideoRequest):
+        source = Path(body.path)
+        suffix = source.suffix.lower()
+        if not source.is_absolute() or suffix not in _VIDEO_EXTENSIONS:
+            raise ValueError("请选择本机支持的视频文件")
+        folder = settings.data_dir / "recordings" / "imports"
+        final = folder / (secrets.token_hex(16) + suffix)
+        temporary = final.with_suffix(suffix + ".partial")
+        try:
+            initial = source.stat()
+            if not stat.S_ISREG(initial.st_mode) or not initial.st_size:
+                raise ValueError("所选视频为空文件或无法读取")
+            folder.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, temporary)
+            current = source.stat()
+            identity = (initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns)
+            if identity != (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns):
+                raise ValueError("视频仍在写入，请等待文件保存后再导入")
+            temporary.rename(final)
+            os.utime(final, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+            return store.enqueue("import", {"path": str(final), "display_name": source.name,
+                                            "original_path": str(source), "original_file_id": identity[:2]})
+        except BaseException as exc:
+            for owned in (temporary, final):
+                try:
+                    owned.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            if isinstance(exc, OSError):
+                raise HTTPException(409, "无法复制视频，请检查原件状态、权限和剩余空间") from None
             raise
 
     @app.get("/api/v1/assets")

@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { Asset, Candidate, Plan, Job, Artifact, ProjectDraft, ProjectDetail } from '../api'
+import { ApiError, type Asset, type Candidate, type Plan, type Job, type Artifact, type ProjectDraft, type ProjectDetail } from '../api'
 import { projectsApi, type ShortFillerFilter } from '../services/projects'
 import { useSessionStore } from './session'
 
@@ -59,7 +59,7 @@ function applyProject(detail: ProjectDetail, opening: boolean) {
       pendingAnalyzeId.value='';session.message='粗剪方案已生成，正在拼接预览'
     }
   }
-  if(!selectedPlan.value && detail.plans.length) selectedPlan.value=clonePlan(detail.plans[0])
+  if(!detail.plans.some(plan => plan.id === selectedPlan.value?.id)) selectedPlan.value=clonePlan(detail.plans[0])
 }
 
 async function load(id: string, canApply: () => boolean = () => true) {
@@ -73,6 +73,28 @@ async function refresh() {
   await load(id,()=>assetId.value===id && !session.navigating)
 }
 function invalidate() { detailRequest++ }
+async function refreshAfterCleanup() {
+  const id = assetId.value
+  if (!id) return
+  try {
+    await load(id, () => assetId.value === id && !session.navigating)
+  } catch (error) {
+    if (assetId.value !== id) return
+    if (!(error instanceof ApiError) || error.status !== 404) throw error
+    invalidate()
+    assetId.value = ''
+    assets.value = []
+    candidates.value = []
+    plans.value = []
+    jobs.value = []
+    artifacts.value = []
+    projectAnalysis.value = null
+    selectedPlan.value = null
+    pendingAnalyzeId.value = ''
+    transcript.value = null
+    transcriptVisible.value = false
+  }
+}
 async function saveProjectInfo() {await session.act(async()=>{await persistDraft();session.message='项目资料与剪辑设置已保存'})}
 async function saveDefaultInstructions() {await session.act(async()=>{
   const id=assetId.value
@@ -149,6 +171,6 @@ function moveClip(index: number, delta: number) { moveClipTo(index,delta<0?index
 return {projectAnalysis,savedDraft,assets,candidates,plans,jobs,artifacts,assetId,productName,pendingAnalyzeId,
  defaultInstructions,instructions,targetSeconds,toleranceSeconds,refreshAsr,transcript,transcriptVisible,selectedPlan,
  activeAsset,assetPlans,previewArtifact,planDirty,assetJobs,analyzingAsset,latestAnalysis,
- currentDraft,persistDraft,saveProjectInfo,saveDefaultInstructions,load,refresh,invalidate,checkSwitch,trackRetry,
+ currentDraft,persistDraft,saveProjectInfo,saveDefaultInstructions,load,refresh,refreshAfterCleanup,invalidate,checkSwitch,trackRetry,
  analyze,loadTranscript,createJianyingDraft,savePlan,deletePlan,moveClip,moveClipTo}
 })

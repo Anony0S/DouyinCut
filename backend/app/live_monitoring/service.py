@@ -598,11 +598,11 @@ class LiveStore:
         with self.store.connection() as conn:
             conn.execute("INSERT OR IGNORE INTO live_product_events "
                          "(id,session_id,event_key,promotion_id,product_name,explain_type,event_time,received_at,source) "
-                         "VALUES(?,?,?,?,?,?,?,?,?)",
-                         (new_id("product_event"), session_id, event_key, promotion_id, product_name,
-                          explain_type, event_time, received_at, source))
+                         "SELECT ?,id,?,?,?,?,?,?,? FROM live_sessions WHERE id=?",
+                         (new_id("product_event"), event_key, promotion_id, product_name,
+                          explain_type, event_time, received_at, source, session_id))
             row = conn.execute("SELECT id FROM live_product_events WHERE event_key=?", (event_key,)).fetchone()
-        return row["id"]
+        return row["id"] if row else None
 
     def update_product_name(self, session_id: str, promotion_id: str, product_name: str):
         product_name = product_name.strip()[:500]
@@ -679,14 +679,16 @@ class LiveStore:
 
     def mark_product_catalog_attempt(self, monitor_id: str, now: float):
         with self.store.connection() as conn:
-            conn.execute("INSERT INTO live_monitor_product_catalog(monitor_id,attempted) VALUES(?,?) "
-                         "ON CONFLICT(monitor_id) DO UPDATE SET attempted=excluded.attempted", (monitor_id, now))
+            conn.execute("INSERT INTO live_monitor_product_catalog(monitor_id,attempted) "
+                         "SELECT id,? FROM live_monitors WHERE id=? "
+                         "ON CONFLICT(monitor_id) DO UPDATE SET attempted=excluded.attempted", (now, monitor_id))
 
     def defer_missing_products(self, monitor_id: str, products: set[str], retry_at: float):
         with self.store.connection() as conn:
-            conn.executemany("INSERT INTO live_monitor_product_misses(monitor_id,promotion_id,retry_at) VALUES(?,?,?) "
+            conn.executemany("INSERT INTO live_monitor_product_misses(monitor_id,promotion_id,retry_at) "
+                             "SELECT id,?,? FROM live_monitors WHERE id=? "
                              "ON CONFLICT(monitor_id,promotion_id) DO UPDATE SET retry_at=excluded.retry_at",
-                             [(monitor_id, product_id, retry_at) for product_id in products])
+                             [(product_id, retry_at, monitor_id) for product_id in products])
 
     def finish_product_listener_retry(self, session_id: str):
         with self.store.connection() as conn:
@@ -703,6 +705,8 @@ class LiveStore:
         now = time.time()
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM live_monitors WHERE id=?", (monitor_id,)).fetchone():
+                return 0
             conn.execute("DELETE FROM live_monitor_products WHERE monitor_id=?", (monitor_id,))
             conn.executemany(
                 "INSERT INTO live_monitor_products(monitor_id,promotion_id,product_name,updated_at) "
@@ -722,9 +726,9 @@ class LiveStore:
                 return
             conn.execute(
                 "INSERT INTO live_session_product_catalog_state(session_id,error_detail,updated) "
-                "VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET "
+                "SELECT id,?,? FROM live_sessions WHERE id=? ON CONFLICT(session_id) DO UPDATE SET "
                 "error_detail=excluded.error_detail,updated=excluded.updated",
-                (session_id, json.dumps(detail, ensure_ascii=False)[:10000], time.time()),
+                (json.dumps(detail, ensure_ascii=False)[:10000], time.time(), session_id),
             )
 
     def set_current_product(self, session_id: str, *, promotion_id: str,
@@ -775,9 +779,10 @@ class LiveStore:
 
     def set_product_listener_state(self, session_id: str, status: str, detail: str = ""):
         with self.store.connection() as conn:
-            conn.execute("INSERT INTO live_product_listener_state(session_id,status,detail,updated) VALUES(?,?,?,?) "
+            conn.execute("INSERT INTO live_product_listener_state(session_id,status,detail,updated) "
+                         "SELECT id,?,?,? FROM live_sessions WHERE id=? "
                          "ON CONFLICT(session_id) DO UPDATE SET status=excluded.status,detail=excluded.detail,updated=excluded.updated",
-                         (session_id, status, detail[:1000], time.time()))
+                         (status, detail[:1000], time.time(), session_id))
 
     def mark_product_listener_stopped(self, session_id: str, detail: str) -> bool:
         """Record the stop without discarding an unresolved error.
@@ -785,13 +790,15 @@ class LiveStore:
         Returns False only when an error is kept, so the caller leaves the row alone.
         """
         with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT status FROM live_product_listener_state WHERE session_id=?",
                                (session_id,)).fetchone()
             if row is not None and row["status"] == "error":
                 return False
             if row is None:
                 conn.execute("INSERT INTO live_product_listener_state(session_id,status,detail,updated) "
-                             "VALUES(?,?,?,?)", (session_id, "stopped", detail[:1000], time.time()))
+                             "SELECT id,'stopped',?,? FROM live_sessions WHERE id=?",
+                             (detail[:1000], time.time(), session_id))
                 return True
             conn.execute("UPDATE live_product_listener_state SET status='stopped',detail=?,updated=? "
                          "WHERE session_id=?", (detail[:1000], time.time(), session_id))
@@ -847,9 +854,10 @@ class LiveStore:
 
     def set_liveness(self, monitor_id: str, is_live: bool | None):
         with self.store.connection() as conn:
-            conn.execute("INSERT INTO live_monitor_liveness(monitor_id,is_live,checked) VALUES(?,?,?) "
-                         "ON CONFLICT(monitor_id) DO UPDATE SET is_live=excluded.is_live,checked=excluded.checked",
-                         (monitor_id, None if is_live is None else int(is_live), time.time()))
+            return conn.execute("INSERT INTO live_monitor_liveness(monitor_id,is_live,checked) "
+                                "SELECT id,?,? FROM live_monitors WHERE id=? "
+                                "ON CONFLICT(monitor_id) DO UPDATE SET is_live=excluded.is_live,checked=excluded.checked",
+                                (None if is_live is None else int(is_live), time.time(), monitor_id)).rowcount == 1
 
     def delete_monitor(self, monitor_id: str):
         with self.store.connection() as conn:
@@ -915,6 +923,9 @@ class LiveStore:
         path_text = str(path.resolve())
         now = time.time()
         with self.store.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute("SELECT 1 FROM live_sessions WHERE id=?", (session_id,)).fetchone():
+                return None
             row = conn.execute("SELECT id,status FROM live_segments WHERE path=?", (path_text,)).fetchone()
             if row:
                 if row["status"] == "deleted":
@@ -1600,7 +1611,6 @@ class LiveMonitorWorker:
     def _start_recorder(self, monitor: dict, stream_url: str):
         session_id = new_id("session")
         directory = self.settings.data_dir / "recordings" / "live" / monitor["id"] / session_id
-        directory.mkdir(parents=True, exist_ok=True)
         safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", monitor["name"]).strip(" ._")[:60] or "douyin"
         prefix = f"{safe_name}_{datetime.now():%Y%m%d-%H%M%S}"
         pattern = directory / f"{prefix}-%06d.ts"
@@ -1608,17 +1618,18 @@ class LiveMonitorWorker:
                 "-i", stream_url, "-map", "0:v:0", "-map", "0:a?", "-c", "copy",
                 "-f", "segment", "-segment_time", str(SEGMENT_SECONDS), "-reset_timestamps", "1",
                 "-segment_format", "mpegts", str(pattern)]
-        stderr_log = directory / "ffmpeg.log"
-        stderr_handle = stderr_log.open("ab")
-        try:
-            process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                       stderr=stderr_handle,
-                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        finally:
-            stderr_handle.close()
+        process = None
         try:
             # Persist before exposing the child process to the loop.
             with self.store.connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if not conn.execute("SELECT 1 FROM live_monitors WHERE id=?", (monitor["id"],)).fetchone():
+                    return
+                directory.mkdir(parents=True, exist_ok=True)
+                with (directory / "ffmpeg.log").open("ab") as stderr_handle:
+                    process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                               stderr=stderr_handle,
+                                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 now = time.time()
                 conn.execute("INSERT INTO live_sessions(id,monitor_id,status,started,ffmpeg_pid) VALUES(?,?,'recording',?,?)",
                              (session_id, monitor["id"], now, process.pid))
@@ -1628,8 +1639,9 @@ class LiveMonitorWorker:
                 conn.execute("UPDATE live_monitor_controls SET record_requested=0,record_held=0 WHERE monitor_id=?",
                              (monitor["id"],))
         except BaseException:
-            process.terminate()
-            process.wait(timeout=5)
+            if process is not None:
+                process.terminate()
+                process.wait(timeout=5)
             raise
         self.processes[monitor["id"]] = (process, session_id)
         self._start_python_product_listener(monitor, session_id)
@@ -2032,7 +2044,8 @@ class LiveMonitorWorker:
                     return await asyncio.wait_for(self._resolve(monitor["url"]), timeout=8)
                 resolved = asyncio.run(resolve_with_timeout())
                 is_live = bool(resolved.get("is_live"))
-                self.live.set_liveness(monitor_id, is_live)
+                if not self.live.set_liveness(monitor_id, is_live):
+                    continue
                 if not monitor["name"] and resolved.get("anchor_name"):
                     self.live.set_auto_name(monitor_id, resolved["anchor_name"])
                     monitor = self.live.monitor(monitor_id)

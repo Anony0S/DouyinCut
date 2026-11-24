@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from app.cleanup import CleanupPreviewChanged, DEFAULT_RETENTION_DAYS, SECONDS_PER_DAY, cleanup_unused_files
 from app.core.storage import Store
+from app.live_monitoring import LiveStore
 
 
 class CleanupUnusedFilesTests(unittest.TestCase):
@@ -14,6 +15,7 @@ class CleanupUnusedFilesTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.store = Store(self.root / "database" / "douyincut.sqlite3")
+        self.live = LiveStore(self.store)
         for name in ("analysis", "previews", "exports", "covers", "recordings"):
             (self.root / name).mkdir()
         self.now = 2_000_000_000.0
@@ -80,38 +82,74 @@ class CleanupUnusedFilesTests(unittest.TestCase):
         self.assertTrue(staging.exists())
         self.assertTrue(analysis.exists())
 
-    def test_preview_counts_referenced_files_with_opt_in_and_protects_active_inputs(self):
-        asset_id = "asset_1"
-        original = self.old(self.root / "previews" / "source" / "source.mp4")
-        os.utime(original.parent, (original.stat().st_mtime, original.stat().st_mtime))
-        self.store.put("asset", {"id": asset_id, "path": str(original)})
-        cover = self.old(self.root / "covers" / asset_id)
-        self.store.enqueue("jianying", {"cover_path": str(cover / "output.bin")})
-        export = self.old(self.root / "exports" / "export_kept")
-        self.store.put("export", {"id": "export_kept", "path": str(export)})
-        preview = self.old(self.root / "previews" / "terminal_output")
-        temporary = self.old(self.root / "covers" / "asset_orphan" / f"job_{'a' * 32}.tmp.jpg")
-        os.utime(temporary.parent, (temporary.stat().st_mtime, temporary.stat().st_mtime))
-        job = self.store.enqueue("preview", {})
+    def test_expanded_cleanup_deletes_expired_records_and_original_but_retains_recent_dependencies(self):
+        workspace = self.root / "work"
+        original = self.old(self.root / "source.mp4")
+        other_source = self.old(self.root / "other.mp4")
+        info = original.stat()
+        copy = self.old(workspace / "recordings" / "imports" / "copy.mp4")
+        self.store.put("asset", {"id": "expired", "path": str(copy), "original_path": str(original),
+                                 "original_file_id": [info.st_dev, info.st_ino]})
+        self.store.put("asset", {"id": "retained", "path": str(other_source)})
+        self.store.put("config", {"id": "cloud"})
+        self.store.put("project", {"id": "retained"})
+        stamp = self.now - 8 * SECONDS_PER_DAY
+        monitor = self.live.create_monitor("https://live.douyin.com/123", "old")
+        session_id = self.live.start_session(monitor["id"], workspace / "recordings" / "live" / monitor["id"])
+        recording = self.old(workspace / "recordings" / "live" / monitor["id"] / session_id / "recording.ts")
+        self.live.upsert_segment(session_id, recording, 1, "completed", 3)
+        self.live.stop_session(monitor["id"], session_id)
         with self.store.connection() as conn:
-            conn.execute("UPDATE jobs SET state='succeeded', result=json_object('path', ?) WHERE id=?",
-                         (str(preview), job["id"]))
-        default = cleanup_unused_files(self.store, self.root, now=self.now, preview=True)
-        expanded = cleanup_unused_files(self.store, self.root, now=self.now, preview=True, include_referenced=True)
-        self.assertEqual((default["file_count"], default["estimated_bytes"]), (1, 3))
-        self.assertEqual((expanded["file_count"], expanded["estimated_bytes"]), (3, 9))
-        self.assertTrue(all(path.exists() for path in (original, cover, export, preview, temporary)))
+            conn.execute("UPDATE objects SET created=? WHERE kind='asset'", (stamp,))
+            conn.execute("UPDATE objects SET created=? WHERE kind='project'", (self.now,))
+            conn.execute("UPDATE live_monitors SET created=?", (stamp,))
+            conn.execute("UPDATE live_monitor_controls SET updated=?", (stamp,))
+            conn.execute("UPDATE live_sessions SET started=?,ended=?", (stamp, stamp))
+            conn.execute("UPDATE live_segments SET started=?,ended=?", (stamp, stamp))
+        default = cleanup_unused_files(self.store, workspace, now=self.now, preview=True)
+        expanded = cleanup_unused_files(self.store, workspace, now=self.now, preview=True, clear_expired_data=True)
+        self.assertEqual(expanded["original_videos"], [str(original)])
+        self.assertEqual((expanded["file_count"], expanded["record_count"]), (3, 5))
+        self.assertTrue(all(path.exists() for path in (original, other_source, copy, recording)))
         with self.assertRaises(CleanupPreviewChanged):
-            cleanup_unused_files(self.store, self.root, now=self.now, include_referenced=True,
+            cleanup_unused_files(self.store, workspace, now=self.now, clear_expired_data=True,
                                  preview_id=default["preview_id"])
-        result = cleanup_unused_files(self.store, self.root, now=self.now, include_referenced=True,
+        result = cleanup_unused_files(self.store, workspace, now=self.now, clear_expired_data=True,
                                       preview_id=expanded["preview_id"])
-        self.assertEqual((result["deleted_files"], result["bytes_reclaimed"]), (3, 9))
+        self.assertEqual((result["deleted_files"], result["deleted_records"]), (3, 5))
+        self.assertTrue(other_source.exists())
+        self.assertTrue(all(not path.exists() for path in (original, copy, recording)))
+        self.assertEqual(self.store.get("config", "cloud")["id"], "cloud")
+        self.assertEqual(self.store.get("asset", "retained")["id"], "retained")
+
+    def test_expanded_cleanup_keeps_records_for_retry_if_file_cannot_be_deleted(self):
+        original = self.old(self.root / "recordings" / "imports" / "old.mp4")
+        self.store.put("asset", {"id": "expired", "path": str(original)})
+        with self.store.connection() as conn:
+            conn.execute("UPDATE objects SET created=?", (self.now - 8 * SECONDS_PER_DAY,))
+        preview = cleanup_unused_files(self.store, self.root, now=self.now, preview=True, clear_expired_data=True)
+        with patch("app.cleanup.Path.unlink", side_effect=PermissionError("busy")):
+            result = cleanup_unused_files(self.store, self.root, now=self.now, clear_expired_data=True,
+                                          preview_id=preview["preview_id"])
+        self.assertEqual((result["retained_files"], result["retained_records"], result["deleted_records"]), (1, 1, 0))
         self.assertTrue(original.exists())
-        self.assertTrue(cover.exists())
-        self.assertFalse(export.exists())
-        self.assertFalse(preview.exists())
-        self.assertFalse(temporary.exists())
+        self.assertEqual(self.store.get("asset", "expired")["id"], "expired")
+
+    def test_expanded_cleanup_leaves_replacement_at_original_path(self):
+        original = self.old(self.root / "source.mp4")
+        info = original.stat()
+        original.rename(original.with_name("moved.mp4"))
+        self.old(original)
+        self.store.put("asset", {"id": "expired", "path": str(self.root / "copy.mp4"),
+                                 "original_path": str(original), "original_file_id": [info.st_dev, info.st_ino]})
+        with self.store.connection() as conn:
+            conn.execute("UPDATE objects SET created=?", (self.now - 8 * SECONDS_PER_DAY,))
+
+        preview = cleanup_unused_files(self.store, self.root, now=self.now, preview=True, clear_expired_data=True)
+        self.assertEqual((preview["file_count"], preview["record_count"], preview["original_videos"]), (0, 1, []))
+        cleanup_unused_files(self.store, self.root, now=self.now, clear_expired_data=True,
+                             preview_id=preview["preview_id"])
+        self.assertTrue(original.exists())
 
     def test_stale_preview_cannot_delete_a_different_batch(self):
         export = self.old(self.root / "exports" / "export_orphan")

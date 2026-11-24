@@ -14,15 +14,14 @@ class LoginRequest(MobileRequest):
 
 
 class SearchRequest(Model):
-    keyword: str = Field(min_length=1, max_length=200)
+    keyword: str = Field(max_length=200)
     monitor_id: str | None = Field(default=None, min_length=1, max_length=100)
     asset_id: str | None = Field(default=None, min_length=1, max_length=100)
+    start: int = Field(default=0, ge=0, le=1_000_000)
 
     @field_validator("keyword")
     @classmethod
-    def non_blank(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("商品名称不能为空")
+    def strip_keyword(cls, value: str) -> str:
         return value.strip()
 
 
@@ -42,8 +41,20 @@ class ScopeRequest(Model):
     main_ip_id: str = Field(min_length=1, max_length=100)
 
 
+class XingdongliTokenRequest(Model):
+    member_token: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("member_token")
+    @classmethod
+    def validate_token(cls, value: str) -> str:
+        token = value.strip()
+        if not token or any(not 33 <= ord(char) <= 126 for char in token):
+            raise ValueError("请填写有效的 member-token")
+        return token
+
+
 class RoomPlatformBinding(Model):
-    platform: Literal["xingdou", "daduoduo"]
+    platform: Literal["xingdou", "daduoduo", "xingdongli"]
     ip_id: str = Field(default="", max_length=128)
 
     @field_validator("ip_id")
@@ -55,6 +66,9 @@ class RoomPlatformBinding(Model):
     def validate_ip_id(self):
         if self.platform == "daduoduo" and not self.ip_id:
             raise ValueError("达多多需要填写 ipId")
+        if self.platform == "xingdongli" and not (self.ip_id.isascii() and self.ip_id.isdecimal()
+                                                   and 1 <= len(self.ip_id) <= 20):
+            raise ValueError("请选择星动力签约达人")
         if self.platform == "xingdou" and self.ip_id:
             raise ValueError("星斗直播间绑定只需要选择平台")
         return self

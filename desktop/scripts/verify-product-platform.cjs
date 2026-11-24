@@ -271,6 +271,83 @@ async function verifySearch() {
   } finally { mounted.app.unmount() }
 }
 
+async function verifyXingdongli() {
+  const account = { ...loggedIn, platform: 'xingdongli', scopes: [{ id: '42', name: '签约达人 A' }] }
+  const first = { id: 'one', title: '商品 A', real_time_sales: 0 }
+  const second = { id: 'two', title: '商品 B', real_time_sales: 2 }
+  respond = (url, options) => {
+    if (url.endsWith('/settings/cloud')) return { config: {}, secrets: {}, secret_previews: {} }
+    if (url.endsWith('/status')) return status
+    if (url.endsWith('/xingdongli')) return { ...status, platform: 'xingdongli' }
+    if (url.endsWith('/xingdongli/connect')) return account
+    if (url.endsWith('/products/search')) {
+      const start = JSON.parse(options.body).start || 0
+      const products = start ? [second] : [first, second]
+      return { product: products[0], products, start, length: 20, total: 21,
+        scope_name: '签约达人 A', can_add_to_showcase: false }
+    }
+    throw new Error(`Unexpected request ${url}`)
+  }
+  route.query.platform = 'xingdongli'
+  let mounted = await mount('views/SettingsView.vue')
+  try {
+    input(mounted.root, 'xingdongli-member-token', 'fixture-token')
+    const form = all(mounted.root, el => el.type === 'form' && button(el, '验证并保存'))[0]
+    await form.props.onSubmit({ preventDefault() {} }); await settle()
+    assert.ok(text(mounted.root).includes('签约达人 A'))
+    assert.deepEqual(calls.find(call => call.url.endsWith('/xingdongli/connect')).body, { member_token: 'fixture-token' })
+  } finally {
+    mounted.app.unmount()
+    delete route.query.platform
+  }
+  respond = (url, options) => {
+    if (url.endsWith('/xingdongli')) return account
+    if (url.endsWith('/monitor-x/product-platform')) return { id: 'monitor-x', product_platform: JSON.parse(options.body).binding }
+    throw new Error(`Unexpected request ${url}`)
+  }
+  mounted = await mount('components/live/LiveRoomList.vue', {
+    monitors: [{ id: 'monitor-x', name: '星动力直播间', url: 'https://live.douyin.com/x', sessions: [], product_platform: null }],
+    selectedId: 'monitor-x', loading: false, busy: false, onRemove: async () => {},
+  })
+  try {
+    await click(button(mounted.root, '星动力直播间设置'))
+    await click(button(body, '绑定平台'))
+    const [dialog] = all(body, el => el.type === 'dialog')
+    const [platform] = all(dialog, el => el.type === 'select')
+    platform.props.onChange({ target: { value: 'xingdongli' } }); await settle()
+    const [, scope] = all(dialog, el => el.type === 'select')
+    assert.ok(text(scope).includes('签约达人 A'))
+    assert.ok(button(dialog, '保存绑定').props.disabled)
+    scope.props['onUpdate:modelValue']('42'); await settle()
+    assert.ok(!button(dialog, '保存绑定').props.disabled)
+    const [form] = all(dialog, el => el.type === 'form')
+    await form.props.onSubmit({ preventDefault() {} }); await settle()
+    assert.deepEqual(calls.at(-1).body, { binding: { platform: 'xingdongli', ip_id: '42' } })
+  } finally { mounted.app.unmount() }
+  respond = (url, options) => {
+    assert.ok(url.endsWith('/products/search'))
+    const start = JSON.parse(options.body).start || 0
+    const products = start ? [second] : [first, second]
+    return { product: products[0], products, start, length: 20, total: 21,
+      scope_name: '签约达人 A', can_add_to_showcase: false }
+  }
+  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '', monitorId: 'monitor', browse: true })
+  try {
+    const select = all(body, el => el.type === 'select')[0]
+    assert.ok(select)
+    select.props.onChange({ target: { value: '1' } }); await settle()
+    assert.ok(text(body).includes('今日销量2'))
+    await click(button(body, '下一页'))
+    assert.deepEqual(calls.at(-1).body, { keyword: '', monitor_id: 'monitor', start: 20 })
+    assert.ok(button(body, '下一页').props.disabled)
+    assert.ok(!button(body, '添加橱窗'))
+  } finally { mounted.app.unmount() }
+  respond = () => ({ status: 401, body: { detail: { code: 'XINGDONGLI_AUTH_REQUIRED', message: '已失效' } } })
+  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '商品', monitorId: 'monitor' })
+  assert.deepEqual(navigation.at(-1), { path: '/settings', query: { cloudTab: 'product-platform', platform: 'xingdongli' } })
+  mounted.app.unmount()
+}
+
 async function verifyDouyinScan() {
   route.query = { cloudTab: 'douyin' }
   respond = url => {
@@ -327,10 +404,10 @@ async function main() {
     return new Response(JSON.stringify(result?.body ?? result), { status: result?.status ?? 200, headers: { 'Content-Type': 'application/json' } })
   }
   try {
-    await verifyLogin(); await verifySearch(); await verifyLectureButton(); await verifyDaduoduoControls()
+    await verifyLogin(); await verifySearch(); await verifyLectureButton(); await verifyDaduoduoControls(); await verifyXingdongli()
     assert.ok(calls.every(call => call.url.startsWith('/api/v1/')), 'The frontend only calls its authenticated local API')
     await verifyDouyinScan()
-    console.log('Product platform UI checks passed: settings deep link, SMS login, Douyin QR login, product cards, auth redirect and stale response guard.')
+    console.log('Product platform UI checks passed: settings, SMS and QR login, Xingdongli token and pagination, product cards and auth redirects.')
   } finally { global.fetch = originalFetch; global.window = originalWindow }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

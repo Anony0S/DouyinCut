@@ -17,8 +17,8 @@ from app.core.storage import Store
 from app.media.processing import import_asset, probe, run_process
 from app.worker import Worker
 
-SELECTION = {"clips": [{"start_ms": 3000, "end_ms": 4500, "reason": "面料"},
-                       {"start_ms": 0, "end_ms": 1000, "reason": "上身"}]}
+SELECTION = {"clips": [{"start_ms": 3000, "end_ms": 4500},
+                       {"start_ms": 0, "end_ms": 1000}]}
 ASR_RESPONSE = {"output": {"sentence": {"begin_time": 0, "end_time": 6000,
                 "text": "上身显瘦。只要九十九。面料柔软。", "words": [
                     {"begin_time": 0, "end_time": 1000, "text": "上身显瘦", "punctuation": "。"},
@@ -162,7 +162,7 @@ class PlannerExitRecoveryTests(PlannerRecoveryFixture, unittest.TestCase):
         self.assertEqual(finished["state"], "succeeded", finished.get("error"))
         self.assertEqual(PlannerHandler.requests, 2)
         self.upload.assert_not_called()
-        self.assertEqual([c["reason"] for c in finished["result"]["selected_intervals"]], ["面料", "上身"])
+        self.assertEqual(finished["result"]["selected_intervals"], SELECTION["clips"])
 
     def test_each_exit_record_requeues_once_and_finished_jobs_survive_repeated_restarts(self):
         job = self.enqueue()
@@ -193,7 +193,7 @@ class PlannerExitRecoveryTests(PlannerRecoveryFixture, unittest.TestCase):
         self.assertEqual([j["id"] for j in self.store.jobs() if j["kind"] == "preview"], [p["id"] for p in previews])
 
     def test_invalid_rejected_and_dropped_planner_replies_fail_normally_without_exit_recovery(self):
-        cases = [("answer", "not JSON", "剪辑决策时间区间无效"),
+        cases = [("answer", "not JSON", "剪辑决策模型返回格式无效"),
                  ("reject", "", "HTTP 401"),
                  ("drop", "", "对端在返回 HTTP 响应前断开连接")]
         for mode, content, message in cases:
@@ -227,7 +227,7 @@ class PlannerExitRecoveryTests(PlannerRecoveryFixture, unittest.TestCase):
         with patch.object(Store, "complete_cloud_operation", saved_then_exit):
             Worker(self.settings, interruptible_cloud=True).run_once()
         self.assertEqual(self.store.job(job["id"])["state"], "failed")
-        self.assertIn("剪辑决策时间区间无效", self.store.job(job["id"])["error"])
+        self.assertIn("剪辑决策模型返回格式无效", self.store.job(job["id"])["error"])
 
         restarted = self.restart()
         self.assertEqual(restarted.job(job["id"])["state"], "failed")
@@ -247,7 +247,7 @@ class PlannerExitRecoveryTests(PlannerRecoveryFixture, unittest.TestCase):
         Worker(self.settings, interruptible_cloud=True).run_once()  # Reclaims the expired lease.
         fresh = self.store.job(job["id"])
         self.assertEqual(fresh["state"], "succeeded", fresh.get("error"))
-        PlannerHandler.content = json.dumps({"clips": [{"start_ms": 0, "end_ms": 1000, "reason": "迟到"}]})
+        PlannerHandler.content = json.dumps({"clips": [{"start_ms": 0, "end_ms": 1000}]})
         PlannerHandler.release.set()
         thread.join(10)
 
@@ -307,7 +307,7 @@ class PlannerExitRecoveryMediaTests(PlannerRecoveryFixture, unittest.TestCase):
         self.assertEqual(restarted.job(job["id"])["state"], "failed")
         self.assertEqual((PlannerHandler.asr_requests, PlannerHandler.requests), (1, 1))
 
-    def test_recovered_plan_keeps_clip_reasons_and_renders_the_stitched_preview(self):
+    def test_recovered_plan_keeps_clip_order_and_renders_the_stitched_preview(self):
         job = self.enqueue()
         PlannerHandler.mode = "block"
         thread = self.run_worker_in_background()
@@ -322,8 +322,7 @@ class PlannerExitRecoveryMediaTests(PlannerRecoveryFixture, unittest.TestCase):
 
         result = self.store.job(job["id"])["result"]
         plan = self.store.get("plan", result["plan_id"])
-        reasons = [self.store.get("candidate", clip["candidate_id"])["reason"] for clip in plan["clips"]]
-        self.assertEqual(reasons, ["面料", "上身"])
+        self.assertEqual([clip["source_start_us"] for clip in plan["clips"]], [3_000_000, 0])
         preview = next(j for j in self.store.jobs() if j["kind"] == "preview")
         self.assertEqual(preview["state"], "queued")
         Worker(self.settings, interruptible_cloud=True).run_once()

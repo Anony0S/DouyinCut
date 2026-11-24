@@ -55,14 +55,10 @@ function startupSizeChanged(event: Event) {
 </script>
 
 <template>
-  <section class="appearance-page">
-    <h1>外观</h1>
+  <section class="mt-6 space-y-3" aria-labelledby="appearance-title">
     <section class="card card-border bg-base-100 appearance-card" aria-labelledby="theme-title">
-      <div class="appearance-card-heading">
-        <h2 id="theme-title">主题</h2>
-        <p>选择应用的配色方案</p>
-      </div>
-      <fieldset class="theme-options" aria-labelledby="theme-title">
+      <h3 id="theme-title" class="appearance-card-title">主题</h3>
+      <fieldset class="theme-options">
         <legend class="sr-only">选择主题</legend>
         <label
           v-for="theme in themes"
@@ -94,10 +90,7 @@ function startupSizeChanged(event: Event) {
     </section>
 
     <section class="card card-border bg-base-100 appearance-card" aria-labelledby="window-title">
-      <div class="appearance-card-heading">
-        <h2 id="window-title">窗口</h2>
-        <p>设置应用打开时的位置和大小</p>
-      </div>
+      <h3 id="window-title" class="appearance-card-title">窗口</h3>
       <div class="window-preferences">
         <div class="window-preference-row">
           <div class="window-preference-copy">
@@ -134,25 +127,12 @@ function startupSizeChanged(event: Event) {
 </template>
 
 <style scoped>
-.appearance-page {
-  width: 100%;
-}
-
-.appearance-page > h1 {
-  margin: 0 0 22px;
-}
-
 .appearance-card {
   padding: 24px;
 }
 
-.appearance-card-heading h2 {
+.appearance-card-title {
   font-size: 17px;
-}
-
-.appearance-card-heading p {
-  margin: 5px 0 0;
-  color: var(--text-muted);
 }
 
 .window-preferences {

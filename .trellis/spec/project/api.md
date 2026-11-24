@@ -15,6 +15,7 @@
 | `PATCH /projects/{asset_id}` | 保存 product_name、instructions、target_duration_us、duration_tolerance_us（0–30000000，默认15000000） |
 | `DELETE /projects/{asset_id}` | 删除项目及本地专属数据；活动任务时拒绝，OSS 临时音频保留 |
 | `POST /assets/upload?filename=...` | 认证的原始二进制流，本地复制与排队探测 |
+| `POST /assets/import-local` | Windows 桌面文件选择器提交原件绝对路径 `path`。复制到工作目录，排队探测并保存原件位置和文件标识。 |
 | `GET /assets`、`GET /assets/{id}/media` | 素材查询与原素材范围预览 |
 | `POST /assets/{id}/analyze` | product_name、instructions、target_duration_us、duration_tolerance_us、refresh_asr、short_filler_filter。short_filler_filter 默认 null，开启时传对象，内含 max_chars（整数，至少 1，默认 5）和 max_duration_ms（整数，至少 100，默认 1000），两者均为严格上界。任务快照保存过滤设置和模型配置 |
 | `GET /plans`、`PATCH /plans/{id}`、`DELETE /plans/{id}` | 方案查询、保存新版本 / 自动排队预览、删除单个方案及其本地产物 |
@@ -31,7 +32,7 @@
 | `GET /assets/{asset_id}/covers/{cover_id}/original` | 读取同项目成功封面任务的生图服务原图；不存在或已删除时返回 410 |
 | `GET /exports`、`GET /exports/{id}/media` | 产物历史与播放 |
 | `GET/POST /live/monitors`、`PATCH/DELETE /live/monitors/{id}` | 抖音监控项列表、添加、修改设置（auto_record / notify_live / notify_offline / notify_split_complete）、移除；活动录制期间拒绝删除 |
-| `PATCH /live/monitors/{id}/product-platform` | body.binding 保存直播间商品平台绑定，传 null 解除绑定。新增直播间也可传 product_platform。达多多绑定必填 ip_id |
+| `PATCH /live/monitors/{id}/product-platform` | body.binding 保存直播间商品平台绑定，传 null 解除绑定。新增直播间也可传 product_platform。达多多填写 ip_id，星动力从当前签约达人选择 ip_id |
 | `GET/POST /live/monitors/{id}/product-catalog` | 读取达多多同步状态，或排队更新本地目录 |
 | `GET /live/monitors?window_start=…&window_end=…&include_end_recording=…` | 两个 Unix 秒时间戳须成对提供且开始早于结束；不提供范围时使用服务端最近 24 小时。按窗口返回每个直播间所有相交场次，不限 20 场。已结束场次要求 started < window_end 且 ended > window_start；录制中默认要求 started < window_end。include_end_recording=true 时额外包含恰好在 window_end 开始录制的场次；前端今天及历史日期窗口均发送 false，排除恰好次日 00:00 开始的录制。省略范围时采用服务端最近窗口语义。无效或非有限范围返回 422。列表内的场次只返回摘要：id、status、started、ended、end_time_source 与 product_error（该场次存在商品列表获取错误，或商品消息连接状态为 error），不含分段、讲解区间、商品片段等详情；详情按场次标识读取 |
 | `GET /live/monitors/{monitor_id}/sessions/{session_id}` | 按稳定场次标识读取完整当前详情（分段、商品事件、讲解区间、商品片段、当前商品、监听状态与目录错误），不受时间窗口限制。成功读取但该直播间下无此场次时返回 200 / null，前端据此确认选择已失效；鉴权错误或存储失败保持非成功响应，不伪装成 null |
@@ -64,11 +65,13 @@
 | `POST /product-platform/send-code`、`login` | body.mobile；登录另外包含 sms_code，验证码不持久化；发送成功后本服务会话内限制 60 秒再次发送 |
 | `POST /product-platform/scope`、`logout` | 选择关联范围 main_ip_id，或清理本机登录；不登出用户其他浏览器 |
 | `GET /product-platform/daduoduo` | 读取已绑定达多多的直播间及其目录状态 |
-| `POST /product-platform/products/search` | body.keyword 为非空商品名称。直播商品查询传 monitor_id，项目参考图搜索传 asset_id。按直播间绑定查星斗或达多多。返回 product、scope_name 和 can_add_to_showcase。直播间未绑定或尚无达多多本地目录时返回 409 |
+| `GET /product-platform/xingdongli` | 读取星动力本机状态、脱敏账号信息和签约达人 |
+| `POST /product-platform/xingdongli/connect`、`refresh`、`logout` | connect 接受 member_token 并验证后保存。refresh 验证已保存令牌并刷新账号与达人。logout 清除本机登录 |
+| `POST /product-platform/products/search` | 直播商品查询传 monitor_id，项目参考图搜索传 asset_id。星斗和达多多要求非空 keyword，返回 product、scope_name 和 can_add_to_showcase。星动力直播间允许空 keyword 和非负偏移 start，另返回 products、total、start、length。直播间未绑定、达人不在当前账号名单或尚无达多多本地目录时返回 409 |
 | `POST /product-platform/products/add-to-showcase` | 直播间调用传 monitor_id 和星斗平台商品 ID（platform_product_id）。后端检查当前绑定并从所选合作范围读取 `ipId` 与 `memberTalentId` 执行单商品添加。返回 `{added: true}`，星斗登录失效返回 401，平台不支持或缺少范围或达人关联时返回 409 |
 | `GET/PUT /settings/workspace-layout` | 素材与粗剪页的布局偏好：left_width 为左侧卡片宽度（像素，230–10000）或 null（默认宽度）；随工作目录保存，只保留最新值 |
-| `GET /settings/cleanup-unused-files` | 只读统计可清理文件，接受 `include_referenced`（默认 false）和 `retention_days`（默认 7，正整数）。返回 `file_count`、`directory_count`、`estimated_bytes` 和 `preview_id`。 |
-| `POST /settings/cleanup-unused-files` | 确认后提交 `include_referenced`、`retention_days` 和 `preview_id`。按选项、天数和当前可清理文件重新核对预览，变化时返回 409，需重新统计并确认。返回 `deleted_files`、`deleted_directories`、`retained_files`、`bytes_reclaimed`、`cutoff_timestamp`。 |
+| `GET /settings/cleanup-unused-files` | 只读统计到期数据，接受 `clear_expired_data`（默认 false）和 `retention_days`（默认 7，正整数）。返回 `file_count`、`directory_count`、`record_count`、`original_videos`、`estimated_bytes` 和 `preview_id`。 |
+| `POST /settings/cleanup-unused-files` | 确认后提交 `clear_expired_data`、`retention_days` 和 `preview_id`。按选项、天数及文件和记录重新核对预览，变化时返回 409，数据正在写入时返回 423。返回 `deleted_files`、`deleted_directories`、`deleted_records`、`retained_files`、`retained_directories`、`retained_records`、`bytes_reclaimed` 和 `cutoff_timestamp`。 |
 | `GET /health`（无前缀）、`GET /diagnostics` | 服务存活检查与本机环境诊断 |
 | `GET /logs` | 返回 files（非空日志文件：category=runtime / task、name、size、modified，任务日志另含 group、group_type=job / product_clip、job_kind、product_name）与 runtime_available；应用运行日志在前，任务日志按修改时间倒序 |
 | `GET /logs/{category}/{name}?after=…` | 读取日志内容。不带 after 时返回末尾最多 512 KB 并从整行开始；带 after（字节偏移）时返回其后的新增内容。返回 text、start、next（下次读取的偏移）、size、truncated、reset（文件短于 after，已改为返回新内容末尾）。只接受两处日志目录内的 `.log` 文件名，运行日志仅限当前与上一份；名称无效返回 422，文件不存在返回 404 |
@@ -87,9 +90,8 @@
 | `#/projects/{asset_id}/edit` | 素材与粗剪 | 只加载当前源视频及其关联方案、产物、候选和任务 |
 | `#/live-monitoring` | 直播监控 | 管理抖音直播间，查看检测状态、录制场次、商品讲解区间及商品视频片段 |
 | `#/jobs` | 后台任务 | 全局任务状态和控制 |
-| `#/appearance` | 外观 | 主题、窗口位置记忆及启动窗口大小 |
-| `#/settings` | 云端设置 | 模型、OSS 存储、直播登录和商品平台独立管理。cloudTab=product-platform 打开平台页，默认星斗，platform=daduoduo 可定位达多多 |
-| `#/local-settings` | 本地设置 | 工作目录管理、清理未使用文件和版本更新以列表行排列 |
+| `#/settings` | 云端设置 | 模型、OSS 存储、直播登录和商品平台独立管理。cloudTab=product-platform 打开平台页，默认星斗，platform=daduoduo 或 platform=xingdongli 定位对应平台 |
+| `#/local-settings` | 本地设置 | 工作目录管理、清理未使用文件、版本更新、主题和窗口偏好 |
 | `#/logs` | 运行日志 | 查看、搜索、跟随和清理应用运行日志与任务日志 |
 
 进入受保护页面先建立本地会话；路由切换会保存当前商品资料草稿。当前项目存在未保存片段调整时，切换到其他项目或新建视频会被阻止；保存失败时地址和编辑内容保持不变。导航中的异步项目加载使用序号校验，旧请求不能覆盖较新的页面。直接打开不存在的项目保留地址并显示可重试错误，不触发分析或其他付费请求。刷新页面只恢复已保存资料和方案，未保存片段不写入浏览器存储。

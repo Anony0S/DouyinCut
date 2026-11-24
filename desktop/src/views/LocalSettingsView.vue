@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref } from "vue";
 import { api, ApiError } from "../api";
+import AppearanceSettings from "../components/AppearanceSettings.vue";
 import SoftwareUpdate from "../components/SoftwareUpdate.vue";
+import { useProjectStore } from "../stores/project";
+import { useSessionStore } from "../stores/session";
 
 type TauriInternals = {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -18,10 +21,16 @@ const dialogBusy = ref(false);
 const DEFAULT_RETENTION_DAYS = 7;
 const retentionDays = ref(DEFAULT_RETENTION_DAYS);
 const validRetentionDays = computed(() => Number.isSafeInteger(retentionDays.value) && retentionDays.value >= 1);
-const includeReferenced = ref(false);
+const clearExpiredData = ref(false);
 const cleanupPreview = ref<CleanupPreview | null>(null);
+const canConfirmCleanup = computed(() => {
+  const preview = cleanupPreview.value;
+  return !!(preview && (preview.file_count || preview.directory_count || preview.record_count));
+});
 const cleanupPreviewLoading = ref(false);
 const cleanupPreviewError = ref("");
+const project = useProjectStore();
+const session = useSessionStore();
 let cleanupPreviewRequest = 0;
 
 function openDialog(state: DialogState) {
@@ -41,6 +50,9 @@ async function runDialogAction() {
   } catch (error) {
     if (dialog.value?.kind === "cleanup" && error instanceof ApiError && error.status === 409) {
       await refreshCleanupPreview("清理范围已变化，请核对重新统计的结果。");
+    } else if (dialog.value?.kind === "cleanup" && error instanceof ApiError && error.status === 423) {
+      cleanupPreview.value = null;
+      cleanupPreviewError.value = error.message;
     } else {
       dialog.value = { title: "操作失败", message: String(error), kind: "error" };
     }
@@ -82,6 +94,8 @@ type CleanupPreview = {
   preview_id: string;
   file_count: number;
   directory_count: number;
+  record_count: number;
+  original_videos: string[];
   estimated_bytes: number;
 };
 
@@ -89,6 +103,9 @@ type CleanupResult = {
   deleted_files: number;
   deleted_directories: number;
   retained_files: number;
+  retained_directories: number;
+  deleted_records: number;
+  retained_records: number;
   bytes_reclaimed: number;
 };
 
@@ -111,13 +128,13 @@ async function refreshCleanupPreview(message = "") {
   cleanupPreviewLoading.value = true;
   try {
     const query = new URLSearchParams({
-      include_referenced: String(includeReferenced.value),
+      clear_expired_data: String(clearExpiredData.value),
       retention_days: String(days),
     });
     const preview = await api<CleanupPreview>(`/settings/cleanup-unused-files?${query}`);
     if (request === cleanupPreviewRequest) cleanupPreview.value = preview;
   } catch (error) {
-    if (request === cleanupPreviewRequest) cleanupPreviewError.value = String(error);
+    if (request === cleanupPreviewRequest) cleanupPreviewError.value = error instanceof Error ? error.message : String(error);
   } finally {
     if (request === cleanupPreviewRequest) cleanupPreviewLoading.value = false;
   }
@@ -125,22 +142,28 @@ async function refreshCleanupPreview(message = "") {
 
 function confirmCleanup() {
   retentionDays.value = DEFAULT_RETENTION_DAYS;
-  includeReferenced.value = false;
+  clearExpiredData.value = false;
   openDialog({
     title: "清理应用生成文件",
-    message: "活动任务、原始视频、直播录制及应用数据受保护。删除后无法撤销。",
+    message: "请核对预计清理范围。删除后无法撤销。",
     kind: "cleanup",
     action: async () => {
       const preview = cleanupPreview.value;
-      if (!preview || !(preview.file_count || preview.directory_count)) return dialog.value ?? undefined;
+      if (!preview || !canConfirmCleanup.value) return dialog.value ?? undefined;
       const result = await api<CleanupResult>("/settings/cleanup-unused-files", "POST", {
-        include_referenced: includeReferenced.value,
+        clear_expired_data: clearExpiredData.value,
         retention_days: retentionDays.value,
         preview_id: preview.preview_id,
       });
+      const pending = result.retained_files > 0 || result.retained_directories > 0;
+      if (result.deleted_records) void project.refreshAfterCleanup().catch(session.report);
+      const records = clearExpiredData.value ? `已删除 ${result.deleted_records} 条本地业务记录。` : "";
+      const remaining = pending
+        ? `另有 ${result.retained_files} 个文件和 ${result.retained_directories} 个目录未能删除。${result.retained_records ? `${result.retained_records} 条业务记录已保留，可重新统计后再清理。` : ""}`
+        : "";
       return {
-        title: "清理完成",
-        message: `已删除 ${result.deleted_files} 个文件和 ${result.deleted_directories} 个目录，释放 ${formatBytes(result.bytes_reclaimed)}。${result.retained_files ? `另有 ${result.retained_files} 个文件因占用或权限原因保留。` : ""}`,
+        title: pending ? "部分清理完成" : "清理完成",
+        message: `已删除 ${result.deleted_files} 个文件和 ${result.deleted_directories} 个目录，释放 ${formatBytes(result.bytes_reclaimed)}。${records}${remaining}`,
         kind: "info",
       };
     },
@@ -152,10 +175,7 @@ function confirmCleanup() {
 <template>
   <section class="local-settings-panel">
     <div class="page-heading">
-      <div>
-        <h1>本地设置</h1>
-        <p>管理本机工作目录、清理未使用文件和应用版本。</p>
-      </div>
+      <h1>本地设置</h1>
     </div>
 
     <ul class="list local-settings-list">
@@ -183,6 +203,8 @@ function confirmCleanup() {
       <SoftwareUpdate />
     </ul>
 
+    <AppearanceSettings />
+
     <div v-if="dialog" class="modal modal-open local-settings-dialog" role="presentation">
       <section
         class="modal-box"
@@ -204,27 +226,37 @@ function confirmCleanup() {
               :value="Number.isNaN(retentionDays) ? '' : retentionDays"
               :disabled="dialogBusy"
               @input="retentionDays = ($event.target as HTMLInputElement).valueAsNumber; refreshCleanupPreview()" />
-            天的文件
+            天
           </label>
           <label class="label mt-4 flex w-fit whitespace-normal text-base-content">
             <input
               type="checkbox"
               class="checkbox checkbox-sm"
-              :checked="includeReferenced"
+              :checked="clearExpiredData"
               :disabled="dialogBusy"
-              @change="includeReferenced = ($event.target as HTMLInputElement).checked; refreshCleanupPreview()" />
-            同时清理项目或任务引用的文件
+              @change="clearExpiredData = ($event.target as HTMLInputElement).checked; refreshCleanupPreview()" />
+            同时清理到期记录和原始视频
           </label>
-          <p v-if="includeReferenced">删除后，相关项目或历史任务中的预览、导出或封面可能无法打开。</p>
+          <p v-if="clearExpiredData" class="text-error">
+            清理超过所选天数的项目、任务、直播记录、录制和产物，包括下方列出的原始视频。
+            期内记录依赖的资料继续保留。
+          </p>
           <p v-if="cleanupPreviewError" role="status">{{ cleanupPreviewError }}</p>
           <div class="mt-4 rounded-box bg-base-200 p-3 text-sm text-base-content" role="status" aria-live="polite">
             <span v-if="!validRetentionDays" class="text-error">请输入大于或等于 1 的整数天数。</span>
             <span v-else-if="cleanupPreviewLoading">正在统计可清理文件…</span>
             <span v-else-if="cleanupPreview">
               预计清理 <strong>{{ cleanupPreview.file_count }}</strong> 个文件、{{ cleanupPreview.directory_count }} 个目录，
+              <template v-if="clearExpiredData">删除 <strong>{{ cleanupPreview.record_count }}</strong> 条本地业务记录，</template>
               释放 <strong>{{ formatBytes(cleanupPreview.estimated_bytes) }}</strong>
             </span>
             <button v-else class="btn btn-sm" type="button" @click="refreshCleanupPreview()">重新统计</button>
+          </div>
+          <div v-if="cleanupPreview?.original_videos.length" class="mt-3 text-sm text-error">
+            <p>将删除 {{ cleanupPreview.original_videos.length }} 个原始视频</p>
+            <ul class="mt-1 max-h-32 overflow-y-auto break-all">
+              <li v-for="path in cleanupPreview.original_videos" :key="path">{{ path }}</li>
+            </ul>
           </div>
         </template>
         <div class="modal-action">
@@ -234,8 +266,8 @@ function confirmCleanup() {
             class="btn btn-error"
             type="button"
             :data-autofocus="dialog.kind === 'confirm' || undefined"
-            :disabled="dialogBusy || (dialog.kind === 'cleanup' && !(cleanupPreview?.file_count || cleanupPreview?.directory_count))"
-            @click="runDialogAction">{{ dialogBusy ? "处理中…" : dialog.kind === "cleanup" ? "确认清理" : "确认" }}</button>
+            :disabled="dialogBusy || (dialog.kind === 'cleanup' && !canConfirmCleanup)"
+            @click="runDialogAction">{{ dialogBusy ? "处理中…" : dialog.kind === "cleanup" ? (clearExpiredData ? "确认删除到期数据" : "确认清理") : "确认" }}</button>
           <button v-else class="btn btn-primary" type="button" data-autofocus @click="closeDialog">知道了</button>
         </div>
       </section>
@@ -258,7 +290,6 @@ function confirmCleanup() {
   font-size: 24px;
 }
 
-.page-heading p,
 :deep(.local-setting-copy p) {
   margin: 5px 0 0;
   color: var(--text-secondary);

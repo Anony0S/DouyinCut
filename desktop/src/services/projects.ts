@@ -10,6 +10,7 @@ export const projectsApi = {
   saveDraft: (id: string, draft: ProjectDraft) => api<ProjectDraft>(`/projects/${encodeURIComponent(id)}`, 'PATCH', draft),
   deleteProject: (id: string) => api<{deleted_asset_id:string;deleted_plans:number;oss_audio_retained:boolean;cleanup_pending:string[]}>(`/projects/${encodeURIComponent(id)}`, 'DELETE'),
   upload: uploadVideo,
+  importLocal: (path: string) => api<Job>('/assets/import-local', 'POST', { path }),
   analyze: (id: string, draft: ProjectDraft, options: { refresh_asr: boolean; short_filler_filter: ShortFillerFilter | null }) =>
     api<Job>(`/assets/${encodeURIComponent(id)}/analyze`, 'POST', { ...draft, ...options }),
   savePlan: (plan: Plan) => api<Plan>(`/plans/${encodeURIComponent(plan.id)}`, 'PATCH', plan),

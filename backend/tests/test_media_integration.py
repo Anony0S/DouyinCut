@@ -95,8 +95,8 @@ class MediaIntegrationTests(unittest.TestCase):
                     {'begin_time': 1000, 'end_time': 2000, 'text': '只要九十九', 'punctuation': '。'},
                     {'begin_time': 3000, 'end_time': 4500, 'text': '面料柔软', 'punctuation': '。'}]}}}
             selection = TimeSelection.model_validate({'clips': [
-                {'start_ms': 3000, 'end_ms': 4500, 'reason': '面料'},
-                {'start_ms': 0, 'end_ms': 1000, 'reason': '上身'}]})
+                {'start_ms': 3000, 'end_ms': 4500},
+                {'start_ms': 0, 'end_ms': 1000}]})
             worker = Worker(settings)
             with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                     patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \

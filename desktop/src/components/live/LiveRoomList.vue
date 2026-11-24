@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from "vue";
 import { liveMonitoringApi, type LiveMonitor, type LiveMonitorSettings } from "../../services/liveMonitoring";
-import type { RoomPlatformBinding } from "../../services/productPlatform";
+import { needsPlatformIp, type RoomPlatformBinding } from "../../services/productPlatform";
 import LiveIcon from "./LiveIcon.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
 import RoomPlatformFields from "../product/RoomPlatformFields.vue";
@@ -253,7 +253,7 @@ function resetBinding() {
 async function saveBinding() {
   const monitor = bindingMonitor.value;
   const binding = bindingDraft.value;
-  if (!monitor || savingBinding.value || (binding?.platform === "daduoduo" && !binding.ip_id.trim())) return;
+  if (!monitor || savingBinding.value || needsPlatformIp(binding)) return;
   savingBinding.value = true;
   bindingError.value = "";
   try {
@@ -525,10 +525,10 @@ onUnmounted(closeSettings);
       <dialog v-if="bindingMonitor" ref="bindingDialog" class="modal" :aria-labelledby="bindingTitleId"
         @cancel.prevent="closeBinding" @close="resetBinding">
         <div class="modal-box max-w-sm">
-          <h2 :id="bindingTitleId" class="mb-4 text-lg font-semibold">
+          <h2 :id="bindingTitleId" class="text-lg font-semibold">
             {{ bindingMonitor.product_platform ? "修改绑定" : "绑定平台" }} · {{ bindingMonitor.name || "抖音直播间" }}
           </h2>
-          <form @submit.prevent="saveBinding">
+          <form class="pt-4" @submit.prevent="saveBinding">
             <fieldset :disabled="savingBinding">
               <RoomPlatformFields v-model="bindingDraft" />
             </fieldset>
@@ -536,7 +536,7 @@ onUnmounted(closeSettings);
             <div class="modal-action">
               <button type="button" class="btn btn-sm" :disabled="savingBinding" @click="closeBinding">取消</button>
               <button class="btn btn-primary btn-sm"
-                :disabled="savingBinding || (bindingDraft?.platform === 'daduoduo' && !bindingDraft.ip_id.trim())">保存绑定</button>
+                :disabled="savingBinding || needsPlatformIp(bindingDraft)">保存绑定</button>
             </div>
           </form>
         </div>

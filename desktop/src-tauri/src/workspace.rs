@@ -155,6 +155,40 @@ fn pick_directory() -> Result<Option<PathBuf>, String> {
 }
 
 #[tauri::command]
+pub async fn pick_source_video(window: tauri::WebviewWindow) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Controls::Dialogs::*;
+        let owner = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+        return tauri::async_runtime::spawn_blocking(move || {
+            let mut path = vec![0u16; 32768];
+            let filter: Vec<u16> = "视频文件\0*.mp4;*.mov;*.mkv;*.avi;*.webm;*.flv;*.ts;*.m4v\0\0"
+                .encode_utf16().collect();
+            let mut dialog = OPENFILENAMEW {
+                lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+                hwndOwner: owner as _,
+                lpstrFilter: filter.as_ptr(),
+                lpstrFile: path.as_mut_ptr(),
+                nMaxFile: path.len() as u32,
+                Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR,
+                ..unsafe { std::mem::zeroed() }
+            };
+            if unsafe { GetOpenFileNameW(&mut dialog) } != 0 {
+                let length = path.iter().position(|value| *value == 0).unwrap_or(path.len());
+                return String::from_utf16(&path[..length]).map(Some).map_err(|e| e.to_string());
+            }
+            let error = unsafe { CommDlgExtendedError() };
+            if error == 0 { Ok(None) } else { Err(format!("无法打开视频选择器（{error}）")) }
+        }).await.map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        Err("原始视频选择仅支持 Windows。".into())
+    }
+}
+
+#[tauri::command]
 pub async fn delete_workspace_config(app: tauri::AppHandle) -> Result<(), String> {
     let config_path = app.path()
         .app_config_dir()

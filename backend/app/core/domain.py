@@ -33,6 +33,8 @@ class Asset(Model):
     audio_start_us: int = 0
     session_start_us: int = Field(default=0, ge=0)
     source_monitor_id: str | None = None
+    original_path: str | None = None
+    original_file_id: list[int] | None = None
 
 
 class Span(Model):

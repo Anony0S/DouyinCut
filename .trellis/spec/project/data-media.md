@@ -13,7 +13,7 @@
 - `Asset`：本地路径、原显示名、摘要、时长、分辨率、音轨及音频 / 视频流起始时间。
 - `Transcript`：source_asset_id、start_us、end_us、text、timing；当前粗剪只接受 sentence。
 - `Product`：用户输入商品名，按单商品前提创建；不代表视觉验证。
-- `Candidate`：选句源区间、商品 ID、原话与理由；原话展示可限长，完整源转写单独保存。
+- `Candidate`：选句源区间、商品 ID 和原话；原话展示可限长，完整源转写单独保存。
 - `Plan`：版本、商品、画幅、目标时长、连续 clips、字幕、要求、警告及审核状态。
 - 直播监控数据使用独立表：`live_monitors`、`live_sessions`、`live_segments`、`live_product_events`、`live_product_periods`、`live_segment_product_clips`、`live_monitor_liveness`、`live_monitor_controls`、`live_session_current_product`、`live_monitor_products`、`live_monitor_product_catalog`、`live_monitor_product_misses`、`live_session_product_catalog_state`、`live_product_listener_state`、`live_product_listener_retries`。直播表中的时间为 Unix 秒（浮点），分段 / 片段时长为整数微秒。
 - 剪辑区间、字幕及拼接时间线内部使用整数微秒、左闭右开；拼接时间线起点为零，无缝累计。模型输入 / 输出的整数毫秒在协议边界转换；直播场次和事件的 Unix 秒遵循上一条，不与剪辑微秒混用。
@@ -21,7 +21,7 @@
 - 保存调整按版本校验，冲突返回 409；片段调整重映射字幕。被裁断的句子不导出整句，避免字幕包含未说出的文字。
 - FFmpeg 统一画幅、帧率与音频参数并拼接，跟随原素材画幅；原声保留，当前不烧录字幕。后端 MP4 导出产物为 `video.mp4`、`subtitles.srt`、`timeline.json`、`manifest.json`；当前界面的剪映草稿交付及独立工程保留规则见 [§2.3](workspace.md#23-任务与交付)。
 - 生成目录先 staging，再原子发布；失败清理临时文件，已发布产物可恢复。删除项目时只删除应用导入副本和应用生成产物，不删除用户原始视频。
-- 本地设置的手动清理仅处理修改时间超过七天、且无项目 / 任务产物路径引用的 `analysis/`、`previews/`、`exports/`、`covers/` 应用生成文件；终止任务的分析临时目录可清理，活动任务、项目仍引用的导出 / 封面、符号链接、原始视频、直播录制、日志、数据库和设置均保留。只识别清理已知的导出 staging 与封面转换临时文件，不按扩展名广泛删除。
+- 本地设置的手动清理分为默认的到期未使用产物清理和显式勾选的到期业务数据清理。按所选天数处理文件和记录，后者可删除已登记的到期原始视频，详见[清理设置](settings.md#本地设置与软件更新)。
 - 项目列表和方案列表提供显式删除并二次确认。项目删除清理其本地导入副本、草稿、ASR 转写 / 缓存、任务记录、候选、方案、预览 / 导出；方案删除清理该方案、独占候选 / 商品及其预览 / 导出。存在相关活动任务时拒绝删除，先完成或取消任务。删除方案保留源视频、转写与同源其他方案。
 - 所有用户可见的删除 / 移除操作（视频项目、粗剪方案、直播监控项、录制场次、商品视频片段及未保存方案中的片段移除）统一使用点击触发的锚定确认 popover；显示对象与影响范围，提供取消 / 危险色确认按钮。点击外部、按 Esc 或切换触发器取消；打开后支持焦点、Tab、Enter，确认期间锁定重复提交；不改变现有删除接口、活动任务保护或文件保留语义。未保存方案切换仍使用原有导航确认。
 - 删除不清理 OSS 临时 ASR 音频：对象按源视频 SHA 与片段时间确定名称，重复导入可能共用，且旧对象桶与当前密钥不一定一致。用户可在 OSS 为 `douyincut/audio/` 配置 7 天生命周期过期规则；这仅清理临时音频，不影响本地项目或视频。

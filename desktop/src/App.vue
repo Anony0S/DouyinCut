@@ -39,7 +39,6 @@ const sidebarItems = [
   { route: 'workspace', label: '素材与粗剪', icon: 'video', open: () => workspace.goEditor() },
   { route: 'projects', label: '视频项目', icon: 'folder', open: () => workspace.goProjects() },
   { route: 'jobs', label: '后台任务', icon: 'clock', open: () => workspace.go('jobs') },
-  { route: 'appearance', label: '外观', icon: 'palette', open: () => workspace.go('appearance') },
   { route: 'settings', label: '云端设置', icon: 'settings', open: () => workspace.go('settings') },
   { route: 'local-settings', label: '本地设置', icon: 'server', open: () => workspace.go('local-settings') },
   { route: 'logs', label: '运行日志', icon: 'document', open: () => workspace.go('logs') },

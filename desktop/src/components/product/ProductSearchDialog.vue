@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, useId } from 'vue'
 import { useRouter } from 'vue-router'
-import { isProductPlatformAuthError, productPlatformApi, type PlatformProduct } from '../../services/productPlatform'
+import { isProductPlatformAuthError, isXingdongliAuthError, productPlatformApi, type PlatformProduct } from '../../services/productPlatform'
 import { useSessionStore } from '../../stores/session'
 
-const props = defineProps<{ keyword: string; monitorId: string }>()
+const props = defineProps<{ keyword: string; monitorId: string; browse?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const id = useId(), router = useRouter(), session = useSessionStore()
@@ -12,7 +12,11 @@ const query = ref(props.keyword.trim())
 const loading = ref(false), adding = ref(false), added = ref(false)
 const error = ref(''), addError = ref(''), scopeName = ref(''), imageFailed = ref(false)
 const product = ref<PlatformProduct | null>(null)
+const page = ref<{ products: PlatformProduct[]; start: number; length: number; total: number }>()
+const selectedIndex = ref(0)
 const canAddToShowcase = ref(false)
+const canBrowse = ref(props.browse)
+let submittedKeyword = query.value, requestedStart = 0
 let disposed = false
 const cover = computed(() => {
   if (imageFailed.value || !product.value?.cover) return ''
@@ -28,12 +32,18 @@ const facts = computed(() => product.value ? [
   canAddToShowcase.value
     ? { label: '实时销量', value: product.value.real_time_sales ?? '—' }
     : { label: '近 1 日销量', value: product.value.yesterday_sales ?? '—' },
+  { label: '今日销量', value: page.value ? product.value.real_time_sales ?? '—' : '—' },
   { label: '近 30 日销量', value: product.value.month_sales ?? '—' },
   { label: '累计销量', value: product.value.total_sales ?? '—' },
   { label: '直播', value: product.value.has_live == null ? '—' : product.value.has_live ? '有直播' : '暂无直播' },
   { label: 'AI 直播', value: product.value.has_ai_live == null ? '—' : product.value.has_ai_live ? '有' : '无' },
 ].filter(fact => canAddToShowcase.value || fact.value !== '—') : [])
 function close() { disposed = true; emit('close') }
+function selectProduct(event: Event) {
+  selectedIndex.value = Number((event.target as HTMLSelectElement).value)
+  product.value = page.value?.products[selectedIndex.value] ?? null
+  imageFailed.value = false
+}
 async function addToShowcase() {
   const platformProductId = product.value?.platform_product_id
   if (!platformProductId || !canAddToShowcase.value || adding.value || added.value) return
@@ -50,20 +60,29 @@ async function addToShowcase() {
     } else addError.value = cause instanceof Error ? cause.message : '添加橱窗失败，请重试'
   } finally { if (!disposed) adding.value = false }
 }
-async function search() {
+async function search(start = 0, keyword = query.value.trim()) {
   if (loading.value || adding.value) return
-  const keyword = query.value.trim()
-  if (!keyword) { error.value = '请输入查询词'; return }
+  if (!keyword && !canBrowse.value) { error.value = '请输入查询词'; return }
+  submittedKeyword = keyword; requestedStart = start
   loading.value = true; error.value = ''; addError.value = ''; added.value = false
-  product.value = null; imageFailed.value = false; canAddToShowcase.value = false
+  product.value = null; page.value = undefined; selectedIndex.value = 0
+  imageFailed.value = false; canAddToShowcase.value = false
   try {
-    const result = await productPlatformApi.search(keyword, {monitor_id: props.monitorId})
+    const result = await productPlatformApi.search(keyword, {monitor_id: props.monitorId}, start)
     if (disposed) return
     product.value = result.product; scopeName.value = result.scope_name
     canAddToShowcase.value = result.can_add_to_showcase
+    if (result.products && result.length && result.start !== undefined && result.total !== undefined) {
+      canBrowse.value = true
+      page.value = {products: result.products, start: result.start, length: result.length, total: result.total}
+    }
   } catch (cause) {
     if (disposed) return
-    if (isProductPlatformAuthError(cause)) {
+    if (isXingdongliAuthError(cause)) {
+      close()
+      session.message = '请在云端设置中填写有效的星动力 member-token，再查询商品'
+      await router.push({ path: '/settings', query: { cloudTab: 'product-platform', platform: 'xingdongli' } })
+    } else if (isProductPlatformAuthError(cause)) {
       // Close before navigating so no modal backdrop survives a route change.
       close()
       session.message = '星斗商品平台未登录或登录已失效，请手动登录后重新查询'
@@ -85,13 +104,13 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
           </div>
           <button class="btn btn-ghost btn-sm btn-square shrink-0" aria-label="关闭商品查询" autofocus @click="close">✕</button>
         </div>
-        <form class="mt-3 flex items-center gap-2" @submit.prevent="search">
+        <form class="mt-3 flex items-center gap-2" @submit.prevent="search()">
           <span class="label-text shrink-0 whitespace-nowrap text-xs text-base-content/60">查询词</span>
           <input v-model="query" class="input input-bordered input-sm min-w-0 flex-1" maxlength="200"
             :disabled="loading || adding" aria-label="商品查询词" />
-          <button type="submit" class="btn btn-primary btn-sm shrink-0" :disabled="loading || adding || !query.trim()">
+          <button type="submit" class="btn btn-primary btn-sm shrink-0" :disabled="loading || adding || (!canBrowse && !query.trim())">
             <span v-if="loading" class="loading loading-spinner loading-xs" aria-hidden="true"></span>
-            {{ loading ? '查询中…' : '搜索' }}
+            {{ loading ? '查询中…' : canBrowse && !query.trim() ? '查看全部' : '搜索' }}
           </button>
         </form>
         <div v-if="loading" role="status" class="py-16 text-center text-sm text-base-content/60">
@@ -99,9 +118,15 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
           <p>正在查询商品…</p>
         </div>
         <div v-else-if="error" role="alert" class="alert alert-soft alert-error mt-6 text-sm">
-          <span>{{ error }}</span><button class="btn btn-sm" @click="search">重试</button>
+          <span>{{ error }}</span><button class="btn btn-sm" @click="search(requestedStart, submittedKeyword)">重试</button>
         </div>
         <template v-else-if="product">
+          <label v-if="page && page.products.length > 1" class="mt-4 grid gap-1.5">
+            <span class="text-sm font-medium">选择商品</span>
+            <select class="select select-sm w-full" :value="selectedIndex" @change="selectProduct">
+              <option v-for="(item, index) in page.products" :key="index" :value="index">{{ item.title }}</option>
+            </select>
+          </label>
           <article class="card card-border bg-base-100 mt-6">
             <div class="card-body gap-5">
               <div class="flex flex-col gap-5 sm:flex-row">
@@ -149,6 +174,13 @@ onUnmounted(() => { disposed = true; dialog.value?.close() })
         <div v-else role="status" class="py-16 text-center">
           <p class="font-medium">未查询到商品</p>
           <p v-if="scopeName" class="mt-2 text-sm text-base-content/60">当前范围“{{ scopeName }}”内暂无匹配结果</p>
+        </div>
+        <div v-if="page && (page.start > 0 || page.total > page.length)" class="mt-4 flex flex-wrap items-center gap-2">
+          <button type="button" class="btn btn-sm" :disabled="!page.start"
+            @click="search(Math.max(0, page.start - page.length), submittedKeyword)">上一页</button>
+          <span class="text-sm text-base-content/70">第 {{ Math.floor(page.start / page.length) + 1 }} 页 · 共 {{ page.total }} 件</span>
+          <button type="button" class="btn btn-sm" :disabled="page.start + page.length >= page.total"
+            @click="search(page.start + page.length, submittedKeyword)">下一页</button>
         </div>
         <div class="modal-action"><button class="btn" @click="close">关闭</button></div>
       </div>

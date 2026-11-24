@@ -17,7 +17,8 @@ import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
 import LiveRoomPlatform from "../components/live/LiveRoomPlatform.vue";
 import RoomPlatformFields from "../components/product/RoomPlatformFields.vue";
-import type { RoomPlatformBinding } from "../services/productPlatform";
+import { needsPlatformIp, type RoomPlatformBinding } from "../services/productPlatform";
+import ProductSearchDialog from "../components/product/ProductSearchDialog.vue";
 import { readRoomOrder, sortRooms } from "../components/live/roomOrder";
 import LiveSessionPanel from "../components/live/LiveSessionPanel.vue";
 import LiveRecordingTimeline from "../components/live/LiveRecordingTimeline.vue";
@@ -30,6 +31,7 @@ const session = useSessionStore(),
 const { busy, connected } = storeToRefs(session);
 const monitors = ref<LiveMonitor[]>([]);
 const newProductPlatform = ref<RoomPlatformBinding | null>(null);
+const browseProductsMonitorId = ref("");
 const url = ref(""),
   name = ref(""),
   loading = ref(false),
@@ -224,6 +226,7 @@ function openExternalUrl(url: string) {
   void openUrl(parsed.href).catch((cause) => session.report(cause));
 }
 async function addMonitor() {
+  if (needsPlatformIp(newProductPlatform.value)) return;
   await session.act(async () => {
     const created = await liveMonitoringApi.create(
       url.value.trim(),
@@ -456,7 +459,7 @@ onUnmounted(() => {
             </button>
             <button
               class="btn btn-primary btn-sm"
-              :disabled="busy || !connected || !url.trim() || (newProductPlatform?.platform === 'daduoduo' && !newProductPlatform.ip_id.trim())">
+              :disabled="busy || !connected || !url.trim() || needsPlatformIp(newProductPlatform)">
               <LiveIcon name="plus" />
               开始监控
             </button>
@@ -545,15 +548,20 @@ onUnmounted(() => {
           <template #catalog>
             <LiveRoomPlatform v-if="selectedMonitor.product_platform?.platform === 'daduoduo'"
               :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
+            <button v-else-if="selectedMonitor.product_platform?.platform === 'xingdongli'"
+              type="button" class="btn btn-sm" @click="browseProductsMonitorId = selectedMonitor.id">星动力商品列表</button>
           </template>
         </LiveSessionPanel>
         <div v-else class="live-content-columns">
           <section v-for="title in ['商品讲解', '商品视频片段']" :key="title"
             class="card card-border bg-base-100 live-content-card">
             <div class="live-content-card-heading"><h3>{{ title }}</h3></div>
-            <div v-if="title === '商品讲解' && selectedMonitor.product_platform?.platform === 'daduoduo'" class="live-subheading">
+            <div v-if="title === '商品讲解' && selectedMonitor.product_platform && selectedMonitor.product_platform.platform !== 'xingdou'" class="live-subheading">
               <span>讲解列表</span>
-              <LiveRoomPlatform :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
+              <LiveRoomPlatform v-if="selectedMonitor.product_platform.platform === 'daduoduo'"
+                :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
+              <button v-else type="button" class="btn btn-sm"
+                @click="browseProductsMonitorId = selectedMonitor.id">星动力商品列表</button>
             </div>
             <div class="live-card-empty"><strong>{{ cardEmptyMessage }}</strong></div>
           </section>
@@ -594,5 +602,7 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+    <ProductSearchDialog v-if="browseProductsMonitorId" keyword="" :monitor-id="browseProductsMonitorId"
+      browse @close="browseProductsMonitorId = ''" />
   </section>
 </template>

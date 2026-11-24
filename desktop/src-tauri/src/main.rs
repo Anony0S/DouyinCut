@@ -29,6 +29,7 @@ fn main() {
         .manage(updates::UpdateHost::default())
         .invoke_handler(tauri::generate_handler![
             workspace::workspace_action,
+            workspace::pick_source_video,
             workspace::delete_workspace_config,
             workspace::relaunch,
             updates::check_for_update,

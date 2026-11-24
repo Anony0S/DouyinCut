@@ -12,9 +12,11 @@ from pathlib import Path
 
 from .core.logs import ACTIVE_JOB_STATES
 from .core.storage import Store
+from .cleanup_records import expired_business_data
 
 DEFAULT_RETENTION_DAYS = 7
 SECONDS_PER_DAY = 24 * 60 * 60
+_OUTPUT_FOLDERS = ("analysis", "previews", "exports", "covers")
 _JOB_ID = re.compile(r"job_[0-9a-f]{32}")
 _COVER_TEMP = re.compile(r"^(job_[0-9a-f]{32})\.(?:source\.(?:png|jpg|webp)|tmp\.jpg)$")
 _STAGING = re.compile(r"^\.(export_(job_[0-9a-f]{32}))-attempt_[0-9a-f]{32}\.partial$")
@@ -26,32 +28,52 @@ class CleanupPreviewChanged(Exception):
 
 def cleanup_unused_files(store: Store, data_dir: Path, *, now: float | None = None,
                          retention_days: int = DEFAULT_RETENTION_DAYS,
-                         include_referenced: bool = False, preview: bool = False,
+                         clear_expired_data: bool = False, preview: bool = False,
                          preview_id: str | None = None) -> dict:
     cutoff = (time.time() if now is None else now) - retention_days * SECONDS_PER_DAY
     root = Path(data_dir).resolve()
     with store.connection() as conn:
         # Keep job state stable during deletion. A preview needs only a read snapshot.
         conn.execute("BEGIN" if preview else "BEGIN IMMEDIATE")
-        entries = _cleanup_entries(conn, root, cutoff, include_referenced)
+        records, originals = {}, []
+        if clear_expired_data:
+            if not preview and preview_id is None:
+                raise CleanupPreviewChanged
+            entries, records, originals = expired_business_data(conn, root, cutoff)
+        else:
+            entries = _cleanup_entries(conn, root, cutoff)
         files = {path: info for path, info in entries.items() if stat.S_ISREG(info.st_mode)}
         directories = [path for path, info in entries.items() if stat.S_ISDIR(info.st_mode)]
+        record_count = sum(len(rows) for rows in records.values())
         if preview or preview_id is not None:
-            digest = hashlib.sha256(json.dumps([retention_days, include_referenced]).encode())
+            digest = hashlib.sha256(json.dumps([clear_expired_data, retention_days]).encode())
             for path, info in sorted(entries.items()):
-                identity = (str(path.relative_to(root)), *_identity(info))
+                identity = (str(path), *_identity(info))
                 digest.update(json.dumps(identity).encode())
+            for table, rows in records.items():
+                digest.update(table.encode())
+                for row in rows:
+                    digest.update(json.dumps(tuple(row)).encode())
+            digest.update(json.dumps(originals).encode())
             current_id = digest.hexdigest()
             if preview:
                 return {"preview_id": current_id, "file_count": len(files),
-                        "directory_count": len(directories),
+                        "directory_count": len(directories), "record_count": record_count,
+                        "original_videos": originals,
                         "estimated_bytes": sum(info.st_size for info in files.values())}
             if preview_id != current_id:
                 raise CleanupPreviewChanged
 
-        result = {"deleted_files": 0, "deleted_directories": 0, "retained_files": 0,
-                  "bytes_reclaimed": 0, "cutoff_timestamp": cutoff}
-        for path, info in files.items():
+        result = {"deleted_files": 0, "deleted_directories": 0, "retained_files": 0, "retained_directories": 0,
+                  "deleted_records": 0, "retained_records": record_count, "bytes_reclaimed": 0,
+                  "cutoff_timestamp": cutoff}
+        original_paths = set(map(Path, originals))
+        # Delete managed files first so a failed cleanup can leave originals available.
+        for path in sorted(files, key=lambda candidate: candidate in original_paths):
+            if path in original_paths and result["retained_files"]:
+                result["retained_files"] += 1
+                continue
+            info = files[path]
             try:
                 if not _same_entry(path, info, root):
                     result["retained_files"] += 1
@@ -67,12 +89,19 @@ def cleanup_unused_files(store: Store, data_dir: Path, *, now: float | None = No
                 if _same_entry(path, entries[path], root, directory=True):
                     path.rmdir()
                     result["deleted_directories"] += 1
+                else:
+                    result["retained_directories"] += 1
             except OSError:
-                pass  # Busy directories and newly added files stay in place.
+                result["retained_directories"] += 1
+        if clear_expired_data and not (result["retained_files"] or result["retained_directories"]):
+            for table, rows in records.items():
+                conn.executemany(f"DELETE FROM {table} WHERE rowid=?", ((row[0],) for row in rows))
+            result["deleted_records"] = record_count
+            result["retained_records"] = 0
     return result
 
 
-def _cleanup_entries(conn, root: Path, cutoff: float, include_referenced: bool) -> dict[Path, os.stat_result]:
+def _cleanup_entries(conn, root: Path, cutoff: float) -> dict[Path, os.stat_result]:
     job_rows = conn.execute("SELECT id, state, payload, result FROM jobs").fetchall()
     active_jobs = {row["id"] for row in job_rows if row["state"] in ACTIVE_JOB_STATES}
     assets = conn.execute("SELECT id, body FROM objects WHERE kind='asset'").fetchall()
@@ -82,9 +111,8 @@ def _cleanup_entries(conn, root: Path, cutoff: float, include_referenced: bool) 
     active_assets = set()
     for row in assets:
         protected.update(_record_paths(json.loads(row["body"]), ("path",)))
-    if not include_referenced:
-        for row in conn.execute("SELECT body FROM objects WHERE kind='export'"):
-            referenced.update(_record_paths(json.loads(row[0]), ("path", "video_path")))
+    for row in conn.execute("SELECT body FROM objects WHERE kind='export'"):
+        referenced.update(_record_paths(json.loads(row[0]), ("path", "video_path")))
     for row in job_rows:
         if row["id"] in active_jobs:
             payload = json.loads(row["payload"])
@@ -95,11 +123,11 @@ def _cleanup_entries(conn, root: Path, cutoff: float, include_referenced: bool) 
             paths = _record_paths(json.loads(row["result"]), ("path", "draft_path", "video_path"))
             if row["id"] in active_jobs:
                 protected.update(paths)
-            elif not include_referenced:
+            else:
                 referenced.update(paths)
 
     entries = {}
-    for name in ("analysis", "previews", "exports", "covers"):
+    for name in _OUTPUT_FOLDERS:
         folder = root / name
         if not folder.is_dir() or _is_link(folder):
             continue
@@ -111,8 +139,7 @@ def _cleanup_entries(conn, root: Path, cutoff: float, include_referenced: bool) 
                 continue
             if name == "analysis" and not _JOB_ID.fullmatch(child.name):
                 continue
-            if name == "covers" and (child.name in active_assets or
-                                     (not include_referenced and child.name in asset_ids)):
+            if name == "covers" and (child.name in active_assets or child.name in asset_ids):
                 continue
             # Known staging and old analysis workspaces are disposable even for terminal jobs.
             if name != "analysis" and not _STAGING.fullmatch(child.name) and _overlaps(child, referenced):
@@ -188,7 +215,7 @@ def _identity(info: os.stat_result) -> tuple:
 
 def _same_entry(path: Path, expected: os.stat_result, root: Path, *, directory: bool = False) -> bool:
     # Reject replaced entries and any path now reached through a link or junction.
-    if any(_is_link(item) for item in (path, *path.parents) if item != root and item.is_relative_to(root)):
+    if any(_is_link(item) for item in (path, *path.parents) if item != root):
         return False
     current = path.stat()
     if directory:

@@ -34,8 +34,8 @@ class RoughcutTests(unittest.TestCase):
                                      end_us=i * 10_000_000 + 5_000_000, text=text)
                           for i, text in enumerate(['上身很显瘦。', '今天只要九十九。', '面料柔软透气。'])]
         self.selection = TimeSelection.model_validate({'clips': [
-            {'start_ms': 20000, 'end_ms': 25000, 'reason': '面料'},
-            {'start_ms': 0, 'end_ms': 5000, 'reason': '上身效果'}]})
+            {'start_ms': 20000, 'end_ms': 25000},
+            {'start_ms': 0, 'end_ms': 5000}]})
 
     def test_real_two_minute_chunks_map_every_sentence_and_tail_and_reuse_cache(self):
         self.assertEqual(ASR_CHUNK_US, 120_000_000)
@@ -110,7 +110,7 @@ class RoughcutTests(unittest.TestCase):
     def test_short_filler_filter_sends_original_when_every_row_would_be_removed(self):
         sentences = [Transcript(source_asset_id=self.asset.id, start_us=0, end_us=500_000, text='嗯。')]
         response = {'choices': [{'message': {'content': json.dumps({'clips': [
-            {'start_ms': 0, 'end_ms': 500, 'reason': '测试原转写回退'}]})}}]}
+            {'start_ms': 0, 'end_ms': 500}]})}}]}
         request = RoughcutRequest(product_name='测试', short_filler_filter={})
         with patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
                 patch('app.ai.roughcut.cloud_json', return_value=response) as network:
@@ -153,11 +153,38 @@ class RoughcutTests(unittest.TestCase):
                 select_intervals(self.sentences, RoughcutRequest(product_name='test'), self.config, self.asset.duration_us)
         self.assertEqual(json.loads(raised.exception.details['response_body']), response)
 
+    def test_planner_accepts_single_json_block_after_analysis(self):
+        expected = self.selection.model_dump()
+        reply = self.selection.model_dump()
+        reply['clips'][0]['reason'] = '冗余说明'
+        content = f'我先通读转写。\n```json\n{json.dumps(reply)}\n```\n以上是选片结果。'
+        response = {'choices': [{'finish_reason': 'stop', 'message': {'content': content}}]}
+        with patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
+                patch('app.ai.roughcut.cloud_json', return_value=response) as network:
+            result = select_intervals(self.sentences, RoughcutRequest(product_name='test'),
+                                      self.config, self.asset.duration_us)
+        self.assertEqual(result.model_dump(), expected)
+        self.assertIn('不要输出分析、理由', network.call_args.args[2]['messages'][0]['content'])
+        network.assert_called_once()
+
+    def test_planner_rejects_ambiguous_json_blocks_and_string_timestamps(self):
+        block = f'```json\n{self.selection.model_dump_json()}\n```'
+        for content, error in ((f'{block}\n或\n{block}', '找不到唯一'),
+                               ('```json\n{"clips":[{"start_ms":"0","end_ms":5000}]}\n```', 'clips.0.start_ms')):
+            response = {'choices': [{'message': {'content': content}}]}
+            with self.subTest(content=content), patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
+                    patch('app.ai.roughcut.cloud_json', return_value=response) as network:
+                with self.assertRaisesRegex(ProviderError, error) as raised:
+                    select_intervals(self.sentences, RoughcutRequest(product_name='test'),
+                                     self.config, self.asset.duration_us)
+                self.assertEqual(json.loads(raised.exception.details['response_body']), response)
+                network.assert_called_once()
+
     def duration_fixture(self):
         sentences = [Transcript(source_asset_id=self.asset.id, start_us=i * 9_620_000,
                                 end_us=(i + 1) * 9_620_000, text=f'完整卖点{i}。') for i in range(10)]
         selection = TimeSelection.model_validate({'clips': [
-            {'start_ms': t.start_us // 1000, 'end_ms': t.end_us // 1000, 'reason': t.text}
+            {'start_ms': t.start_us // 1000, 'end_ms': t.end_us // 1000}
             for t in sentences]})
         return sentences, selection
 
@@ -207,7 +234,7 @@ class RoughcutTests(unittest.TestCase):
         sentences = [Transcript(source_asset_id=self.asset.id, start_us=start, end_us=end, text=f'卖点{i}。')
                      for i, (start, end) in enumerate(boundaries)]
         response = {'choices': [{'message': {'content': json.dumps({'clips': [
-            {'start_ms': 166240, 'end_ms': 177040, 'reason': '完整卖点'}]})}}]}
+            {'start_ms': 166240, 'end_ms': 177040}]})}}]}
         self.store.put('asset', self.asset.model_dump())
         job = self.store.enqueue('analyze', {'asset_id': self.asset.id, 'product_name': '测试',
                                            'config': self.config.model_dump()})
@@ -223,7 +250,8 @@ class RoughcutTests(unittest.TestCase):
         plan = self.store.get('plan', result['result']['plan_id'])
         self.assertEqual(sum(c['source_end_us'] - c['source_start_us'] for c in plan['clips']), 10_800_000)
         self.assertEqual([s['text'] for s in plan['subtitles']], [t.text for t in sentences])
-        self.assertEqual([c['reason'] for c in result['result']['selected_intervals']], ['完整卖点'] * 2)
+        self.assertEqual(result['result']['selected_intervals'], [
+            {'start_ms': 166240, 'end_ms': 174200}, {'start_ms': 174200, 'end_ms': 177040}])
 
     def test_worker_preserves_model_opening_and_narrative_order_after_local_split(self):
         boundaries = [(0, 5_000_000), (166_240_000, 170_680_000),
@@ -231,8 +259,8 @@ class RoughcutTests(unittest.TestCase):
         sentences = [Transcript(source_asset_id=self.asset.id, start_us=start, end_us=end, text=f'完整口播{i}。')
                      for i, (start, end) in enumerate(boundaries)]
         response = {'choices': [{'message': {'content': json.dumps({'clips': [
-            {'start_ms': 166240, 'end_ms': 177040, 'reason': '先展示核心利益点，适合作为开头'},
-            {'start_ms': 0, 'end_ms': 5000, 'reason': '再补充商品说明'}]})}}]}
+            {'start_ms': 166240, 'end_ms': 177040},
+            {'start_ms': 0, 'end_ms': 5000}]})}}]}
         self.store.put('asset', self.asset.model_dump())
         job = self.store.enqueue('analyze', {'asset_id': self.asset.id, 'product_name': '测试',
                                            'config': self.config.model_dump()})
@@ -254,10 +282,10 @@ class RoughcutTests(unittest.TestCase):
     def test_planner_splits_single_long_clip_without_changing_sentence_boundaries(self):
         sentences = [Transcript(source_asset_id=self.asset.id, start_us=i * 5_000_000,
                                 end_us=(i + 1) * 5_000_000, text=f'卖点{i}。') for i in range(3)]
-        oversized = {'clips': [{'start_ms': 0, 'end_ms': 15000, 'reason': '长段'}]}
+        oversized = {'clips': [{'start_ms': 0, 'end_ms': 15000}]}
         corrected = TimeSelection.model_validate({'clips': [
-            {'start_ms': 0, 'end_ms': 10000, 'reason': '长段'},
-            {'start_ms': 10000, 'end_ms': 15000, 'reason': '长段'}]})
+            {'start_ms': 0, 'end_ms': 10000},
+            {'start_ms': 10000, 'end_ms': 15000}]})
         with patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
                 patch('app.ai.roughcut.cloud_json', return_value={
                     'choices': [{'message': {'content': json.dumps(oversized)}}]}) as network:
@@ -269,7 +297,7 @@ class RoughcutTests(unittest.TestCase):
         for boundaries in ([(0, 10800000)], [(0, 6000000), (6800000, 10800000)]):
             sentences = [Transcript(source_asset_id=self.asset.id, start_us=start, end_us=end, text=f'卖点{i}。')
                          for i, (start, end) in enumerate(boundaries)]
-            oversized = {'clips': [{'start_ms': 0, 'end_ms': 10800, 'reason': '长段'}]}
+            oversized = {'clips': [{'start_ms': 0, 'end_ms': 10800}]}
             response = {'choices': [{'message': {'content': json.dumps(oversized)}}]}
             with self.subTest(boundaries=boundaries), \
                     patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
@@ -285,10 +313,10 @@ class RoughcutTests(unittest.TestCase):
     def test_local_split_does_not_bypass_total_duration_limit(self):
         sentences = [Transcript(source_asset_id=self.asset.id, start_us=i * 5_000_000,
                                 end_us=(i + 1) * 5_000_000, text=f'卖点{i}。') for i in range(18)]
-        oversized = {'clips': [{'start_ms': i * 15000, 'end_ms': (i + 1) * 15000, 'reason': '卖点'}
+        oversized = {'clips': [{'start_ms': i * 15000, 'end_ms': (i + 1) * 15000}
                                for i in range(6)]}
         corrected = TimeSelection.model_validate({'clips': [
-            {'start_ms': i * 5000, 'end_ms': (i + 1) * 5000, 'reason': '精简卖点'} for i in range(12)]})
+            {'start_ms': i * 5000, 'end_ms': (i + 1) * 5000} for i in range(12)]})
         with patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
                 patch('app.ai.roughcut.cloud_json', side_effect=[
                     {'choices': [{'message': {'content': json.dumps(oversized)}}]},
@@ -303,8 +331,8 @@ class RoughcutTests(unittest.TestCase):
     def test_planner_rejects_invalid_long_clip_before_local_split_or_retry(self):
         sentences = [Transcript(source_asset_id=self.asset.id, start_us=i * 5_000_000,
                                 end_us=(i + 1) * 5_000_000, text=f'卖点{i}。') for i in range(3)]
-        for clips in ([{'start_ms': 1, 'end_ms': 15000, 'reason': '错误句界'}],
-                      [{'start_ms': 0, 'end_ms': 15000, 'reason': '重复'}] * 2):
+        for clips in ([{'start_ms': 1, 'end_ms': 15000}],
+                      [{'start_ms': 0, 'end_ms': 15000}] * 2):
             with self.subTest(clips=clips), patch('app.ai.roughcut.model_api_key', return_value='mock-key'), \
                     patch('app.ai.roughcut.cloud_json', return_value={'choices': [
                         {'message': {'content': json.dumps({'clips': clips})}}]}) as network:
@@ -315,7 +343,7 @@ class RoughcutTests(unittest.TestCase):
     def test_planner_does_not_retry_non_duration_errors_after_correction(self):
         sentences, oversized = self.duration_fixture()
         invalid_contents = ['not json', '{"clips":[]}',
-                            '{"clips":[{"start_ms":1,"end_ms":9620,"reason":"非句界"}]}',
+                            '{"clips":[{"start_ms":1,"end_ms":9620}]}',
                             json.dumps({'clips': [oversized.clips[0].model_dump()] * 2})]
         for content in invalid_contents:
             responses = [{'choices': [{'message': {'content': value}}]}
@@ -425,8 +453,7 @@ class RoughcutTests(unittest.TestCase):
         self.store.put('asset', self.asset.model_dump())
         sentences=[Transcript(source_asset_id=self.asset.id,start_us=i*10_000_000,
             end_us=i*10_000_000+5_000_000,text='面料柔软。') for i in range(4)]
-        decision=TimeSelection.model_validate({'clips':[{'start_ms':i*10000,'end_ms':i*10000+5000,
-            'reason':'面料'} for i in range(4)]})
+        decision=TimeSelection.model_validate({'clips':[{'start_ms':i*10000,'end_ms':i*10000+5000} for i in range(4)]})
         for tolerance, expected in ((4_000_000,'failed'),(5_000_000,'succeeded')):
             job=self.store.enqueue('analyze',{'asset_id':self.asset.id,'product_name':'测试',
                 'config':self.config.model_dump(),'target_duration_us':15_000_000,'duration_tolerance_us':tolerance})
@@ -454,7 +481,7 @@ class RoughcutTests(unittest.TestCase):
                 patch('app.ai.providers.extract_audio'), \
                 patch('app.ai.providers.upload_audio', return_value='https://oss.example/audio'), \
                 patch('app.ai.providers.cloud_json', return_value=response) as network, \
-                patch('app.ai.roughcut.select_intervals', side_effect=[ProviderError('planner failed'), TimeSelection.model_validate({'clips': [{'start_ms': 0, 'end_ms': 5000, 'reason': '上身效果'}]})]):
+                patch('app.ai.roughcut.select_intervals', side_effect=[ProviderError('planner failed'), TimeSelection.model_validate({'clips': [{'start_ms': 0, 'end_ms': 5000}]})]):
             worker.run_once()
             self.assertEqual(self.store.job(job['id'])['state'], 'failed')
             self.assertEqual(self.store.list('plan'), [])
@@ -477,8 +504,8 @@ class RoughcutTests(unittest.TestCase):
                           (160000000, 165000000, '面料柔软。')])
         self.assertEqual(validate_transcripts(rows, self.asset), rows)
         selection = TimeSelection.model_validate({'clips': [
-            {'start_ms': 120600, 'end_ms': 124000, 'reason': '上身'},
-            {'start_ms': 160000, 'end_ms': 165000, 'reason': '面料'}]})
+            {'start_ms': 120600, 'end_ms': 124000},
+            {'start_ms': 160000, 'end_ms': 165000}]})
         self.assertEqual([c.evidence for c in candidates_from_intervals(selection, rows, 'product')],
                          ['上身显瘦。', '面料柔软。'])
 
@@ -560,13 +587,13 @@ class RoughcutTests(unittest.TestCase):
             self.assertEqual(network.call_count, 4)
 
     def test_whole_two_minute_decision_cannot_pass_for_sixty_second_roughcut(self):
-        selection = TimeSelection.model_validate({'clips': [{'start_ms': 840080, 'end_ms': 960000, 'reason': '整段'}]})
+        selection = TimeSelection.model_validate({'clips': [{'start_ms': 840080, 'end_ms': 960000}]})
         with self.assertRaisesRegex(ValueError, '119.9 秒'):
             validate_selection_duration(selection, 60000000)
 
     def test_duration_tolerance_controls_actual_selection_limit(self):
         selection = TimeSelection.model_validate({'clips': [
-            {'start_ms': index * 10000, 'end_ms': (index + 1) * 10000, 'reason': '独立卖点'}
+            {'start_ms': index * 10000, 'end_ms': (index + 1) * 10000}
             for index in range(8)]})
         with self.assertRaisesRegex(ValueError, '15 秒偏差'):
             validate_selection_duration(selection, 60_000_000, 15_000_000)
@@ -586,7 +613,7 @@ class RoughcutTests(unittest.TestCase):
         self.assertEqual(prompt['duration_tolerance_ms'], 7000)
 
     def test_single_long_clip_is_rejected_even_when_total_duration_is_valid(self):
-        selection = TimeSelection.model_validate({'clips': [{'start_ms': 0, 'end_ms': 11000, 'reason': '整段'}]})
+        selection = TimeSelection.model_validate({'clips': [{'start_ms': 0, 'end_ms': 11000}]})
         with self.assertRaisesRegex(ValueError, '单个连续片段最长 10 秒'):
             validate_selection_duration(selection, 60000000)
 
@@ -601,9 +628,9 @@ class RoughcutTests(unittest.TestCase):
         self.assertIn('其他商品 / 款式', prompt)
 
     def test_invalid_repeated_overlapping_or_unknown_timestamps_are_rejected(self):
-        for clips in ([{'start_ms': 1, 'end_ms': 5000, 'reason': 'unknown'}],
-                      [{'start_ms': 0, 'end_ms': 5000, 'reason': 'a'}, {'start_ms': 0, 'end_ms': 5000, 'reason': 'b'}],
-                      [{'start_ms': 0, 'end_ms': 15000, 'reason': 'a'}, {'start_ms': 10000, 'end_ms': 25000, 'reason': 'b'}]):
+        for clips in ([{'start_ms': 1, 'end_ms': 5000}],
+                      [{'start_ms': 0, 'end_ms': 5000}, {'start_ms': 0, 'end_ms': 5000}],
+                      [{'start_ms': 0, 'end_ms': 15000}, {'start_ms': 10000, 'end_ms': 25000}]):
             with self.subTest(clips=clips), self.assertRaises(ValueError):
                 candidates_from_intervals(TimeSelection.model_validate({'clips': clips}), self.sentences, 'product')
 
@@ -644,7 +671,7 @@ class RoughcutApiTests(unittest.TestCase):
         self.assertEqual(retried.json()['payload']['config']['asr_model'], current.asr_model)
         self.assertEqual(retried.json()['payload']['short_filler_filter'], options)
         self.assertIsNone(retried.json()['error'])
-        selection = TimeSelection.model_validate({'clips': [{'start_ms': 600, 'end_ms': 4000, 'reason': '面料'}]})
+        selection = TimeSelection.model_validate({'clips': [{'start_ms': 600, 'end_ms': 4000}]})
         response = {'sentence': {'text': '面料柔软。', 'begin_time': 600, 'end_time': 4000}}
         with patch('app.ai.providers.asr_api_key', return_value='mock-key'), \
                 patch('app.ai.providers.extract_audio'), \

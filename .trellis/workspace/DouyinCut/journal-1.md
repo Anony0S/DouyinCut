@@ -1762,3 +1762,144 @@ Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md), [
 ### Status
 
 [OK] **Completed**
+
+
+## Session 68: 本地设置按所选天数清理到期记录及原始视频
+<!-- trellis-session: v=2 fp=3650c9a2d97ea0d9 -->
+
+**Date**: 2026-11-24
+**Task**: 本地设置按所选天数清理到期记录及原始视频
+**Branch**: `master`
+
+### Summary
+
+勾选扩大清理后仍按用户选定天数筛选，业务记录和应用文件同批核对，已登记的原始视频可从原位置删除。确认前显示原件完整路径，保留期限内及活动数据依赖。旧网页导入仅有应用副本，Windows 原生导入会记录原件路径和文件标识。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 69: 兼容带分析文字的选片 JSON 并移除逐段说明
+<!-- trellis-session: v=2 fp=9f5d601074f85287 -->
+
+**Date**: 2026-11-24
+**Task**: 兼容带分析文字的选片 JSON 并移除逐段说明
+
+### Summary
+
+剪辑决策只请求整数毫秒起止时间。解析纯 JSON 或从回复中读取唯一完整的 JSON 代码块，继续校验句界、重叠和总时长。正式版失败任务保存的三次响应均通过离线回归，分别得到 8、8、10 个有效片段。片段卡片保留原话和切点。
+Topics: [.trellis/spec/project/roughcut.md](../../spec/project/roughcut.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 70: 将外观并入本地设置
+<!-- trellis-session: v=2 fp=8e30c1347aadc540 -->
+
+**Date**: 2026-11-24
+**Task**: 将外观并入本地设置
+
+### Summary
+
+本地设置在工作目录、清理和版本更新下方承载主题预览、窗口位置记忆及启动窗口大小。移除独立外观路由与侧栏项，沿用已保存的本机主题和窗口偏好。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 71: 抖音登录直接显示 Cookie 表单
+<!-- trellis-session: v=2 fp=1e2102bcc1ac8a52 -->
+
+**Date**: 2026-11-24
+**Task**: 抖音登录直接显示 Cookie 表单
+
+### Summary
+
+移除手动填写 Cookie 表单的折叠框，保存入口直接显示在抖音登录卡片。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 72: 抖音登录按钮并排
+<!-- trellis-session: v=2 fp=fbad26d8e679c2e4 -->
+
+**Date**: 2026-11-24
+**Task**: 抖音登录按钮并排
+
+### Summary
+
+桌面版的保存 Cookie 与扫码登录并排显示，窄屏将两按钮放到输入框下方。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 73: 星动力商品平台接入
+<!-- trellis-session: v=2 fp=25167aaed82ec1c3 -->
+
+**Date**: 2026-11-24
+**Task**: 星动力商品平台接入
+
+### Summary
+
+根据 2026-11-24 提供的 HAR，星动力通过 member-token 读取账号与签约达人后保存，固定请求头沿用小程序。直播间绑定签约达人的 ipId 后在线浏览和搜索商品，参考图使用原有上传入口。自动测试使用模拟服务，真实空关键词、多页和失效响应待验。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 74: 调整商品平台设置布局
+<!-- trellis-session: v=2 fp=83eab290125bc55e -->
+
+**Date**: 2026-11-24
+**Task**: 调整商品平台设置布局
+
+### Summary
+
+商品平台横向切换移至卡片顶部，统一账号状态与操作区，达多多同步信息按列显示。构建和平台交互检查通过，浏览器验证了浅色宽屏与深色窄屏。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

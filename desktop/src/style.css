@@ -705,7 +705,6 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
 .clip-source-time { color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .clip-source-time > span { color: var(--text-muted); }
 .clip-play { padding: 6px 9px; font-size: 12px; white-space: nowrap; }
-.clip-reason { margin: 7px 0 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .clip-dialogue { padding: 6px 9px; border: 1px solid var(--app-border); background: var(--color-base-100); border-radius: 6px; }
 .clip-dialogue summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
 .clip-dialogue summary::-webkit-details-marker { display: none; }

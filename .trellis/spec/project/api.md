@@ -67,7 +67,7 @@
 | `GET /product-platform/daduoduo` | 读取已绑定达多多的直播间及其目录状态 |
 | `GET /product-platform/xingdongli` | 读取星动力本机状态、脱敏账号信息和签约达人 |
 | `POST /product-platform/xingdongli/connect`、`refresh`、`logout` | connect 接受 member_token 并验证后保存。refresh 验证已保存令牌并刷新账号与达人。logout 清除本机登录 |
-| `POST /product-platform/products/search` | 直播商品查询传 monitor_id，项目参考图搜索传 asset_id。星斗和达多多要求非空 keyword，返回 product、scope_name 和 can_add_to_showcase。星动力直播间允许空 keyword 和非负偏移 start，另返回 products、total、start、length。直播间未绑定、达人不在当前账号名单或尚无达多多本地目录时返回 409 |
+| `POST /product-platform/products/search` | 直播商品查询传 monitor_id，项目参考图搜索传 asset_id。星斗和达多多要求非空 keyword，返回 product、scope_name 和 can_add_to_showcase。星动力直播间允许空 keyword 和非负偏移 start，另返回 products、total、start、length。星动力的 sort_type 支持 time（默认）、todaySales、sales、7Sales、30Sales，sort_order 支持 desc（默认）和 asc，分别传给平台的 sortType 和 sortOrder。商品的 listing_time 取自 createTime。直播间未绑定、达人不在当前账号名单或尚无达多多本地目录时返回 409 |
 | `POST /product-platform/products/add-to-showcase` | 直播间调用传 monitor_id 和星斗平台商品 ID（platform_product_id）。后端检查当前绑定并从所选合作范围读取 `ipId` 与 `memberTalentId` 执行单商品添加。返回 `{added: true}`，星斗登录失效返回 401，平台不支持或缺少范围或达人关联时返回 409 |
 | `GET/PUT /settings/workspace-layout` | 素材与粗剪页的布局偏好：left_width 为左侧卡片宽度（像素，230–10000）或 null（默认宽度）；随工作目录保存，只保留最新值 |
 | `GET /settings/cleanup-unused-files` | 只读统计到期数据，接受 `clear_expired_data`（默认 false）和 `retention_days`（默认 7，正整数）。返回 `file_count`、`directory_count`、`record_count`、`original_videos`、`estimated_bytes` 和 `preview_id`。 |

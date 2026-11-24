@@ -536,6 +536,7 @@ onUnmounted(() => {
           :selected-period-id="selectedPeriodId"
           :merge-period-ids="mergePeriodIds"
           :monitor-id="selectedMonitor.id"
+          :browse-platform-products="selectedMonitor.product_platform?.platform === 'xingdongli'"
           :busy="busy"
           @import-product-clip="importProductClip"
           @open="workspace.openProject"

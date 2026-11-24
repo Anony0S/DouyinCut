@@ -14,7 +14,7 @@ from .service import _masked_mobile
 
 
 ORIGIN = "https://www.xingdongliqiepian.com"
-PRODUCT_IMAGE_HOST = "lf3-cm.ecombdstatic.com"
+PRODUCT_IMAGE_HOSTS = ("lf3-cm.ecombdstatic.com", "lf26-cm.ecombdstatic.com")
 TOKEN_KEY = "xingdongli_member_token"
 CONFIG_ID = "xingdongli_product_platform"
 AUTH_REQUIRED = "XINGDONGLI_AUTH_REQUIRED"
@@ -85,16 +85,18 @@ def _product(item):
     cover = item.get("productImg")
     try:
         url = urlsplit(cover) if isinstance(cover, str) else None
-        if (url is None or url.scheme != "https" or url.hostname != PRODUCT_IMAGE_HOST
+        if (url is None or url.scheme != "https" or url.hostname not in PRODUCT_IMAGE_HOSTS
                 or url.username or url.password or url.port not in (None, 443)):
             cover = None
     except ValueError:
         cover = None
+    create_time = item.get("createTime")
     return {
         "id": _identifier(item.get("id")) or product_id,
         "platform_product_id": product_id, "title": item["productName"],
         "price": item.get("productPrice"), "shop_name": item.get("shopName"),
         "stock": item.get("productStock"), "cover": cover,
+        "listing_time": (create_time.strip() or None) if isinstance(create_time, str) else None,
         "real_time_sales": item.get("todaySale"), "yesterday_sales": item.get("lastSale"),
         "month_sales": item.get("last30Sale"), "commission_ratio": item.get("commissionRate"),
     }
@@ -195,7 +197,7 @@ class XingdongliService:
             raise ProductPlatformError("请选择星动力当前账号的签约达人", status=409)
         return scope
 
-    def search(self, ip_id, keyword, start):
+    def search(self, ip_id, keyword, start, sort_type="time", sort_order="desc"):
         with self.lock:
             scope = self.scope(ip_id)
             token = read_secret(TOKEN_KEY)
@@ -205,7 +207,7 @@ class XingdongliService:
                 with self._client(token) as client:
                     page = _request(client, "/frontend/product/list-by-ip", {
                         "ipId": int(ip_id), "start": start, "length": PAGE_SIZE,
-                        "searchProduct": keyword, "sortType": "time", "sortOrder": "desc",
+                        "searchProduct": keyword, "sortType": sort_type, "sortOrder": sort_order,
                         "onlyHasMaterial": False,
                     })
             except ProductPlatformError as exc:

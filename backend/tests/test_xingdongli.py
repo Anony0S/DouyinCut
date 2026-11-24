@@ -52,7 +52,12 @@ class XingdongliTests(unittest.TestCase):
                 return httpx.Response(200, json={"success": False, "code": 401, "message": "expired"})
             value = {"total": 21, "data": [
                 {"id": "relation", "productId": "9912345678901234567", "productName": "测试商品",
-                 "productImg": "https://lf3-cm.ecombdstatic.com/product.jpg", "todaySale": 0, "productPrice": 12.5},
+                 "productImg": "https://lf26-cm.ecombdstatic.com/product.jpg", "todaySale": 0,
+                 "productPrice": 12.5, "createTime": " 2026-11-23 16:30:22 "},
+                {"productId": "2", "productName": "原 CDN 商品",
+                 "productImg": "https://lf3-cm.ecombdstatic.com/product.jpg"},
+                {"productId": "3", "productName": "其他来源商品",
+                 "productImg": "https://lf26-cm.ecombdstatic.com.example.com/product.jpg"},
             ]}
         else:
             raise AssertionError(path)
@@ -67,9 +72,9 @@ class XingdongliTests(unittest.TestCase):
                                 json={"url": "https://live.douyin.com/123", "name": "测试直播间",
                                       "product_platform": {"platform": "xingdongli", "ip_id": ip_id}})
 
-    def search(self, monitor_id, keyword, start=0):
+    def search(self, monitor_id, keyword, start=0, **options):
         return self.client.post("/api/v1/product-platform/products/search", headers=self.headers,
-                                json={"monitor_id": monitor_id, "keyword": keyword, "start": start})
+                                json={"monitor_id": monitor_id, "keyword": keyword, "start": start, **options})
 
     def test_token_is_verified_before_saving_and_never_returned(self):
         self.assertEqual(self.client.get("/api/v1/product-platform/xingdongli").status_code, 401)
@@ -105,10 +110,23 @@ class XingdongliTests(unittest.TestCase):
             "ipId": 42, "start": 20, "length": 20, "searchProduct": "测试",
             "sortType": "time", "sortOrder": "desc", "onlyHasMaterial": False,
         })
-        self.assertEqual(response.json()["products"][0]["platform_product_id"], "9912345678901234567")
+        first, original_source, other_source = response.json()["products"]
+        self.assertEqual(first["platform_product_id"], "9912345678901234567")
+        self.assertEqual(first["cover"], "https://lf26-cm.ecombdstatic.com/product.jpg")
+        self.assertEqual(first["listing_time"], "2026-11-23 16:30:22")
+        self.assertEqual(original_source["cover"], "https://lf3-cm.ecombdstatic.com/product.jpg")
+        self.assertIsNone(original_source["listing_time"])
+        self.assertIsNone(other_source["cover"])
         self.assertFalse(response.json()["can_add_to_showcase"])
         self.assertEqual(self.search(monitor_id, "").status_code, 200)
         self.assertEqual(json.loads(self.requests[-1].content)["searchProduct"], "")
+        for sort_type in ("todaySales", "sales", "7Sales", "30Sales"):
+            with self.subTest(sort_type=sort_type):
+                self.assertEqual(self.search(monitor_id, "测试", 20, sort_type=sort_type).status_code, 200)
+                query = json.loads(self.requests[-1].content)
+                self.assertEqual((query["sortType"], query["sortOrder"], query["start"]), (sort_type, "desc", 20))
+        self.assertEqual(self.search(monitor_id, "测试", 20, sort_type="7Sales", sort_order="asc").status_code, 200)
+        self.assertEqual(json.loads(self.requests[-1].content)["sortOrder"], "asc")
         self.app.state.store.put("asset", {"id": "asset_fixture", "source_monitor_id": monitor_id})
         cover_search = self.client.post("/api/v1/product-platform/products/search", headers=self.headers,
                                         json={"asset_id": "asset_fixture", "keyword": "测试"})

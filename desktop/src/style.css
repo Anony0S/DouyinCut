@@ -825,10 +825,6 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
 .confirm-popover-actions .btn { min-width: 72px; }
 
 
-.settings-panel {
-  width: 100%;
-}
-
 .settings-panel > .intro-strip { font-size: 14px; line-height: 1.7; }
 .settings-panel .settings-card-heading h2 { font-size: 18px; }
 .settings-panel .settings-card-heading p { font-size: 14px; }
@@ -906,18 +902,16 @@ main.workspace-main { display: flex; flex-direction: column; height: 100dvh; box
   margin-top: 0;
 }
 
-.settings-field-row {
+.settings-model-fields {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.settings-field-row > div {
-  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 9rem;
+  column-gap: 16px;
 }
 
 .settings-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: flex-end;
   margin-top: 22px;
 }
@@ -1089,9 +1083,12 @@ main {
     padding: 18px;
   }
 
-  .settings-field-row {
+  .settings-model-fields {
     grid-template-columns: minmax(0, 1fr);
-    gap: 0;
+  }
+
+  .settings-model-fields input[type="number"] {
+    max-width: 9rem;
   }
 }
 

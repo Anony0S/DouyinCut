@@ -19,6 +19,8 @@ from app.worker import Worker
 
 SELECTION = {"clips": [{"start_ms": 3000, "end_ms": 4500},
                        {"start_ms": 0, "end_ms": 1000}]}
+PLANNER_REPLY = json.dumps({"clips": [{"start_index": 2, "end_index": 2},
+                                     {"start_index": 0, "end_index": 0}]})
 ASR_RESPONSE = {"output": {"sentence": {"begin_time": 0, "end_time": 6000,
                 "text": "上身显瘦。只要九十九。面料柔软。", "words": [
                     {"begin_time": 0, "end_time": 1000, "text": "上身显瘦", "punctuation": "。"},
@@ -33,7 +35,7 @@ class PlannerHandler(BaseHTTPRequestHandler):
     arrived = None
     release = None
     mode = "answer"
-    content = json.dumps(SELECTION)
+    content = PLANNER_REPLY
 
     def do_POST(self):
         self.rfile.read(int(self.headers["Content-Length"]))
@@ -87,7 +89,7 @@ class PlannerRecoveryFixture:
         PlannerHandler.arrived = threading.Event()
         PlannerHandler.release = threading.Event()
         PlannerHandler.mode = "answer"
-        PlannerHandler.content = json.dumps(SELECTION)
+        PlannerHandler.content = PLANNER_REPLY
         server = ThreadingHTTPServer(("127.0.0.1", 0), PlannerHandler)
         server.daemon_threads = True
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -208,7 +210,7 @@ class PlannerExitRecoveryTests(PlannerRecoveryFixture, unittest.TestCase):
 
                 self.restart()
                 self.assertEqual(self.store.job(job["id"])["state"], "failed")
-                PlannerHandler.mode, PlannerHandler.content = "answer", json.dumps(SELECTION)
+                PlannerHandler.mode, PlannerHandler.content = "answer", PLANNER_REPLY
                 self.store.control(job["id"], "retry")
                 self.run_job(job["id"])
                 self.assertEqual(self.store.job(job["id"])["state"], "succeeded")
@@ -247,7 +249,7 @@ class PlannerExitRecoveryTests(PlannerRecoveryFixture, unittest.TestCase):
         Worker(self.settings, interruptible_cloud=True).run_once()  # Reclaims the expired lease.
         fresh = self.store.job(job["id"])
         self.assertEqual(fresh["state"], "succeeded", fresh.get("error"))
-        PlannerHandler.content = json.dumps({"clips": [{"start_ms": 0, "end_ms": 1000}]})
+        PlannerHandler.content = json.dumps({"clips": [{"start_index": 0, "end_index": 0}]})
         PlannerHandler.release.set()
         thread.join(10)
 

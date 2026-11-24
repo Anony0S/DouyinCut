@@ -18,6 +18,8 @@ class SearchRequest(Model):
     monitor_id: str | None = Field(default=None, min_length=1, max_length=100)
     asset_id: str | None = Field(default=None, min_length=1, max_length=100)
     start: int = Field(default=0, ge=0, le=1_000_000)
+    sort_type: Literal["time", "todaySales", "sales", "7Sales", "30Sales"] = "time"
+    sort_order: Literal["asc", "desc"] = "desc"
 
     @field_validator("keyword")
     @classmethod

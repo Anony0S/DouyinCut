@@ -210,7 +210,7 @@ class CloudDiagnosticsTests(unittest.TestCase):
     def test_planner_uses_configured_timeout_and_bounded_output(self):
         config = self.config.model_copy(update={"chat_timeout_seconds": 600})
         with patch("app.ai.roughcut.model_api_key", return_value="mock-key"), \
-                patch("app.ai.roughcut.cloud_json", return_value={"choices": [{"message": {"content": '{"clips":[{"start_ms":0,"end_ms":5000,"reason":"面料"}]}'}}]}) as network:
+                patch("app.ai.roughcut.cloud_json", return_value={"choices": [{"message": {"content": '{"clips":[{"start_index":0,"end_index":0,"reason":"面料"}]}'}}]}) as network:
             self.assertEqual(select_intervals(self.transcripts, self.request, config, self.asset.duration_us).clips[0].end_ms, 5000)
         self.assertEqual(network.call_args.kwargs, {"timeout_seconds": 600, "operation": "planner"})
         self.assertFalse(network.call_args.args[2]['stream'])
@@ -219,8 +219,8 @@ class CloudDiagnosticsTests(unittest.TestCase):
     def test_planner_reports_truncated_or_empty_output_and_field_errors(self):
         cases = [({"content": "", "finish_reason": "length"}, "达到 16000 token 上限被截断"),
                  ({"content": "", "finish_reason": "stop"}, "返回了空内容"),
-                 ({"content": '{"clips":[{"start_ms":0,"end_ms":5000.5,"reason":"面料"}]}', "finish_reason": "stop"},
-                  r"clips\.0\.end_ms")]
+                 ({"content": '{"clips":[{"start_index":0,"end_index":0.5,"reason":"面料"}]}', "finish_reason": "stop"},
+                  r"clips\.0\.end_index")]
         for reply, message in cases:
             with self.subTest(message=message), \
                     patch("app.ai.roughcut.model_api_key", return_value="mock-key"), \

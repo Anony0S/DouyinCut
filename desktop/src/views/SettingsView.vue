@@ -348,7 +348,7 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <section class="settings-panel">
+  <section class="settings-panel mx-auto w-full min-w-0 max-w-[768px]">
     <div class="settings-tabs" role="tablist" aria-label="云端设置">
       <button
         v-for="(section, index) in cloudSections"
@@ -397,20 +397,17 @@ onUnmounted(() => {
           <p class="hint">
             仅用于文本剪辑。输入新密钥可替换，留空保留已保存的密钥。
           </p>
-          <label for="planner-model">模型 API ID</label>
-          <input
-            id="planner-model"
-            v-model="config.planner_model"
-            required
-            maxlength="100" />
-          <label for="chat-timeout">请求等待时间 / 秒</label>
-          <input
-            id="chat-timeout"
-            v-model.number="config.chat_timeout_seconds"
-            type="number"
-            min="30"
-            max="900"
-            required />
+          <div class="settings-model-fields">
+            <div>
+              <label for="planner-model">模型 API ID</label>
+              <input id="planner-model" v-model="config.planner_model" required maxlength="100" />
+            </div>
+            <div>
+              <label for="chat-timeout">请求等待时间 / 秒</label>
+              <input id="chat-timeout" v-model.number="config.chat_timeout_seconds"
+                type="number" min="30" max="900" required />
+            </div>
+          </div>
           <p class="hint">
             默认 300 秒。新分析、组片和失败任务重试使用保存后的文本配置。
           </p>
@@ -467,10 +464,17 @@ onUnmounted(() => {
             secret-name="image_generation_api_key" :preview="imageKeyPreview" :disabled="busy"
             placeholder="填写独立生图服务的 API Key" />
           <p class="hint">密钥单独保存到 Windows 凭据管理器，不与文本剪辑模型共用。</p>
-          <label for="image-model">模型 API ID</label>
-          <input id="image-model" v-model="config.image_model" required maxlength="100" />
-          <label for="image-timeout">请求等待时间 / 秒</label>
-          <input id="image-timeout" v-model.number="config.image_timeout_seconds" type="number" min="30" max="900" required />
+          <div class="settings-model-fields">
+            <div>
+              <label for="image-model">模型 API ID</label>
+              <input id="image-model" v-model="config.image_model" required maxlength="100" />
+            </div>
+            <div>
+              <label for="image-timeout">请求等待时间 / 秒</label>
+              <input id="image-timeout" v-model.number="config.image_timeout_seconds"
+                type="number" min="30" max="900" required />
+            </div>
+          </div>
           <p class="hint">封面固定输出 3:4 竖版图片。图片生成会产生服务调用费用，任务可在后台查看状态。</p>
           <div class="settings-actions">
             <button class="btn btn-primary" :disabled="busy || !connected">保存封面生图</button>
@@ -508,21 +512,18 @@ onUnmounted(() => {
           <p class="hint">
             仅用于语音识别，需单独保存。输入新密钥可替换，留空保留已保存的密钥。
           </p>
-          <label for="asr-model">模型 API ID</label>
-          <input
-            id="asr-model"
-            v-model="config.asr_model"
-            required
-            maxlength="100"
-            placeholder="qwen-audio-3.1-asr-flash" />
-          <label for="asr-timeout">请求等待时间 / 秒</label>
-          <input
-            id="asr-timeout"
-            v-model.number="config.asr_timeout_seconds"
-            type="number"
-            min="30"
-            max="900"
-            required />
+          <div class="settings-model-fields">
+            <div>
+              <label for="asr-model">模型 API ID</label>
+              <input id="asr-model" v-model="config.asr_model" required maxlength="100"
+                placeholder="qwen-audio-3.1-asr-flash" />
+            </div>
+            <div>
+              <label for="asr-timeout">请求等待时间 / 秒</label>
+              <input id="asr-timeout" v-model.number="config.asr_timeout_seconds"
+                type="number" min="30" max="900" required />
+            </div>
+          </div>
           <p class="hint">
             默认 300
             秒。新分析和失败任务重试使用保存后的语音配置，进行中的任务保持提交时配置。

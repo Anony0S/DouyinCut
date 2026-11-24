@@ -332,7 +332,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         platform, binding = resolve_product_platform(body.monitor_id, body.asset_id,
                                                      reference_images=body.asset_id is not None)
         if platform == "xingdongli":
-            return xingdongli.search(binding["ip_id"], body.keyword, body.start)
+            return xingdongli.search(binding["ip_id"], body.keyword, body.start, body.sort_type, body.sort_order)
         if not body.keyword:
             raise HTTPException(422, "商品名称不能为空")
         if platform == "daduoduo":

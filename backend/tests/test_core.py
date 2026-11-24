@@ -302,7 +302,7 @@ class ProviderTests(unittest.TestCase):
             with self.assertRaises(ProviderError):
                 model_api_key(config)
         transcript = [Transcript(source_asset_id='a', start_us=0, end_us=5000000, text='面料柔软。')]
-        result = {'choices': [{'message': {'content': '{"clips":[{"start_ms":0,"end_ms":5000,"reason":"面料"}]}'}}]}
+        result = {'choices': [{'message': {'content': '{"clips":[{"start_index":0,"end_index":0,"reason":"面料"}]}'}}]}
         with patch('app.ai.providers.read_secret', return_value='model-key'), patch('app.ai.roughcut.cloud_json', return_value=result) as network:
             select_intervals(transcript, RoughcutRequest(product_name='测试'), config, 10000000)
             self.assertEqual(network.call_args.args[1], config.chat_url)

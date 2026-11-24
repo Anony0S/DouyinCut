@@ -173,7 +173,7 @@ function confirmCleanup() {
 </script>
 
 <template>
-  <section class="local-settings-panel">
+  <section class="mx-auto w-full min-w-0 max-w-[768px]">
     <div class="page-heading">
       <h1>本地设置</h1>
     </div>
@@ -277,10 +277,6 @@ function confirmCleanup() {
 </template>
 
 <style scoped>
-.local-settings-panel {
-  width: 100%;
-}
-
 .page-heading {
   margin-bottom: 22px;
 }
@@ -349,7 +345,8 @@ function confirmCleanup() {
 
 @media (max-width: 620px) {
   .local-settings-list :deep(.list-row) {
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
     align-items: stretch;
     gap: 14px;
     padding: 18px;
@@ -359,7 +356,6 @@ function confirmCleanup() {
     width: 100%;
     margin-left: 0;
     justify-content: flex-start;
-    flex-wrap: wrap;
   }
 }
 </style>

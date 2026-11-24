@@ -3,12 +3,14 @@ from pathlib import PurePosixPath
 from starlette.exceptions import HTTPException
 from starlette.staticfiles import StaticFiles
 
-from .product_platform.xingdongli import PRODUCT_IMAGE_HOST
+from .product_platform.xingdongli import PRODUCT_IMAGE_HOSTS
 
 
+XINGDONGLI_IMAGE_SOURCES = " ".join(f"https://{host}" for host in PRODUCT_IMAGE_HOSTS)
 PRODUCTION_CSP = (
     "default-src 'self'; connect-src 'self'; script-src 'self'; "
-    f"media-src 'self' blob:; img-src 'self' data: blob: https://p3-aio.ecombdimg.com https://p9-aio.ecombdimg.com https://{PRODUCT_IMAGE_HOST}; "
+    "media-src 'self' blob:; img-src 'self' data: blob: https://p3-aio.ecombdimg.com https://p9-aio.ecombdimg.com "
+    f"{XINGDONGLI_IMAGE_SOURCES}; "
     "style-src 'self' 'unsafe-inline'; object-src 'none'; "
     "base-uri 'none'; frame-ancestors 'none'"
 )

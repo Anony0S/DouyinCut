@@ -32,6 +32,10 @@ export type PlatformProduct = {
 }
 
 export type RoomPlatformBinding = { platform: 'xingdou' | 'daduoduo' | 'xingdongli'; ip_id: string }
+export type XingdongliProductSort = {
+  sort_type: 'time' | 'todaySales' | 'sales' | '7Sales' | '30Sales'
+  sort_order: 'asc' | 'desc'
+}
 export type XingdongliStatus = Pick<ProductPlatformStatus, 'logged_in' | 'member_name' | 'mobile' | 'scopes' | 'last_validated_at'>
 type ProductSearchResult = {
   product: PlatformProduct | null
@@ -58,8 +62,10 @@ export const productPlatformApi = {
   login: (mobile: string, smsCode: string) => api<ProductPlatformStatus>('/product-platform/login', 'POST', {mobile, sms_code: smsCode}),
   logout: () => api<ProductPlatformStatus>('/product-platform/logout', 'POST'),
   selectScope: (mainIpId: string) => api<ProductPlatformStatus>('/product-platform/scope', 'POST', {main_ip_id: mainIpId}),
-  search: (keyword: string, context: {monitor_id: string} | {asset_id: string}, start = 0) =>
-    api<ProductSearchResult>('/product-platform/products/search', 'POST', {keyword, ...context, ...(start ? {start} : {})}),
+  search: (keyword: string, context: {monitor_id: string} | {asset_id: string}, start = 0, sort?: XingdongliProductSort) =>
+    api<ProductSearchResult>('/product-platform/products/search', 'POST', {
+      keyword, ...context, ...(start ? {start} : {}), ...sort,
+    }),
   images: (assetId:string, productId: string, refresh=false) => api<{images:{id:string;url:string}[];cached:boolean}>('/product-platform/products/images', 'POST', {asset_id:assetId,product_id:productId,refresh}),
   addToShowcase: (platformProductId: string, monitorId: string) =>
     api<{added: boolean}>('/product-platform/products/add-to-showcase', 'POST',

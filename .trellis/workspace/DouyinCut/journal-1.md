@@ -1903,3 +1903,83 @@ Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 75: 限制设置页宽屏布局
+<!-- trellis-session: v=2 fp=6044858c7c7b124e -->
+
+**Date**: 2026-11-24
+**Task**: 限制设置页宽屏布局
+
+### Summary
+
+云端和本地设置统一限制内容宽度。模型请求等待时间使用短输入框，窄窗口将字段和本地操作分行。已用模拟接口验证宽窄窗口，前端构建及设置相关检查通过。
+Topics: [.trellis/spec/project/settings.md](../../spec/project/settings.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 76: 星动力商品上架时间与封面
+<!-- trellis-session: v=2 fp=95d64342af8ae09d -->
+
+**Date**: 2026-11-24
+**Task**: 星动力商品上架时间与封面
+
+### Summary
+
+商品详情使用星动力 createTime 显示上架时间。指定图片源可返回 PNG，缺图由原有单主机规则导致。服务端商品映射与桌面图片策略同步接受两个已验证的 CDN 主机。商品平台回归与前端构建通过。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 77: 星动力排序与紧凑商品卡片
+<!-- trellis-session: v=2 fp=01367f3741cad147 -->
+
+**Date**: 2026-11-24
+**Task**: 星动力排序与紧凑商品卡片
+
+### Summary
+
+用户确认星动力商品排序的 sortType 为 time、todaySales、sales、7Sales、30Sales，sortOrder 使用 desc。弹窗固定比例高度，切换排序回到第一页。上架时间沿用 createTime，空值明确显示。产品平台前后端回归和生产构建通过。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 78: 星动力排序切换方向
+<!-- trellis-session: v=2 fp=3e6f65c5b653469b -->
+
+**Date**: 2026-11-24
+**Task**: 星动力排序切换方向
+
+### Summary
+
+单击当前排序项切换升降序，新排序项默认降序，重新从第一页查询。翻页沿用当前 sortType 与 sortOrder。已通过前后端模拟回归。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 74
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 80
 - **Last Active**: 2026-11-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1905 | Active |
+| `journal-2.md` | ~47 | Active |
+| `journal-1.md` | ~1985 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,12 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 80 | 2026-11-24 | 粗剪模型返回转写句子索引 | - | `-` |
+| 79 | 2026-11-24 | 粗剪选片的 ASR 句界纠正 | - | `-` |
+| 78 | 2026-11-24 | 星动力排序切换方向 | - | `-` |
+| 77 | 2026-11-24 | 星动力排序与紧凑商品卡片 | - | `-` |
+| 76 | 2026-11-24 | 星动力商品上架时间与封面 | - | `-` |
+| 75 | 2026-11-24 | 限制设置页宽屏布局 | - | `-` |
 | 74 | 2026-11-24 | 调整商品平台设置布局 | - | `-` |
 | 73 | 2026-11-24 | 星动力商品平台接入 | - | `-` |
 | 72 | 2026-11-24 | 抖音登录按钮并排 | - | `-` |

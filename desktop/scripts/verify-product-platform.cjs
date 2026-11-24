@@ -273,8 +273,10 @@ async function verifySearch() {
 
 async function verifyXingdongli() {
   const account = { ...loggedIn, platform: 'xingdongli', scopes: [{ id: '42', name: '签约达人 A' }] }
-  const first = { id: 'one', title: '商品 A', real_time_sales: 0 }
-  const second = { id: 'two', title: '商品 B', real_time_sales: 2 }
+  const first = { id: 'one', title: '商品 A', real_time_sales: 0,
+    cover: 'https://lf26-cm.ecombdstatic.com/product.jpg', listing_time: '2026-11-23 16:30:22' }
+  const second = { id: 'two', title: '商品 B', real_time_sales: 2,
+    cover: 'https://lf3-cm.ecombdstatic.com/another-product.jpg', listing_time: null }
   respond = (url, options) => {
     if (url.endsWith('/settings/cloud')) return { config: {}, secrets: {}, secret_previews: {} }
     if (url.endsWith('/status')) return status
@@ -333,15 +335,41 @@ async function verifyXingdongli() {
   }
   mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '', monitorId: 'monitor', browse: true })
   try {
-    const select = all(body, el => el.type === 'select')[0]
-    assert.ok(select)
-    select.props.onChange({ target: { value: '1' } }); await settle()
-    assert.ok(text(body).includes('今日销量2'))
+    assert.equal(all(body, el => el.type === 'select').length, 0)
+    const [list] = all(body, el => el.props['aria-label'] === '商品列表')
+    const cards = all(list, el => el.type === 'article')
+    assert.equal(cards.length, 2)
+    assert.ok(text(cards[0]).includes('上架时间2026-11-23 16:30:22'))
+    assert.ok(text(cards[1]).includes('今日销量2'))
+    assert.ok(text(cards[1]).includes('上架时间平台未提供'))
+    const [firstImage, secondImage] = all(list, el => el.type === 'img')
+    assert.equal(firstImage.props.src, first.cover)
+    firstImage.props.onError(); await settle()
+    assert.ok(text(cards[0]).includes('暂无图片'))
+    assert.equal(all(list, el => el.type === 'img')[0], secondImage)
     await click(button(body, '下一页'))
-    assert.deepEqual(calls.at(-1).body, { keyword: '', monitor_id: 'monitor', start: 20 })
+    assert.deepEqual(calls.at(-1).body, { keyword: '', monitor_id: 'monitor', start: 20, sort_type: 'time', sort_order: 'desc' })
+    assert.equal(all(body, el => el.type === 'article').length, 1)
+    assert.ok(!text(body).includes(first.title))
     assert.ok(button(body, '下一页').props.disabled)
     assert.ok(!button(body, '添加橱窗'))
+    await click(button(body, '7 日销量'))
+    assert.deepEqual(calls.at(-1).body, { keyword: '', monitor_id: 'monitor', sort_type: '7Sales', sort_order: 'desc' })
+    assert.equal(button(body, '7 日销量，降序').props['aria-pressed'], true)
+    await click(button(body, '下一页'))
+    assert.deepEqual(calls.at(-1).body, { keyword: '', monitor_id: 'monitor', start: 20, sort_type: '7Sales', sort_order: 'desc' })
+    await click(button(body, '7 日销量，降序'))
+    assert.deepEqual(calls.at(-1).body, { keyword: '', monitor_id: 'monitor', sort_type: '7Sales', sort_order: 'asc' })
+    assert.ok(text(button(body, '7 日销量，升序')).includes('↑'))
+    await click(button(body, '下一页'))
+    assert.deepEqual(calls.at(-1).body, { keyword: '', monitor_id: 'monitor', start: 20, sort_type: '7Sales', sort_order: 'asc' })
+    await click(button(body, '7 日销量，升序'))
+    assert.equal(calls.at(-1).body.sort_order, 'desc')
+    assert.ok(text(button(body, '7 日销量，降序')).includes('↓'))
   } finally { mounted.app.unmount() }
+  mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '商品', monitorId: 'monitor' })
+  assert.equal(all(body, el => el.type === 'article').length, 2)
+  mounted.app.unmount()
   respond = () => ({ status: 401, body: { detail: { code: 'XINGDONGLI_AUTH_REQUIRED', message: '已失效' } } })
   mounted = await mount('components/product/ProductSearchDialog.vue', { keyword: '商品', monitorId: 'monitor' })
   assert.deepEqual(navigation.at(-1), { path: '/settings', query: { cloudTab: 'product-platform', platform: 'xingdongli' } })

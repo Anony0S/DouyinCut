@@ -27,7 +27,7 @@
 | `GET /assets/{asset_id}/cover-references` | 返回当前项目本地上传的参考图列表 `images`。 |
 | `GET /assets/{asset_id}/cover-references/{image_id}` | 读取当前项目已获取或上传的参考图 |
 | `DELETE /assets/{asset_id}/cover-references/{image_id}` | 删除当前项目本地上传的参考图。图片被活动封面任务引用时返回 409。 |
-| `POST /assets/{asset_id}/covers` | body 包含 plan_id、revision、reference_id、prompt；校验当前已保存方案修订后排队 `cover` 任务，使用独立 OpenAI Images 兼容服务生成草稿列表封面 |
+| `POST /assets/{asset_id}/covers` | body 包含 plan_id、revision、reference_id、prompt（包含商品名称的提示词快照，最多 4300 字符）。校验当前已保存方案修订后排队 `cover` 任务，使用独立 OpenAI Images 兼容服务生成草稿列表封面 |
 | `GET /assets/{asset_id}/covers/{cover_id}/media` | 读取成功封面任务的本地图片结果；封面与方案修订及视频项目绑定 |
 | `GET /assets/{asset_id}/covers/{cover_id}/original` | 读取同项目成功封面任务的生图服务原图；不存在或已删除时返回 410 |
 | `GET /exports`、`GET /exports/{id}/media` | 产物历史与播放 |
@@ -55,6 +55,7 @@
 | `GET /jobs/{id}/transcript` | 查看汇总全量 ASR 对话与源时间戳 |
 | `GET /jobs/{id}/error-detail` | 完整脱敏错误详情 |
 | `GET /events` | fetch SSE，jobs 事件发送任务汇总变化信号；共用认证、退避重连与卸载取消 |
+| `GET /settings/cover-prompts`、`POST /settings/cover-prompts`、`PUT/DELETE /settings/cover-prompts/{prompt_id}` | 读取和管理当前工作目录共享的封面提示词。新增和修改传 name（最多 80 字符）和 prompt（Markdown，最多 4000 字符），两项必填。列表条目含 id、name、prompt |
 | `GET/PUT /settings/editing-defaults` | 认证读取 / 保存本机默认剪辑要求 instructions（最多4000字符，空白重置为内置要求），不创建分析或调用云端；项目草稿与全局默认要求分别持久化 |
 | `GET/PATCH /settings/cloud`、`POST /settings/secrets` | 文本字段 base_url、planner_model、chat_timeout_seconds、封面字段 image_base_url、image_model、image_timeout_seconds 与语音字段 asr_base_url、asr_model、asr_timeout_seconds 分开保存；密钥名 llm_api_key、image_generation_api_key、asr_api_key 分别使用系统凭据存储，配置加载仅返回各自状态及缩略值 |
 | `POST /settings/cloud/test-model` | 本地认证后按 body.config 中的 Base URL、planner_model、chat_timeout_seconds 与可选 api_key 测试文本生成；空密钥使用已保存 llm_api_key。只发一次请求，成功与可预期测试失败返回 ok、model、elapsed_ms、message，不保存设置或密钥；非法配置返回 422，未授权返回 401 |

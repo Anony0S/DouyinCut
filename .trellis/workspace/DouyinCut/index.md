@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 80
+- **Total Sessions**: 81
 - **Last Active**: 2026-11-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~47 | Active |
+| `journal-2.md` | ~68 | Active |
 | `journal-1.md` | ~1985 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 81 | 2026-11-24 | 封面弹窗管理 Markdown 提示词 | - | `master` |
 | 80 | 2026-11-24 | 粗剪模型返回转写句子索引 | - | `-` |
 | 79 | 2026-11-24 | 粗剪选片的 ASR 句界纠正 | - | `-` |
 | 78 | 2026-11-24 | 星动力排序切换方向 | - | `-` |

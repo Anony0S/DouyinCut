@@ -31,6 +31,7 @@ from .ai.connection import (ModelConnectionTestRequest, check_model_connection, 
                             check_oss_connection)
 from .ai.roughcut import DEFAULT_INSTRUCTIONS, RoughcutRequest
 from .core.storage import SessionStopping, Store
+from .projects.cover_prompts import CoverPromptDraft, change_cover_prompt, list_cover_prompts
 from .projects.service import (EditingDefaults, editing_defaults, save_editing_defaults, WorkspaceLayout,
                        workspace_layout, save_workspace_layout, ProjectDraft, delete_plan, delete_project, job_summary,
                        project_detail, project_list, save_draft)
@@ -62,7 +63,7 @@ class CoverGenerationRequest(Model):
     plan_id: str = Field(min_length=1, max_length=100)
     revision: int = Field(ge=1)
     reference_id: str = Field(min_length=1, max_length=100)
-    prompt: str = Field(min_length=1, max_length=4000)
+    prompt: str = Field(min_length=1, max_length=4300)
 
 
 class ProductImagesRequest(Model):
@@ -984,6 +985,22 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             return CloudConfig.model_validate(store.get("config", "cloud")["config"])
         except KeyError:
             return CloudConfig()
+
+    @app.get("/api/v1/settings/cover-prompts")
+    def get_cover_prompts():
+        return list_cover_prompts(store)
+
+    @app.post("/api/v1/settings/cover-prompts", status_code=201)
+    def add_cover_prompt(body: CoverPromptDraft):
+        return change_cover_prompt(store, None, body)
+
+    @app.put("/api/v1/settings/cover-prompts/{prompt_id}")
+    def update_cover_prompt(prompt_id: str, body: CoverPromptDraft):
+        return change_cover_prompt(store, prompt_id, body)
+
+    @app.delete("/api/v1/settings/cover-prompts/{prompt_id}")
+    def delete_cover_prompt(prompt_id: str):
+        return change_cover_prompt(store, prompt_id, None)
 
     @app.get("/api/v1/settings/editing-defaults")
     def get_editing_defaults():

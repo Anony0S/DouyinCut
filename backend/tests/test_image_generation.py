@@ -6,15 +6,40 @@ from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 import httpx
+from fastapi.testclient import TestClient
 
 from app.ai.image_generation import fetch_product_image, request_image
 from app.ai.providers import CloudConfig, ProviderError
+from app.api import create_app
+from app.core.config import Settings
 
 
 PNG = b"\x89PNG\r\n\x1a\nfixture"
 
 
 class ImageGenerationTests(unittest.TestCase):
+    def test_cover_prompt_library_persists_edits_and_empty_list(self):
+        with tempfile.TemporaryDirectory() as temp:
+            settings = Settings(Path(temp))
+            path = "/api/v1/settings/cover-prompts"
+            headers = {"X-Session-Token": "test-token"}
+            with TestClient(create_app(settings, token="test-token"), headers=headers) as client:
+                default = client.get(path).json()[0]
+                self.assertIn("画面比例严格为3:4", default["prompt"])
+                self.assertEqual(client.post(path, json={"name": " ", "prompt": "正文"}).status_code, 422)
+                reply = client.post(path, json={"name": " 特写 ", "prompt": "# 细节\n\n- 面料"})
+                self.assertEqual(reply.status_code, 201)
+                custom = reply.json()
+                self.assertEqual(custom["name"], "特写")
+                reply = client.put(f"{path}/{default['id']}", json={"name": "上身", "prompt": "**上身效果**"})
+                self.assertEqual(reply.status_code, 200)
+                self.assertEqual(client.get(path).json(), [reply.json(), custom])
+                self.assertEqual(client.delete(f"{path}/{default['id']}").json(), {"deleted": True})
+                self.assertEqual(client.delete(f"{path}/{custom['id']}").json(), {"deleted": True})
+                self.assertEqual(client.delete(f"{path}/{custom['id']}").status_code, 404)
+            with TestClient(create_app(settings, token="test-token"), headers=headers) as client:
+                self.assertEqual(client.get(path).json(), [])
+
     def test_cover_worker_retains_original_bytes(self):
         from app.core.config import Settings
         from app.worker import Worker

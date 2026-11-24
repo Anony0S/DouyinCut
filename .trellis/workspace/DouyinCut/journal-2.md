@@ -45,3 +45,24 @@ Topics: [.trellis/spec/project/roughcut.md](../../spec/project/roughcut.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 81: 封面弹窗管理 Markdown 提示词
+<!-- trellis-session: v=2 fp=205d58e0ba7b7bda -->
+
+**Date**: 2026-11-24
+**Task**: 封面弹窗管理 Markdown 提示词
+**Branch**: `master`
+
+### Summary
+
+生成带封面的剪映草稿弹窗列出工作目录共享的多套提示词。查看、新增和编辑在独立弹窗中进行，支持 Markdown 预览。已验证本地存储和选择后的任务提交。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**

@@ -3,6 +3,8 @@ import { api, apiJson, uploadVideo, type ProjectDetail, type ProjectDraft, type 
 export type ProjectFilter = { page: number; search: string; status: string }
 export type ShortFillerFilter = { max_chars: number; max_duration_ms: number }
 export type CoverReference = { id: string; url: string }
+export type CoverPromptDraft = { name: string; prompt: string }
+export type CoverPrompt = CoverPromptDraft & { id: string }
 export const projectsApi = {
   saveEditingDefaults: (instructions: string) => api<{instructions:string}>('/settings/editing-defaults', 'PUT', {instructions}),
   list: (filter: ProjectFilter) => api<ProjectPage>(`/projects?${new URLSearchParams({page:String(filter.page),page_size:'20',search:filter.search,status:filter.status})}`),
@@ -24,6 +26,12 @@ export const projectsApi = {
     api<{images: CoverReference[]}>(`/assets/${encodeURIComponent(assetId)}/cover-references`),
   deleteCoverReference: (assetId: string, referenceId: string) =>
     api<{deleted: boolean}>(`/assets/${encodeURIComponent(assetId)}/cover-references/${encodeURIComponent(referenceId)}`, 'DELETE'),
+  coverPrompts: () => api<CoverPrompt[]>('/settings/cover-prompts'),
+  createCoverPrompt: (draft: CoverPromptDraft) => api<CoverPrompt>('/settings/cover-prompts', 'POST', draft),
+  updateCoverPrompt: (id: string, draft: CoverPromptDraft) =>
+    api<CoverPrompt>(`/settings/cover-prompts/${encodeURIComponent(id)}`, 'PUT', draft),
+  deleteCoverPrompt: (id: string) =>
+    api<{deleted: boolean}>(`/settings/cover-prompts/${encodeURIComponent(id)}`, 'DELETE'),
   generateCover: (assetId:string, planId:string, revision:number, referenceId:string, prompt:string) =>
     api<Job>(`/assets/${encodeURIComponent(assetId)}/covers`, 'POST', {plan_id:planId, revision, reference_id:referenceId, prompt}),
   transcript: (id: string) => api<TranscriptResult>(`/jobs/${encodeURIComponent(id)}/transcript`),

@@ -12,6 +12,7 @@ import { useVideoImport } from '../composables/useVideoImport'
 import WorkspaceSplit from '../components/WorkspaceSplit.vue'
 import JobErrorDetails from '../components/JobErrorDetails.vue'
 import ConfirmPopover from '../components/ConfirmPopover.vue'
+import CoverPromptPicker from '../components/CoverPromptPicker.vue'
 import { projectsApi, type CoverReference } from '../services/projects'
 import { productPlatformApi, isProductPlatformAuthError } from '../services/productPlatform'
 const project=useProjectStore(),session=useSessionStore(),workspace=useWorkspace(),route=useRoute(),router=useRouter()
@@ -48,6 +49,7 @@ const productImageStates=ref<Record<string,'loading'|'loaded'|'error'>>({})
 const matchedProductTitle=ref('')
 const coverImageKeyword=ref('')
 const coverPrompt=ref('')
+const showCoverPrompts=ref(false)
 const coverError=ref(''), coverBusy=ref(false), loadingCoverImages=ref(false)
 const platformImageError=ref(''), platformLoginRequired=ref(false), uploadingCoverImage=ref(false)
 const loadingUploadedImages=ref(false), deletingCoverImage=ref('')
@@ -58,7 +60,6 @@ const originalDialog=ref<HTMLDialogElement|null>(null)
 const originalState=ref<'loading'|'loaded'|'error'>('loading')
 const originalJobId=ref('')
 const coverPreviewState=ref<'loading'|'loaded'|'error'>('loading')
-const coverPromptBase='生成一张用于抖音商品短视频的竖版封面，画面比例严格为3:4。请从商品名称中提炼一个简短、准确、易读的中文标题。封面必须同时展示人物上身效果图和商品单品图：人物穿着商品作为主要视觉主体，清楚呈现真实上身效果；将同款未上身的单品图以较小尺寸放在人物旁边，作为辅助对照，不能省略或用文字代替。两种商品展示需款式、颜色和细节一致；单品图可用平铺或电商静物形式，不要再添加其他人物或商品。标题与人物主体清晰醒目、互不遮挡，商品单品图保持可辨识但视觉权重低于上身图。若参考图包含人物，尽量忠实保留人物穿着商品的效果；若参考图仅为单品图，则以它还原同款商品并生成自然可信的上身效果，同时保留较小的单品展示。采用简洁、有质感且衬托商品的背景，标题、人物和单品图避开边缘并留出安全空间。标题精炼，不添加价格、折扣、功效或名称之外的营销承诺。不要添加水印、平台标识、无关文字、额外商品或与参考商品不符的细节。'
 const matchingCoverJobs=computed(()=>assetJobs.value.filter(job=>job.kind==='cover'&&job.payload?.plan_id===selectedPlan.value?.id&&job.payload?.revision===selectedPlan.value?.revision).sort((a,b)=>b.created-a.created))
 const successfulCoverJobs=computed(()=>matchingCoverJobs.value.filter(job=>job.state==='succeeded'&&typeof job.result?.cover_id==='string'))
 const selectedCoverJob=computed(()=>successfulCoverJobs.value[0]||null)
@@ -88,7 +89,8 @@ async function openCoverDraftDialog() {
   deletingCoverImage.value=''; loadingUploadedImages.value=true
   const original=productName.value.trim()
   coverImageKeyword.value=original
-  coverPrompt.value=original?`${coverPromptBase}\n商品名称：${original}`:coverPromptBase
+  coverPrompt.value=''
+  showCoverPrompts.value=true
   await nextTick()
   if(version!==coverDialogVersion) return
   coverDialog.value?.showModal()
@@ -98,10 +100,12 @@ function closeCoverDraftDialog() {
   if(coverBusy.value) return
   coverDialogVersion++
   coverDialog.value?.close()
+  showCoverPrompts.value=false
 }
 watch([assetId,()=>selectedPlan.value?.id,()=>selectedPlan.value?.revision],()=>{
   coverDialogVersion++
   if(coverDialog.value?.open) coverDialog.value.close()
+  showCoverPrompts.value=false
 },{flush:'sync'})
 async function loadCoverImages(refresh=false) {
   const keyword=coverImageKeyword.value.trim()
@@ -195,7 +199,9 @@ async function generateCover() {
   if(!plan||!activeAsset.value||!canGenerateCover.value) return
   coverBusy.value=true;coverError.value=''
   try {
-    await projectsApi.generateCover(activeAsset.value.id,plan.id,plan.revision,selectedReferenceId.value,coverPrompt.value.trim())
+    const name = productName.value.trim()
+    const prompt = name ? `${coverPrompt.value.trim()}\n商品名称：${name}` : coverPrompt.value.trim()
+    await projectsApi.generateCover(activeAsset.value.id,plan.id,plan.revision,selectedReferenceId.value,prompt)
     session.message='封面生成任务已排队，可在当前项目任务状态查看进度'
     await project.refresh()
   } catch(error) { coverError.value=error instanceof Error?error.message:'封面任务提交失败，请重试' }
@@ -494,10 +500,7 @@ onUnmounted(()=>{coverDialogVersion++;stopSourcePlayback();finishClipDrag(false)
     </p>
     <p v-else-if="!coverReferences.length&&!loadingCoverImages&&!loadingUploadedImages" class="hint">获取商品图片，或上传 PNG、JPEG、WebP 图片（最大 20 MB）。</p>
     <div class="cover-dialog-workarea">
-      <section class="cover-dialog-prompt">
-        <label for="cover-prompt-dialog">生成要求</label>
-        <textarea id="cover-prompt-dialog" v-model="coverPrompt" class="textarea textarea-sm w-full" maxlength="4000" rows="14" :disabled="Boolean(activeCoverJob)||coverBusy" />
-      </section>
+      <CoverPromptPicker v-if="showCoverPrompts" v-model="coverPrompt" :disabled="Boolean(activeCoverJob)||coverBusy" />
       <section class="cover-dialog-preview" aria-label="生成的封面预览">
         <div class="cover-preview-heading">
           <span class="cover-dialog-preview-label">生成封面</span>

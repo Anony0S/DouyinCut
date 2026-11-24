@@ -16,6 +16,7 @@ let releaseOtherProject
 const requests=[]
 const coverSearches=[]
 let coverRequest
+let coverPrompts=[{id:'default',name:'默认提示词',prompt:'# 默认生成要求'}]
 let localCoverReferences=[{id:'local',url:'/reference-local.png'}]
 const networkCoverReference={id:'network',url:'/reference-network.png'}
 const asset = { id: 'video', name: '奶黄千层.mp4', path: 'local.mp4', duration_us: 250e6, width: 160, height: 120 }
@@ -39,6 +40,21 @@ const api = async (url, method = 'GET', body) => {
   if (url === '/assets/video/covers') {
     coverRequest=copy(body)
     return {id:'cover',state:'queued'}
+  }
+  if (url === '/settings/cover-prompts') {
+    if (method === 'GET') return copy(coverPrompts)
+    const added = {id:'custom', ...body}
+    coverPrompts.push(added)
+    return copy(added)
+  }
+  if (url === '/settings/cover-prompts/custom') {
+    if (method === 'DELETE') {
+      coverPrompts = coverPrompts.filter(item => item.id !== 'custom')
+      return {deleted:true}
+    }
+    const updated = {id:'custom', ...body}
+    coverPrompts = coverPrompts.map(item => item.id === updated.id ? updated : item)
+    return copy(updated)
   }
   if (url === '/jobs-summary') return {active:0}
   if (url.startsWith('/projects?')) return {items:lists['/assets'].map(item=>({...item,product_name:savedDraft?.product_name||'',status:'pending',updated_at:1,plan_id:null,output_duration_us:null})),total:lists['/assets'].length,page:1,page_size:20,pages:1}
@@ -240,6 +256,15 @@ async function verifyEditingControls() {
   const confirm={props:['title'],setup(props,{slots}){
     return ()=>vue.h('div',{'data-confirm-title':props.title},slots.default?.({}))
   }}
+  const pickerSource = fs.readFileSync(path.join(__dirname, '../src/components/CoverPromptPicker.vue'), 'utf8')
+  const pickerCompiled = compileScript(parse(pickerSource).descriptor, {id:'cover-prompt-check', inlineTemplate:true})
+  const pickerCode = ts.transpileModule(pickerCompiled.content, {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText
+  const pickerModule = {exports:{}}
+  new Function('require','module','exports',pickerCode)(name=>{
+    if (name === 'vue') return {...vue,vModelText:{}}
+    if (name === '../services/projects') return loaded.load('services/projects.ts')
+    return require(name)
+  },pickerModule,pickerModule.exports)
   new Function('require','module','exports',code)(name=>{
     if(name==='vue') return {...vue,vModelText:{},vModelSelect:{},vModelCheckbox:{}}
     if(name==='vue-router') return {...require(name),useRoute:()=>router.currentRoute.value,useRouter:()=>router}
@@ -252,6 +277,7 @@ async function verifyEditingControls() {
     if(name.startsWith('../services/')) return loaded.load(name.slice(3)+'.ts')
     if(name.endsWith('WorkspaceSplit.vue')) return {__esModule:true,default:split}
     if(name.endsWith('ConfirmPopover.vue')) return {__esModule:true,default:confirm}
+    if(name.endsWith('CoverPromptPicker.vue')) return pickerModule.exports
     if(name.endsWith('.vue')) return {__esModule:true,default:empty}
     return require(name)
   },componentModule,componentModule.exports)
@@ -326,9 +352,34 @@ async function verifyEditingControls() {
     await button('生成带封面剪映草稿').props.onClick()
     await settle()
     const search=all(root,el=>el.props.id==='cover-image-keyword')[0]
-    const prompt=all(root,el=>el.props.id==='cover-prompt-dialog')[0]
     const projectName=project.productName
-    prompt.props['onUpdate:modelValue']('原有生成要求')
+    const promptEditor=all(root,el=>el.props['aria-labelledby']==='cover-prompt-editor-title')[0]
+    const editorButton=label=>all(promptEditor,el=>el.type==='button'&&text(el).trim()===label)[0]
+    const promptField=id=>all(promptEditor,el=>el.props.id===id)[0]
+    const submitPrompt=()=>all(promptEditor,el=>el.type==='form'&&el.props.onSubmit&&el.props.method!=='dialog')[0].props.onSubmit({preventDefault(){}})
+    await button('新增提示词').props.onClick()
+    await settle()
+    assert.equal(promptEditor.open,true)
+    promptField('cover-prompt-name').props['onUpdate:modelValue']('商品特写')
+    promptField('cover-prompt-content').props['onUpdate:modelValue']('# 特写\n\n- 保留面料')
+    await settle()
+    await editorButton('预览').props.onClick()
+    await settle()
+    assert.ok(all(promptEditor,el=>el.props.innerHTML?.includes('<h1>特写</h1>')).length)
+    await submitPrompt()
+    await settle()
+    assert.equal(promptEditor.open,false)
+    const promptAction=label=>all(root,el=>el.props['aria-label']===label)[0]
+    await promptAction('编辑 商品特写').props.onClick()
+    await settle()
+    promptField('cover-prompt-content').props['onUpdate:modelValue']('# 原有生成要求')
+    await submitPrompt()
+    await settle()
+    await promptAction('查看 商品特写').props.onClick()
+    await settle()
+    assert.ok(all(promptEditor,el=>el.props.innerHTML?.includes('<h1>原有生成要求</h1>')).length)
+    await editorButton('关闭').props.onClick()
+    await settle()
     search.props['onUpdate:modelValue']('换一个图片搜索标题')
     const searchForm=all(root,el=>el.type==='form'&&el.props.class==='cover-image-search')[0]
     await searchForm.props.onSubmit({preventDefault(){}})
@@ -346,8 +397,14 @@ async function verifyEditingControls() {
     assert.equal(button('生成封面').props.disabled,false)
     await button('生成封面').props.onClick()
     assert.equal(coverRequest.reference_id,networkCoverReference.id)
-    assert.equal(coverRequest.prompt,'原有生成要求')
+    assert.equal(coverRequest.prompt,'# 原有生成要求\n商品名称：'+projectName.trim())
     assert.equal(project.productName,projectName)
+    await promptAction('删除 商品特写').props.onClick()
+    await settle()
+    await editorButton('删除').props.onClick()
+    await settle()
+    assert.equal(promptAction('查看 商品特写'),undefined)
+    assert.ok(all(root,el=>el.props['aria-pressed']===true&&text(el).includes('默认提示词')).length)
     console.log('Cover dialog passed: independent search title, action order, local-only deletion and prompt submission.')
   } finally {failDefaultSave=false;app.unmount()}
 }

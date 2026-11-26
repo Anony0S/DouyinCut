@@ -14,7 +14,7 @@ import JobErrorDetails from '../components/JobErrorDetails.vue'
 import ConfirmPopover from '../components/ConfirmPopover.vue'
 import CoverPromptPicker from '../components/CoverPromptPicker.vue'
 import { projectsApi, type CoverReference } from '../services/projects'
-import { productPlatformApi, isProductPlatformAuthError } from '../services/productPlatform'
+import { productPlatformApi, isProductPlatformAuthError, isXingdongliAuthError } from '../services/productPlatform'
 const project=useProjectStore(),session=useSessionStore(),workspace=useWorkspace(),route=useRoute(),router=useRouter()
 const {busy,connected,pendingImportId}=storeToRefs(session)
 const {assetId,activeAsset,productName,instructions,targetSeconds,toleranceSeconds,refreshAsr,analyzingAsset,
@@ -51,7 +51,7 @@ const coverImageKeyword=ref('')
 const coverPrompt=ref('')
 const showCoverPrompts=ref(false)
 const coverError=ref(''), coverBusy=ref(false), loadingCoverImages=ref(false)
-const platformImageError=ref(''), platformLoginRequired=ref(false), uploadingCoverImage=ref(false)
+const platformImageError=ref(''), platformLoginRequired=ref<'xingdou' | 'xingdongli' | null>(null), uploadingCoverImage=ref(false)
 const loadingUploadedImages=ref(false), deletingCoverImage=ref('')
 const coverUploadInput=ref<HTMLInputElement|null>(null)
 let coverDialogVersion=0
@@ -76,7 +76,7 @@ const canGenerateCover=computed(()=>Boolean(connected.value&&selectedPlan.value&
   !planDirty.value&&!activeCoverJob.value&&!coverBusy.value&&!uploadingCoverImage.value&&!deletingCoverImage.value))
 function handleCoverPlatformError(error:unknown, message:string) {
   platformImageError.value=error instanceof Error?error.message:message
-  platformLoginRequired.value=isProductPlatformAuthError(error)
+  platformLoginRequired.value=isProductPlatformAuthError(error) ? 'xingdou' : isXingdongliAuthError(error) ? 'xingdongli' : null
 }
 async function openCoverDraftDialog() {
   const plan=selectedPlan.value
@@ -84,7 +84,7 @@ async function openCoverDraftDialog() {
   if(!plan||planDirty.value||!asset||!connected.value||coverBusy.value) return
   const version=++coverDialogVersion
   coverError.value=''; matchedProductTitle.value=''; productImages.value=[]; selectedReferenceId.value=''
-  platformImageError.value=''; platformLoginRequired.value=false; loadingCoverImages.value=false
+  platformImageError.value=''; platformLoginRequired.value=null; loadingCoverImages.value=false
   uploadedImages.value=[]; productImageStates.value={}; uploadingCoverImage.value=false
   deletingCoverImage.value=''; loadingUploadedImages.value=true
   const original=productName.value.trim()
@@ -112,21 +112,21 @@ async function loadCoverImages(refresh=false) {
   const currentAsset=assetId.value
   if(!keyword||!currentAsset||loadingCoverImages.value) return
   const version=coverDialogVersion
-  platformImageError.value=''; platformLoginRequired.value=false; loadingCoverImages.value=true
+  platformImageError.value=''; platformLoginRequired.value=null; loadingCoverImages.value=true
   matchedProductTitle.value=''
   for(const image of productImages.value) delete productImageStates.value[image.id]
   productImages.value=[]
   selectAvailableCoverReference()
   try {
-    const match=await productPlatformApi.search(keyword,{asset_id:currentAsset})
+    const match=await productPlatformApi.searchCoverProduct(currentAsset,keyword,refresh)
     if(version!==coverDialogVersion) return
     if(!match.product?.id) {platformImageError.value='平台未查询到可取图的商品';return}
-    const result=await productPlatformApi.images(currentAsset,match.product.id,refresh)
+    const images=match.reference_images ?? (await productPlatformApi.images(currentAsset,match.product.id,refresh)).images
     if(version!==coverDialogVersion) return
     matchedProductTitle.value=match.product.title||''
-    productImages.value=result.images
+    productImages.value=images
     selectAvailableCoverReference()
-    if(!result.images.length) platformImageError.value='该商品没有可用图片'
+    if(!images.length) platformImageError.value='该商品没有可用图片'
   } catch(error) {
     if(version===coverDialogVersion) handleCoverPlatformError(error,'获取商品图片失败，请重试')
   } finally {
@@ -496,7 +496,7 @@ onUnmounted(()=>{coverDialogVersion++;stopSourcePlayback();finishClipDrag(false)
     <p v-if="platformImageError" class="hint">
       {{ platformImageError }}
       <button v-if="platformLoginRequired" type="button" class="btn btn-link btn-xs"
-        @click="router.push({path:'/settings',query:{cloudTab:'product-platform'}})">打开平台设置</button>
+        @click="router.push({path:'/settings',query:{cloudTab:'product-platform',platform:platformLoginRequired}})">打开平台设置</button>
     </p>
     <p v-else-if="!coverReferences.length&&!loadingCoverImages&&!loadingUploadedImages" class="hint">获取商品图片，或上传 PNG、JPEG、WebP 图片（最大 20 MB）。</p>
     <div class="cover-dialog-workarea">

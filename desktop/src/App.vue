@@ -170,7 +170,11 @@ onUnmounted(()=>{window.removeEventListener('douyincut-exit-request',onExitReque
 
     <main :class="{ 'workspace-main': route.name==='workspace', 'live-monitoring-main': route.name==='live-monitoring', 'projects-main': route.name==='projects', 'jobs-main': route.name==='jobs', 'logs-main': route.name==='logs' }">
       <input ref="fileInput" class="file-input" type="file" accept="video/*,.mkv,.flv,.ts" @change="selectFile"/>
-      <RouterView/>
+      <RouterView v-slot="{ Component }">
+        <KeepAlive include="LiveMonitoringView">
+          <component :is="Component" />
+        </KeepAlive>
+      </RouterView>
     </main>
     <div class="toast toast-top toast-end app-toast-stack" aria-live="polite" aria-relevant="additions text">
       <div v-for="toast in toasts" :key="toast.id" class="alert app-toast" :class="`alert-${toast.kind}`" :role="toast.kind==='error'?'alert':'status'">

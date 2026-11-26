@@ -7,8 +7,10 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
+from app.ai.providers import CloudConfig
 from app.api import create_app
 from app.core.config import Settings
+from app.core.domain import Asset, Canvas, Clip, Plan
 from app.product_platform import xingdongli
 
 
@@ -53,12 +55,18 @@ class XingdongliTests(unittest.TestCase):
             value = {"total": 21, "data": [
                 {"id": "relation", "productId": "9912345678901234567", "productName": "测试商品",
                  "productImg": "https://lf26-cm.ecombdstatic.com/product.jpg", "todaySale": 0,
-                 "productPrice": 12.5, "createTime": " 2026-11-23 16:30:22 "},
+                 "productPrice": 12.5, "createTime": " 2026-11-23 16:30:22 ",
+                 "promotionUrl": "https://example.com/product?id=9912345678901234567&source=fixture"},
                 {"productId": "2", "productName": "原 CDN 商品",
                  "productImg": "https://lf3-cm.ecombdstatic.com/product.jpg"},
                 {"productId": "3", "productName": "其他来源商品",
-                 "productImg": "https://lf26-cm.ecombdstatic.com.example.com/product.jpg"},
+                 "productImg": "https://lf26-cm.ecombdstatic.com.example.com/product.jpg", "promotionUrl": "  "},
             ]}
+            keyword = json.loads(request.content)["searchProduct"]
+            if keyword == "无图":
+                value = {"total": 1, "data": value["data"][-1:]}
+            elif keyword == "无结果":
+                value = {"total": 0, "data": []}
         else:
             raise AssertionError(path)
         return httpx.Response(200, json={"success": True, "data": value})
@@ -114,6 +122,10 @@ class XingdongliTests(unittest.TestCase):
         self.assertEqual(first["platform_product_id"], "9912345678901234567")
         self.assertEqual(first["cover"], "https://lf26-cm.ecombdstatic.com/product.jpg")
         self.assertEqual(first["listing_time"], "2026-11-23 16:30:22")
+        self.assertEqual(first["promotion_url"], "https://example.com/product?id=9912345678901234567&source=fixture")
+        self.assertEqual(response.json()["product"]["promotion_url"], first["promotion_url"])
+        self.assertIsNone(original_source["promotion_url"])
+        self.assertIsNone(other_source["promotion_url"])
         self.assertEqual(original_source["cover"], "https://lf3-cm.ecombdstatic.com/product.jpg")
         self.assertIsNone(original_source["listing_time"])
         self.assertIsNone(other_source["cover"])
@@ -127,10 +139,47 @@ class XingdongliTests(unittest.TestCase):
                 self.assertEqual((query["sortType"], query["sortOrder"], query["start"]), (sort_type, "desc", 20))
         self.assertEqual(self.search(monitor_id, "测试", 20, sort_type="7Sales", sort_order="asc").status_code, 200)
         self.assertEqual(json.loads(self.requests[-1].content)["sortOrder"], "asc")
-        self.app.state.store.put("asset", {"id": "asset_fixture", "source_monitor_id": monitor_id})
-        cover_search = self.client.post("/api/v1/product-platform/products/search", headers=self.headers,
-                                        json={"asset_id": "asset_fixture", "keyword": "测试"})
-        self.assertEqual(cover_search.json()["detail"]["code"], "REFERENCE_IMAGES_UNSUPPORTED")
+
+    def test_cover_search_saves_the_first_results_image_for_cover_generation(self):
+        self.connect()
+        monitor_id = self.bind().json()["id"]
+        store = self.app.state.store
+        asset = Asset(id="asset_fixture", path="source.mp4", name="source", sha256="digest",
+                      duration_us=2_000_000, width=320, height=240, has_audio=True, source_monitor_id=monitor_id)
+        store.put("asset", asset.model_dump())
+        plan = Plan(product_id="product", canvas=Canvas(width=320, height=240),
+                    clips=[Clip(source_asset_id=asset.id, source_start_us=0, source_end_us=1_000_000,
+                                timeline_start_us=0, candidate_id="candidate")])
+        store.put("plan", plan.model_dump())
+        store.put("config", {"id": "cloud", "config": CloudConfig(
+            image_base_url="https://images.example/v1", image_model="cover-model").model_dump()})
+        payload = {"asset_id": asset.id, "keyword": "测试"}
+
+        def cover_search(**changes):
+            return self.client.post("/api/v1/product-platform/products/search", headers=self.headers,
+                                    json={**payload, **changes})
+
+        with patch("app.ai.image_generation.fetch_product_image", return_value=(b"\xff\xd8\xfffixture", "image/jpeg")) as fetch:
+            result = cover_search()
+            self.assertEqual(result.status_code, 200, result.text)
+            reference, = result.json()["reference_images"]
+            fetch.assert_called_once_with("https://lf26-cm.ecombdstatic.com/product.jpg",
+                                          allowed_hosts=xingdongli.PRODUCT_IMAGE_HOSTS)
+            self.assertEqual(json.loads(self.requests[-1].content)["ipId"], 42)
+            self.assertEqual(cover_search().json()["reference_images"], [reference])
+            self.assertEqual(cover_search(keyword="无图").json()["reference_images"], [])
+            self.assertEqual(cover_search(keyword="无结果").json()["reference_images"], [])
+            self.assertEqual(fetch.call_count, 1)
+            self.assertNotEqual(cover_search(refresh=True).json()["reference_images"], [reference])
+            self.assertEqual(fetch.call_count, 2)
+
+        self.assertEqual(self.client.get(reference["url"], headers=self.headers).content, b"\xff\xd8\xfffixture")
+        with patch("app.api.read_secret", return_value="fixture-key"):
+            queued = self.client.post(f"/api/v1/assets/{asset.id}/covers", headers=self.headers, json={
+                "plan_id": plan.id, "revision": plan.revision, "reference_id": reference["id"], "prompt": "生成封面",
+            })
+        self.assertEqual(queued.status_code, 202, queued.text)
+        self.assertEqual(Path(queued.json()["payload"]["reference_path"]).read_bytes(), b"\xff\xd8\xfffixture")
 
     def test_refresh_revalidates_scope_and_search_detects_expired_login(self):
         self.connect()

@@ -40,7 +40,7 @@ from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveProductMerge, L
 from .product_platform import ProductPlatformService
 from .product_platform.client import ProductPlatformError
 from .product_platform.daduoduo import DaduoduoCatalog
-from .product_platform.xingdongli import XingdongliService
+from .product_platform.xingdongli import PRODUCT_IMAGE_HOSTS as XINGDONGLI_IMAGE_HOSTS, XingdongliService
 from .product_platform.schemas import (AddToShowcaseRequest, LoginRequest, MobileRequest,
                                        RoomPlatformRequest, ScopeRequest, SearchRequest, XingdongliTokenRequest)
 
@@ -323,7 +323,7 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if binding is None:
             raise ProductPlatformError("请先为直播间绑定商品平台", code="ROOM_PLATFORM_REQUIRED", status=409)
         platform = binding["platform"]
-        if reference_images and platform != "xingdou":
+        if reference_images and platform == "daduoduo":
             raise ProductPlatformError("该直播间绑定的平台暂不支持获取参考图",
                                        code="REFERENCE_IMAGES_UNSUPPORTED", status=409)
         return platform, binding
@@ -332,10 +332,24 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     def product_platform_search(body: SearchRequest):
         platform, binding = resolve_product_platform(body.monitor_id, body.asset_id,
                                                      reference_images=body.asset_id is not None)
-        if platform == "xingdongli":
-            return xingdongli.search(binding["ip_id"], body.keyword, body.start, body.sort_type, body.sort_order)
-        if not body.keyword:
+        if not body.keyword and (platform != "xingdongli" or body.asset_id is not None):
             raise HTTPException(422, "商品名称不能为空")
+        if platform == "xingdongli":
+            result = xingdongli.search(binding["ip_id"], body.keyword, body.start, body.sort_type, body.sort_order)
+            if body.asset_id is not None:
+                from .ai.image_generation import fetch_product_image
+
+                product = result["product"]
+                result["reference_images"] = []
+                if product and product["cover"]:
+                    images = cache_product_reference_images(
+                        body.asset_id, local_cover_reference_root(body.asset_id),
+                        product["id"], f"{platform}:{binding['ip_id']}", body.refresh,
+                        load_urls=lambda: [product["cover"]],
+                        download=lambda url: fetch_product_image(url, allowed_hosts=XINGDONGLI_IMAGE_HOSTS),
+                    )
+                    result["reference_images"] = images["images"]
+            return result
         if platform == "daduoduo":
             return catalog.search(body.monitor_id, body.keyword)
         return {**app.state.product_platform.search(body.keyword), "can_add_to_showcase": True}
@@ -343,18 +357,27 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     @app.post("/api/v1/product-platform/products/images")
     def product_platform_product_images(body: ProductImagesRequest):
         from .ai.image_generation import fetch_product_image
-        from .core.domain import new_id
-        if not body.asset_id.startswith("asset_") or not body.asset_id[6:].isalnum():
-            raise HTTPException(422, "项目标识无效")
+        references = local_cover_reference_root(body.asset_id)
         platform, _ = resolve_product_platform(asset_id=body.asset_id, reference_images=True)
-        references = settings.data_dir / "covers" / body.asset_id / "references"
+        if platform != "xingdou":
+            raise ProductPlatformError("请使用商品查询获取星动力参考图",
+                                       code="REFERENCE_IMAGES_UNSUPPORTED", status=409)
+        return cache_product_reference_images(
+            body.asset_id, references, body.product_id, platform, body.refresh,
+            load_urls=lambda: app.state.product_platform.product_images(body.product_id),
+            download=fetch_product_image,
+        )
+
+    def cache_product_reference_images(asset_id, references, product_id, cache_scope, refresh, *, load_urls, download):
+        from .core.domain import new_id
+
         references.mkdir(parents=True, exist_ok=True)
-        cache_key = hashlib.sha256(f"{platform}:{body.product_id}".encode("utf-8")).hexdigest()
+        cache_key = hashlib.sha256(f"{cache_scope}:{product_id}".encode("utf-8")).hexdigest()
         cache_path = references / f"{cache_key}.json"
-        if not body.refresh and cache_path.is_file():
+        if not refresh and cache_path.is_file():
             try:
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
-                cached_images = cached.get("images", []) if cached.get("product_id") == body.product_id else []
+                cached_images = cached.get("images", []) if cached.get("product_id") == product_id else []
                 result = []
                 for item in cached_images:
                     image_id = item.get("id") if isinstance(item, dict) else None
@@ -365,17 +388,16 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                     if len(matches) != 1 or not matches[0].resolve().is_relative_to(references.resolve()):
                         result = []
                         break
-                    result.append({"id": image_id, "url": f"/api/v1/assets/{body.asset_id}/cover-references/{image_id}"})
+                    result.append({"id": image_id, "url": f"/api/v1/assets/{asset_id}/cover-references/{image_id}"})
                 if result:
                     return {"images": result, "cached": True}
             except (OSError, ValueError, TypeError, AttributeError):
                 pass
-        urls = app.state.product_platform.product_images(body.product_id)
         result = []
         cache_images = []
-        for url in urls:
+        for url in load_urls():
             try:
-                data, content_type = fetch_product_image(url)
+                data, content_type = download(url)
             except ValueError as exc:
                 raise HTTPException(502, str(exc)) from None
             extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(content_type)
@@ -384,14 +406,17 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             image_id = new_id("coverref")
             path = references / f"{image_id}{extension}"
             path.write_bytes(data)
-            result.append({"id": image_id, "url": f"/api/v1/assets/{body.asset_id}/cover-references/{image_id}"})
+            result.append({"id": image_id, "url": f"/api/v1/assets/{asset_id}/cover-references/{image_id}"})
             cache_images.append({"id": image_id})
         if not result:
-            raise HTTPException(404, "星斗商品没有可用图片")
-        temporary_cache_path = cache_path.with_suffix(".json.tmp")
-        temporary_cache_path.write_text(json.dumps({"product_id": body.product_id, "images": cache_images}),
-                                        encoding="utf-8")
-        os.replace(temporary_cache_path, cache_path)
+            raise HTTPException(404, "该商品没有可用图片")
+        temporary_cache_path = cache_path.with_suffix(f".{new_id('tmp')}.tmp")
+        try:
+            temporary_cache_path.write_text(json.dumps({"product_id": product_id, "images": cache_images}),
+                                            encoding="utf-8")
+            os.replace(temporary_cache_path, cache_path)
+        finally:
+            temporary_cache_path.unlink(missing_ok=True)
         return {"images": result, "cached": False}
 
     def local_cover_reference_root(asset_id: str) -> Path:

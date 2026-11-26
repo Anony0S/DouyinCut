@@ -22,7 +22,7 @@
 | `POST /plans/{id}/approve` | 审核保存版本；当前界面不调用 |
 | `POST /plans/{id}/exports` | 只接受 format=mp4，默认 mp4；当前界面不调用 |
 | `POST /plans/{id}/jianying-drafts` | body 包含 revision 和可选 cover_id；后台生成该已保存修订的剪映工程草稿。cover_id 必须属于同一视频项目、方案和修订，带封面时创建新的草稿目录并返回任务 |
-| `POST /product-platform/products/images` | body 包含 asset_id、product_id 和可选 refresh（默认 false）。按项目来源直播间当前绑定选择平台；手动导入的视频沿用星斗。星斗 product_id 对应详情 `xdBizId`，缓存按项目、平台及商品 ID 隔离。达多多返回 409 / REFERENCE_IMAGES_UNSUPPORTED。返回本地图片 ID、接口地址及 cached 状态，不持久化带签名的原始图片 URL |
+| `POST /product-platform/products/images` | 取星斗参考图。body 包含 asset_id、product_id 和可选 refresh（默认 false）。按项目来源直播间当前绑定选择平台；手动导入的视频沿用星斗。星斗 product_id 对应详情 `xdBizId`，缓存按项目、平台及商品 ID 隔离。星动力参考图随项目商品查询返回。返回本地图片 ID、接口地址及 cached 状态，不持久化带签名的原始图片 URL |
 | `POST /assets/{asset_id}/cover-references` | 以原始文件内容上传当前项目的本地参考图，支持 PNG、JPEG、WebP，大小上限 20 MiB。返回可用于封面任务的 `id` 和本机预览 `url`。 |
 | `GET /assets/{asset_id}/cover-references` | 返回当前项目本地上传的参考图列表 `images`。 |
 | `GET /assets/{asset_id}/cover-references/{image_id}` | 读取当前项目已获取或上传的参考图 |
@@ -62,13 +62,15 @@
 | `POST /settings/cloud/test-oss` | 本地认证后按 body.config 的 oss_endpoint、oss_bucket 与可选 access_key_id / access_key_secret 测试小对象上传；两项空密钥分别使用已保存凭据。返回 ok、elapsed_ms、message，不保存表单或创建任务；总等待不超过 30 秒及进程清理时间，未授权返回 401 |
 | `POST /settings/secrets/{name}/reveal` | 显式获取完整密钥，禁止缓存 |
 | Tauri `scan_douyin_login` | 仅限本机工作台发起。独立官方抖音窗口扫码后，原生层使用现有会话令牌调用 `POST /settings/secrets` 保存 `douyin_cookie`，返回 `saved` 及掩码预览或 `cancelled`。 |
+| Tauri `open_xingdongli_products` | 本机工作台传当前直播间 ID，打开或聚焦同源的星动力商品列表窗口。窗口通过现有本机会话读取商品，地址只携带直播间 ID。 |
+| Tauri `xingdongli_products_always_on_top` | 商品列表窗口读取自身的系统置顶状态，传 `pinned` 布尔值时先设置再返回当前状态。 |
 | `GET /product-platform/status` | 只返回星斗本机登录状态、脱敏账号和所选合作范围，不返回令牌 |
 | `POST /product-platform/send-code`、`login` | body.mobile；登录另外包含 sms_code，验证码不持久化；发送成功后本服务会话内限制 60 秒再次发送 |
 | `POST /product-platform/scope`、`logout` | 选择关联范围 main_ip_id，或清理本机登录；不登出用户其他浏览器 |
 | `GET /product-platform/daduoduo` | 读取已绑定达多多的直播间及其目录状态 |
 | `GET /product-platform/xingdongli` | 读取星动力本机状态、脱敏账号信息和签约达人 |
 | `POST /product-platform/xingdongli/connect`、`refresh`、`logout` | connect 接受 member_token 并验证后保存。refresh 验证已保存令牌并刷新账号与达人。logout 清除本机登录 |
-| `POST /product-platform/products/search` | 直播商品查询传 monitor_id，项目参考图搜索传 asset_id。星斗和达多多要求非空 keyword，返回 product、scope_name 和 can_add_to_showcase。星动力直播间允许空 keyword 和非负偏移 start，另返回 products、total、start、length。星动力的 sort_type 支持 time（默认）、todaySales、sales、7Sales、30Sales，sort_order 支持 desc（默认）和 asc，分别传给平台的 sortType 和 sortOrder。商品的 listing_time 取自 createTime。直播间未绑定、达人不在当前账号名单或尚无达多多本地目录时返回 409 |
+| `POST /product-platform/products/search` | 直播商品查询传 monitor_id，项目参考图搜索传 asset_id。星斗和达多多要求非空 keyword，返回 product、scope_name 和 can_add_to_showcase。星动力直播间允许空 keyword 和非负偏移 start，另返回 products、total、start、length。星动力的 sort_type 支持 time（默认）、todaySales、sales、7Sales、30Sales，sort_order 支持 desc（默认）和 asc，分别传给平台的 sortType 和 sortOrder。星动力商品的 listing_time 取自 createTime，promotion_url 取自 promotionUrl，缺失或为空时为 null。直播间未绑定、达人不在当前账号名单或尚无达多多本地目录时返回 409。星动力项目参考图查询要求非空 keyword，从首条商品的 productImg 下载参考图，并在 reference_images 返回本地 id 和 url。无匹配或缺少受支持的图片地址时返回空数组。refresh 默认 false，复用同项目、签约达人、商品的缓存，传 true 时重新下载。达多多项目参考图请求返回 409 / REFERENCE_IMAGES_UNSUPPORTED |
 | `POST /product-platform/products/add-to-showcase` | 直播间调用传 monitor_id 和星斗平台商品 ID（platform_product_id）。后端检查当前绑定并从所选合作范围读取 `ipId` 与 `memberTalentId` 执行单商品添加。返回 `{added: true}`，星斗登录失效返回 401，平台不支持或缺少范围或达人关联时返回 409 |
 | `GET/PUT /settings/workspace-layout` | 素材与粗剪页的布局偏好：left_width 为左侧卡片宽度（像素，230–10000）或 null（默认宽度）；随工作目录保存，只保留最新值 |
 | `GET /settings/cleanup-unused-files` | 只读统计到期数据，接受 `clear_expired_data`（默认 false）和 `retention_days`（默认 7，正整数）。返回 `file_count`、`directory_count`、`record_count`、`original_videos`、`estimated_bytes` 和 `preview_id`。 |
@@ -89,7 +91,7 @@
 | `#/`、未知路径 | 默认入口 | 跳转 `#/live-monitoring`；已知页面直接链接按对应路由打开 |
 | `#/projects` | 视频项目 | 分页列表；`page`、`search`、`status` 作为可分享 / 可恢复的查询参数 |
 | `#/projects/{asset_id}/edit` | 素材与粗剪 | 只加载当前源视频及其关联方案、产物、候选和任务 |
-| `#/live-monitoring` | 直播监控 | 管理抖音直播间，查看检测状态、录制场次、商品讲解区间及商品视频片段 |
+| `#/live-monitoring` | 直播监控 | 管理抖音直播间，查看检测状态、录制场次、商品讲解区间及商品视频片段。切换路由时在应用内保留[直播监控页状态](live-monitoring.md#页面) |
 | `#/jobs` | 后台任务 | 全局任务状态和控制 |
 | `#/settings` | 云端设置 | 模型、OSS 存储、直播登录和商品平台独立管理。cloudTab=product-platform 打开平台页，默认星斗，platform=daduoduo 或 platform=xingdongli 定位对应平台 |
 | `#/local-settings` | 本地设置 | 工作目录管理、清理未使用文件、版本更新、主题和窗口偏好 |

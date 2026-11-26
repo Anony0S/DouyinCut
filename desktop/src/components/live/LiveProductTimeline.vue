@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onDeactivated, onUnmounted, ref, watch } from "vue";
 import { duration } from "../../api";
 import type { LivePeriodSource, LiveSession, LiveProductPeriod, LiveMergeResult, LiveSplitResult } from "../../services/liveMonitoring";
 import ConfirmPopover from "../ConfirmPopover.vue";
@@ -92,6 +92,7 @@ function frameLoaded(event: Event) {
   }
 }
 function hidePreview() { hover.value = null; }
+onDeactivated(() => { closeContext(); hidePreview(); });
 window.addEventListener("resize", hidePreview);
 window.addEventListener("scroll", hidePreview, true);
 onUnmounted(() => { window.removeEventListener("resize", hidePreview); window.removeEventListener("scroll", hidePreview, true); });

@@ -18,7 +18,6 @@ import {
 const props = defineProps<{
   session: LiveSession;
   monitorId: string;
-  browsePlatformProducts?: boolean;
   busy: boolean;
   selectedPeriodId: string;
   mergePeriodIds: string[];
@@ -403,6 +402,6 @@ const listenerNote = computed(() => {
       </section>
     </div>
     <ProductSearchDialog v-if="queryProductName" :keyword="queryProductName" :monitor-id="monitorId"
-      :browse="browsePlatformProducts" @close="queryProductName = ''" />
+      @close="queryProductName = ''" />
   </div>
 </template>

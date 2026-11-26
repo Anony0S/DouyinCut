@@ -7,6 +7,7 @@ mod window_preferences;
 mod workspace;
 mod updates;
 mod douyin_login;
+mod product_window;
 
 fn main() {
     use tauri::Manager;
@@ -38,6 +39,8 @@ fn main() {
             updates::cancel_update_download,
             updates::install_update,
             douyin_login::scan_douyin_login,
+            product_window::open_xingdongli_products,
+            product_window::xingdongli_products_always_on_top,
             session::complete_exit,
             appearance_preferences::get_appearance_preference,
             appearance_preferences::set_appearance_preference,

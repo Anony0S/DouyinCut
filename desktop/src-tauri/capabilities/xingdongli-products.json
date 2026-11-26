@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "xingdongli-products",
+  "description": "星动力商品列表窗口权限",
+  "local": true,
+  "remote": {
+    "urls": ["http://127.0.0.1:*/xingdongli-products.html"]
+  },
+  "windows": ["xingdongli-products"],
+  "permissions": ["allow-read-appearance-preference", "allow-xingdongli-products-always-on-top"]
+}

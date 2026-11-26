@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onDeactivated, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSessionStore } from "../stores/session";
@@ -17,8 +17,7 @@ import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
 import LiveRoomPlatform from "../components/live/LiveRoomPlatform.vue";
 import RoomPlatformFields from "../components/product/RoomPlatformFields.vue";
-import { needsPlatformIp, type RoomPlatformBinding } from "../services/productPlatform";
-import ProductSearchDialog from "../components/product/ProductSearchDialog.vue";
+import { needsPlatformIp, openXingdongliProducts, type RoomPlatformBinding } from "../services/productPlatform";
 import { readRoomOrder, sortRooms } from "../components/live/roomOrder";
 import LiveSessionPanel from "../components/live/LiveSessionPanel.vue";
 import LiveRecordingTimeline from "../components/live/LiveRecordingTimeline.vue";
@@ -31,7 +30,7 @@ const session = useSessionStore(),
 const { busy, connected } = storeToRefs(session);
 const monitors = ref<LiveMonitor[]>([]);
 const newProductPlatform = ref<RoomPlatformBinding | null>(null);
-const browseProductsMonitorId = ref("");
+const openingProducts = ref(false);
 const url = ref(""),
   name = ref(""),
   loading = ref(false),
@@ -43,7 +42,6 @@ const selectedPeriodId = ref("");
 const mergePeriodIds = ref<string[]>([]);
 const refreshError = ref("");
 let refreshVersion = 0;
-let disposed = false;
 let chooseRoomDefault = false;
 let pendingRecordingMonitorId = "";
 // A clicked timeline session is applied by the next refresh, which reads its detail.
@@ -128,9 +126,9 @@ function focusPeriod(id: string) {
 function viewSelectedDate() {
   if (selectedSession.value) void changeDate(localDate(new Date(selectedSession.value.started * 1000)));
 }
-watch(showCreate, async (value) => {
+watch(showCreate, async () => {
   await nextTick();
-  if (value) {
+  if (showCreate.value) {
     if (!createDialog.value?.open) createDialog.value?.showModal();
     urlInput.value?.focus();
   } else if (createDialog.value?.open) {
@@ -142,18 +140,31 @@ function closeCreate() {
   showCreate.value = false;
 }
 
+async function browseProducts(monitorId: string) {
+  if (openingProducts.value) return;
+  openingProducts.value = true;
+  try {
+    await openXingdongliProducts(monitorId);
+  } catch (cause) {
+    session.report(cause);
+  } finally {
+    openingProducts.value = false;
+  }
+}
+
 async function refresh() {
+  if (timer === undefined) return;
   const version = ++refreshVersion;
   loading.value = true;
   const previousMonitor = selectedMonitor.value?.id;
   const dateChanged = selectedDate.value !== recordingWindow.value.date;
   try {
     await session.connect();
-    if (disposed || version !== refreshVersion) return;
+    if (version !== refreshVersion) return;
     const now = Date.now() / 1000;
     const range = dateWindow(selectedDate.value, now);
     const result = await liveMonitoringApi.list(range);
-    if (disposed || version !== refreshVersion) return;
+    if (version !== refreshVersion) return;
     const nextMonitor = result.find(item => item.id === selectedId.value)
       ?? sortRooms(result, readRoomOrder())[0];
     const items = nextMonitor?.sessions ?? [];
@@ -171,7 +182,7 @@ async function refresh() {
       } else {
         // Absence from a time window does not establish that the session was deleted.
         nextSession = await liveMonitoringApi.session(nextMonitor.id, current.id);
-        if (disposed || version !== refreshVersion) return;
+        if (version !== refreshVersion) return;
         if (!nextSession) target = latestSession(items);
       }
     } else if (!target && !current) {
@@ -180,7 +191,7 @@ async function refresh() {
     }
     if (!nextSession && target && nextMonitor) {
       nextSession = await liveMonitoringApi.session(nextMonitor.id, target.id);
-      if (disposed || version !== refreshVersion) return;
+      if (version !== refreshVersion) return;
     }
     currentTime.value = now;
     recordingWindow.value = range;
@@ -195,7 +206,7 @@ async function refresh() {
     refreshError.value = "";
     updatedAt.value = Date.now() / 1000;
   } catch (cause) {
-    if (disposed || version !== refreshVersion) return;
+    if (version !== refreshVersion) return;
     requestedSessionId = "";
     selectedDate.value = pendingRecordingMonitorId ? "" : recordingWindow.value.date;
     refreshError.value = cause instanceof Error ? cause.message : "操作失败";
@@ -263,7 +274,7 @@ async function updateSettings(
 async function record(monitor: LiveMonitor, action: "start" | "stop") {
   await session.act(async () => {
     await liveMonitoringApi.setRecording(monitor.id, action);
-    if (disposed) return;
+    if (timer === undefined) return;
     if (action === "start") {
       selectedId.value = monitor.id;
       selectedDate.value = "";
@@ -359,20 +370,22 @@ async function retryProductListener(monitorId: string, sessionId: string) {
     await refresh();
   });
 }
-// Recording and detection run in the backend; a hidden window only needs to catch up once shown.
+// Recording and detection run in the backend while this page is inactive.
 function syncWhenVisible() {
   if (!document.hidden && !loading.value) void refresh();
 }
-onMounted(() => {
-  void refresh();
+onActivated(() => {
   timer = setInterval(syncWhenVisible, 5000);
   document.addEventListener("visibilitychange", syncWhenVisible);
+  syncWhenVisible();
 });
-onUnmounted(() => {
-  disposed = true;
+onDeactivated(() => {
+  clearInterval(timer);
+  timer = undefined;
   refreshVersion++;
-  if (timer) clearInterval(timer);
+  loading.value = false;
   document.removeEventListener("visibilitychange", syncWhenVisible);
+  closeCreate();
 });
 </script>
 
@@ -536,7 +549,6 @@ onUnmounted(() => {
           :selected-period-id="selectedPeriodId"
           :merge-period-ids="mergePeriodIds"
           :monitor-id="selectedMonitor.id"
-          :browse-platform-products="selectedMonitor.product_platform?.platform === 'xingdongli'"
           :busy="busy"
           @import-product-clip="importProductClip"
           @open="workspace.openProject"
@@ -550,7 +562,7 @@ onUnmounted(() => {
             <LiveRoomPlatform v-if="selectedMonitor.product_platform?.platform === 'daduoduo'"
               :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
             <button v-else-if="selectedMonitor.product_platform?.platform === 'xingdongli'"
-              type="button" class="btn btn-sm" @click="browseProductsMonitorId = selectedMonitor.id">星动力商品列表</button>
+              type="button" class="btn btn-sm" :disabled="openingProducts" @click="browseProducts(selectedMonitor.id)">星动力商品列表</button>
           </template>
         </LiveSessionPanel>
         <div v-else class="live-content-columns">
@@ -561,8 +573,8 @@ onUnmounted(() => {
               <span>讲解列表</span>
               <LiveRoomPlatform v-if="selectedMonitor.product_platform.platform === 'daduoduo'"
                 :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
-              <button v-else type="button" class="btn btn-sm"
-                @click="browseProductsMonitorId = selectedMonitor.id">星动力商品列表</button>
+              <button v-else type="button" class="btn btn-sm" :disabled="openingProducts"
+                @click="browseProducts(selectedMonitor.id)">星动力商品列表</button>
             </div>
             <div class="live-card-empty"><strong>{{ cardEmptyMessage }}</strong></div>
           </section>
@@ -603,7 +615,5 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <ProductSearchDialog v-if="browseProductsMonitorId" keyword="" :monitor-id="browseProductsMonitorId"
-      browse @close="browseProductsMonitorId = ''" />
   </section>
 </template>

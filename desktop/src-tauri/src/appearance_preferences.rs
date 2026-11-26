@@ -80,7 +80,9 @@ pub fn get_appearance_preference(
     window: tauri::WebviewWindow,
     preferences: tauri::State<'_, AppearanceHost>,
 ) -> Result<String, String> {
-    crate::window_preferences::ensure_settings_window(&window)?;
+    if !crate::product_window::is_product_window(&window) {
+        crate::window_preferences::ensure_settings_window(&window)?;
+    }
     preferences.get()
 }
 

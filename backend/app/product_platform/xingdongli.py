@@ -91,12 +91,14 @@ def _product(item):
     except ValueError:
         cover = None
     create_time = item.get("createTime")
+    promotion_url = item.get("promotionUrl")
     return {
         "id": _identifier(item.get("id")) or product_id,
         "platform_product_id": product_id, "title": item["productName"],
         "price": item.get("productPrice"), "shop_name": item.get("shopName"),
         "stock": item.get("productStock"), "cover": cover,
         "listing_time": (create_time.strip() or None) if isinstance(create_time, str) else None,
+        "promotion_url": (promotion_url.strip() or None) if isinstance(promotion_url, str) else None,
         "real_time_sales": item.get("todaySale"), "yesterday_sales": item.get("lastSale"),
         "month_sales": item.get("last30Sale"), "commission_ratio": item.get("commissionRate"),
     }

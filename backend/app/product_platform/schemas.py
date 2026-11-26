@@ -20,6 +20,7 @@ class SearchRequest(Model):
     start: int = Field(default=0, ge=0, le=1_000_000)
     sort_type: Literal["time", "todaySales", "sales", "7Sales", "30Sales"] = "time"
     sort_order: Literal["asc", "desc"] = "desc"
+    refresh: bool = False
 
     @field_validator("keyword")
     @classmethod

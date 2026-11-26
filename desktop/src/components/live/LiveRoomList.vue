@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from "vue";
+import { computed, nextTick, onDeactivated, onMounted, onUnmounted, ref, useId, watch } from "vue";
 import { liveMonitoringApi, type LiveMonitor, type LiveMonitorSettings } from "../../services/liveMonitoring";
 import { needsPlatformIp, type RoomPlatformBinding } from "../../services/productPlatform";
 import LiveIcon from "./LiveIcon.vue";
@@ -276,6 +276,10 @@ watch(() => props.busy, async (busy) => {
   settingsPanel.value?.querySelectorAll<HTMLInputElement>("input[data-setting]").forEach((input) => {
     input.checked = monitor[input.dataset.setting as keyof LiveMonitorSettings];
   });
+});
+onDeactivated(() => {
+  closeSettings();
+  bindingMonitor.value = null;
 });
 onUnmounted(closeSettings);
 </script>

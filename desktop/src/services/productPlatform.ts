@@ -1,4 +1,5 @@
 import { api, ApiError } from '../api'
+import type { CoverReference } from './projects'
 
 export type ProductPlatformStatus = {
   platform: 'xingdou'
@@ -15,6 +16,7 @@ export type ProductPlatformStatus = {
 export type PlatformProduct = {
   id: string | null
   platform_product_id: string | null
+  promotion_url?: string | null
   title: string | null
   price: number | null
   stock: string | number | null
@@ -45,6 +47,7 @@ type ProductSearchResult = {
   total?: number
   start?: number
   length?: number
+  reference_images?: CoverReference[]
 }
 export type CatalogStatus = {
   state: 'idle' | 'queued' | 'running' | 'failed'; downloaded: number; total: number | null
@@ -56,16 +59,32 @@ export type DaduoduoSettings = {
 
 const roomCatalogPath = (id: string) => `/live/monitors/${encodeURIComponent(id)}/product-catalog`
 
+export async function openXingdongliProducts(monitorId: string): Promise<void> {
+  const internals = (window as Window & {
+    __TAURI_INTERNALS__?: { invoke: (command: string, args: Record<string, unknown>) => Promise<void> }
+  }).__TAURI_INTERNALS__
+  if (internals) return internals.invoke('open_xingdongli_products', { monitorId })
+
+  const url = new URL('/xingdongli-products.html', window.location.href)
+  url.searchParams.set('monitor_id', monitorId)
+  const popup = window.open(url, 'xingdongli-products', 'popup,width=820,height=650')
+  if (!popup) throw new Error('浏览器拦截了商品列表窗口，请允许弹出式窗口后重试。')
+  popup.opener = null
+  popup.focus()
+}
+
 export const productPlatformApi = {
   status: () => api<ProductPlatformStatus>('/product-platform/status'),
   sendCode: (mobile: string) => api<{sent: boolean; message: string; retry_after_seconds: number}>('/product-platform/send-code', 'POST', {mobile}),
   login: (mobile: string, smsCode: string) => api<ProductPlatformStatus>('/product-platform/login', 'POST', {mobile, sms_code: smsCode}),
   logout: () => api<ProductPlatformStatus>('/product-platform/logout', 'POST'),
   selectScope: (mainIpId: string) => api<ProductPlatformStatus>('/product-platform/scope', 'POST', {main_ip_id: mainIpId}),
-  search: (keyword: string, context: {monitor_id: string} | {asset_id: string}, start = 0, sort?: XingdongliProductSort) =>
+  search: (keyword: string, context: {monitor_id: string}, start = 0, sort?: XingdongliProductSort) =>
     api<ProductSearchResult>('/product-platform/products/search', 'POST', {
       keyword, ...context, ...(start ? {start} : {}), ...sort,
     }),
+  searchCoverProduct: (assetId: string, keyword: string, refresh: boolean) =>
+    api<ProductSearchResult>('/product-platform/products/search', 'POST', { asset_id: assetId, keyword, refresh }),
   images: (assetId:string, productId: string, refresh=false) => api<{images:{id:string;url:string}[];cached:boolean}>('/product-platform/products/images', 'POST', {asset_id:assetId,product_id:productId,refresh}),
   addToShowcase: (platformProductId: string, monitorId: string) =>
     api<{added: boolean}>('/product-platform/products/add-to-showcase', 'POST',

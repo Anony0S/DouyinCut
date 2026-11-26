@@ -26,21 +26,21 @@ def image_extension(data: bytes | bytearray) -> str | None:
     return None
 
 
-def fetch_product_image(url: str) -> tuple[bytes, str]:
+def fetch_product_image(url: str, *, allowed_hosts=PRODUCT_IMAGE_HOSTS) -> tuple[bytes, str]:
     parsed = urlparse(url)
-    if (parsed.scheme != "https" or parsed.hostname not in PRODUCT_IMAGE_HOSTS
+    if (parsed.scheme != "https" or parsed.hostname not in allowed_hosts
             or parsed.username or parsed.password or parsed.port not in (None, 443)):
-        raise ValueError("星斗商品图片地址无效")
+        raise ValueError("商品图片地址无效")
     try:
         with httpx.Client(timeout=20, follow_redirects=False, trust_env=False) as client:
             response = client.get(url)
             response.raise_for_status()
     except httpx.HTTPError:
-        raise ValueError("下载星斗商品图片失败，请稍后重试") from None
+        raise ValueError("下载商品图片失败，请稍后重试") from None
     content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
     data = response.content
     if not content_type.startswith("image/") or not data or len(data) > MAX_IMAGE_BYTES:
-        raise ValueError("星斗商品图片格式无效或文件过大")
+        raise ValueError("商品图片格式无效或文件过大")
     return data, content_type
 
 

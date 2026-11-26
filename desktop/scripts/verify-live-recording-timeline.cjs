@@ -5,6 +5,7 @@ const vue = require('vue')
 const ts = require('typescript')
 const { parse, compileScript } = require('vue/compiler-sfc')
 const { createPinia } = require('pinia')
+const { createMemoryHistory, createRouter } = require('vue-router')
 const checkDst = process.argv.includes('--dst')
 const checkMidnightDst = process.argv.includes('--midnight-dst')
 process.env.TZ = checkMidnightDst ? 'America/Sao_Paulo' : checkDst ? 'America/New_York' : 'Asia/Shanghai'
@@ -68,7 +69,12 @@ const api = async (url, method, body) => {
 }
 const overrides = new Map([
   [path.join(src, 'api.ts'), { api, duration: n => `${n / 1e6} 秒`, seconds: n => n / 1e6 }],
-  [path.join(src, 'workspace.ts'), { useWorkspace: () => ({ openProject: async () => {} }) }],
+  [path.join(src, 'workspace.ts'), {
+    useWorkspace: () => ({ openProject: async () => {} }),
+    createWorkspace: router => ({ start() {}, stop() {}, go: name => router.push({ name }) }),
+    provideWorkspace() {},
+  }],
+  [path.join(src, 'composables/useVideoImport.ts'), { provideVideoImport: () => ({ fileInput: vue.ref() }) }],
 ])
 const cache = new Map()
 function load(file) {
@@ -77,7 +83,7 @@ function load(file) {
   if (cache.has(file)) return cache.get(file).exports
   if (file.endsWith('.css')) return {}
   let source = fs.readFileSync(file, 'utf8')
-  if (file.endsWith('.vue')) source = compileScript(parse(source, { templateParseOptions: { isCustomElement: tag => ['calendar-date', 'calendar-month'].includes(tag) } }).descriptor, { id: file, inlineTemplate: true, templateOptions: { compilerOptions: { isCustomElement: tag => ['calendar-date', 'calendar-month'].includes(tag) } } }).content
+  if (file.endsWith('.vue')) source = compileScript(parse(source, { filename: file, templateParseOptions: { isCustomElement: tag => ['calendar-date', 'calendar-month'].includes(tag) } }).descriptor, { id: file, inlineTemplate: true, templateOptions: { compilerOptions: { isCustomElement: tag => ['calendar-date', 'calendar-month'].includes(tag) } } }).content
   const result = { exports: {} }; cache.set(file, result)
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   new Function('require', 'module', 'exports', code)(name => {
@@ -89,8 +95,9 @@ function load(file) {
   }, result, result.exports)
   return result.exports
 }
-const node = type => ({ focus() {}, type, props: {}, children: [], parent: null, text: '' })
-global.window = { addEventListener() {}, removeEventListener() {} }
+const node = type => ({ focus() {}, getBoundingClientRect: () => ({ left: 20, top: 20, bottom: 40 }),
+  type, props: {}, children: [], parent: null, text: '' })
+global.window = { addEventListener() {}, removeEventListener() {}, matchMedia: () => window }
 const visibilityListeners = new Set()
 global.document = {
   hidden: false,
@@ -98,12 +105,16 @@ global.document = {
   removeEventListener(type, listener) { if (type === 'visibilitychange') visibilityListeners.delete(listener) },
 }
 const body = node('body')
+function remove(el) {
+  if (el.parent) el.parent.children.splice(el.parent.children.indexOf(el), 1)
+  el.parent = null
+}
 const renderer = vue.createRenderer({
   createElement: node, createComment: () => node('comment'), createText: text => ({ ...node('text'), text }),
   setText: (el, text) => { el.text = text }, setElementText: (el, text) => { el.text = text },
   patchProp: (el, key, old, value) => { el.props[key] = value },
-  insert(el, parent, anchor) { if (el.parent) this.remove(el); const i = parent.children.indexOf(anchor); parent.children.splice(i < 0 ? parent.children.length : i, 0, el); el.parent = parent },
-  remove(el) { if (el.parent) el.parent.children.splice(el.parent.children.indexOf(el), 1); el.parent = null },
+  insert(el, parent, anchor) { remove(el); const i = parent.children.indexOf(anchor); parent.children.splice(i < 0 ? parent.children.length : i, 0, el); el.parent = parent },
+  remove,
   parentNode: el => el.parent, nextSibling: el => el.parent?.children[el.parent.children.indexOf(el) + 1],
   querySelector: () => body,
 })
@@ -120,7 +131,8 @@ const deferred = () => {
 }
 async function mount() {
   const root = node('root')
-  const app = renderer.createApp(load(path.join(src, 'views/LiveMonitoringView.vue')).default)
+  const page = load(path.join(src, 'views/LiveMonitoringView.vue')).default
+  const app = renderer.createApp({ render: () => vue.h(vue.KeepAlive, null, () => vue.h(page)) })
   app.use(createPinia()); app.mount(root); await settle()
   return { root, app }
 }
@@ -474,6 +486,71 @@ async function verifyDefaultRoomSelection() {
     delete global.localStorage
   }
 }
+async function verifyRouteRetention() {
+  global.__APP_VERSION__ = '0.0.0'
+  global.localStorage = { getItem: () => JSON.stringify(['甲', '乙']), setItem() {} }
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/live-monitoring', name: 'live-monitoring', component: load(path.join(src, 'views/LiveMonitoringView.vue')).default },
+    { path: '/jobs', name: 'jobs', component: { render: () => vue.h('div', '任务页') } },
+  ] })
+  const older = session('手动选中场次', now - 90000, now - 89900, 1)
+  const newer = session('最新场次', now - 89500, now - 89400, 2)
+  const platform = { platform: 'xingdongli', ip_id: '42' }
+  response = [{ ...monitor('甲', []), product_platform: platform }, { ...monitor('乙', [older, newer]), is_live: true, product_platform: platform }]
+  const openedCatalogs = []
+  window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+    assert.equal(command, 'open_xingdongli_products')
+    openedCatalogs.push(args.monitorId)
+  } }
+  const root = node('root')
+  const app = renderer.createApp(load(path.join(src, 'App.vue')).default)
+  app.use(createPinia()); app.use(router)
+  await router.push('/live-monitoring')
+  app.mount(root); await settle()
+  try {
+    const rooms = () => all(root, el => el.props.role === 'button' && el.props.class?.includes('live-room-item'))
+    const roomLink = () => all(root, el => el.props.class === 'live-room-selected-url')[0]
+    const date = () => all(root, el => el.type === 'calendar-date')[0]
+    const filter = () => all(root, el => el.type === 'button' && text(el) === '开播中')[0]
+    const catalog = () => all(root, el => el.type === 'button' && text(el) === '星动力商品列表')[0]
+    const page = all(root, el => el.props.class === 'live-page')[0]
+    const otherRoom = rooms().find(el => text(el).includes('直播间-乙'))
+    assert.equal(roomLink().props.href, 'https://live.douyin.com/甲')
+    await click(catalog())
+    await click(otherRoom)
+    await click(catalog())
+    assert.deepEqual(openedCatalogs, ['甲', '乙'], 'catalog opens for the selected room with and without recording details')
+    assert.equal(all(body, el => el.type === 'dialog' && el.props.class === 'modal').length, 0)
+    await click(selectButton(root, '前一天'))
+    await click(selectButton(root, '选择录制场次：'))
+    await click(filter())
+    assert.ok(text(root).includes('讲解-手动选中场次'))
+    await click(selectButton(root, '删除录制场次：'))
+    assert.ok(all(body, el => el.props.role === 'dialog').length)
+    const requestsBeforeLeaving = listRequests
+    await router.push('/jobs'); await settle()
+    assert.ok(text(root).includes('任务页'))
+    assert.ok(!text(root).includes('讲解-手动选中场次'))
+    assert.equal(all(body, el => el.props.role === 'dialog').length, 0, 'teleported confirmation closes on navigation')
+    for (const poll of polls) poll()
+    for (const listener of visibilityListeners) listener()
+    await settle()
+    assert.equal(listRequests, requestsBeforeLeaving, 'inactive live workspace does not poll')
+    await router.push('/live-monitoring'); await settle()
+    assert.equal(listRequests, requestsBeforeLeaving + 1, 'returning refreshes once')
+    assert.equal(all(root, el => el.props.class === 'live-page')[0], page, 'retains the whole route subtree')
+    assert.equal(roomLink().props.href, 'https://live.douyin.com/乙')
+    assert.equal(date().props.value, '2026-10-22')
+    assert.equal(filter().props['aria-pressed'], true)
+    assert.ok(text(root).includes('讲解-手动选中场次'))
+  } finally {
+    app.unmount()
+    delete global.__APP_VERSION__
+    delete global.localStorage
+    delete window.__TAURI_INTERNALS__
+  }
+  assert.equal(visibilityListeners.size, 0, 'unmount removes the visibility listener')
+}
 async function verifyRecordingStartSelection() {
   for (const mode of ['immediate', 'delayed', 'cancelled']) {
     const delayed = mode !== 'immediate'
@@ -511,7 +588,7 @@ async function verifyRecordingStartSelection() {
         assert.ok(!text(root).includes('讲解-本次录制'))
         continue
       }
-      assert.ok(text(root).includes('讲解-本次录制'), 'starting recording selects the current session instead of retaining the previous session')
+      assert.ok(text(root).includes('讲解-本次录制'), `starting recording selects the current session (${mode})`)
       assert.ok(text(root).includes('片段-本次录制'), 'product clips follow the newly started session')
       assert.ok(!text(root).includes('讲解-上次录制'))
       const previous = selectButton(root, '选择录制场次：')
@@ -584,7 +661,7 @@ async function verifyLocalCalendarDay() {
     assert.ok(text(root).includes('当天无录制'))
   } finally { app.unmount() }
 }
-(checkDst || checkMidnightDst ? verifyLocalCalendarDay() : verify().then(verifyDefaultRoomSelection).then(verifyRecordingStartSelection).then(verifyDenseSessions)).then(() => {
+(checkDst || checkMidnightDst ? verifyLocalCalendarDay() : verify().then(verifyDefaultRoomSelection).then(verifyRouteRetention).then(verifyRecordingStartSelection).then(verifyDenseSessions)).then(() => {
   console.log(checkDst || checkMidnightDst ? `historical calendar checks passed (${process.env.TZ})` : 'live recording timeline page checks passed')
   if (!checkDst && !checkMidnightDst) {
     for (const option of ['--dst', '--midnight-dst']) require('node:child_process').execFileSync(process.execPath, [__filename, option], { stdio: 'inherit' })

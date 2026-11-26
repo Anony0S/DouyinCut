@@ -66,3 +66,167 @@ Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 82: 直播监控页切换时保留状态
+<!-- trellis-session: v=2 fp=d924b273cd4dbbb2 -->
+
+**Date**: 2026-11-26
+**Task**: 直播监控页切换时保留状态
+
+### Summary
+
+用户确认使用整页 KeepAlive。启动后仍默认选中排序第一的直播间，切页返回沿用本次运行状态并同步；离开时暂停列表轮询并关闭临时浮层。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端生产构建与模拟接口的 Vue 路由切换回归通过，待用户在桌面端手动验证。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 83: 分开星动力商品列表和单商品查询
+<!-- trellis-session: v=2 fp=723147b043945dc4 -->
+
+**Date**: 2026-11-26
+**Task**: 分开星动力商品列表和单商品查询
+
+### Summary
+
+直播监控的星动力商品列表在独立原生窗口中搜索、排序和翻页，同一窗口可复用。讲解行沿用单商品查询弹窗，星动力使用分页响应中的首条结果。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端生产构建、商品平台与直播页面回归、18 项 Rust 测试及 43 项后端测试通过。Windows 窗口实际拖动及真实星动力账号待手动验证。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 84: 更新星动力商品列表样式
+<!-- trellis-session: v=2 fp=54e4f239e8f2252b -->
+
+**Date**: 2026-11-26
+**Task**: 更新星动力商品列表样式
+
+### Summary
+
+按参考图调整独立商品列表的搜索、排序、卡片与分页。列表用完整商品 ID 进行复制，讲解行查询继续用单商品详情。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、商品平台与直播时间线回归通过，模拟商品在 Chromium 宽窗、默认窗口和窄窗深色模式验证通过。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 85: 星动力商品列表复制推广链接
+<!-- trellis-session: v=2 fp=53fea301834e2fe5 -->
+
+**Date**: 2026-11-26
+**Task**: 星动力商品列表复制推广链接
+
+### Summary
+
+星动力返回的 promotionUrl 映射为 promotion_url，列表复制完整链接，商品 ID 用于展示。空链接禁用复制。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、商品平台 UI 回归和 27 项后端测试通过，真实星动力账号待桌面端验证。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 86: 单商品查询增加复制链接
+<!-- trellis-session: v=2 fp=475086d49457e7fd -->
+
+**Date**: 2026-11-26
+**Task**: 单商品查询增加复制链接
+
+### Summary
+
+星动力查询商品详情复用商品列表的 promotionUrl 复制操作。用户手动测试。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 87: 星动力商品列表窗口置顶
+<!-- trellis-session: v=2 fp=9f4bd9ac7489a7c4 -->
+
+**Date**: 2026-11-26
+**Task**: 星动力商品列表窗口置顶
+
+### Summary
+
+独立窗口右上角的图钉切换 Windows 系统置顶，切换直播间时跟随同一窗口，关窗后恢复默认。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 商品平台 UI 回归和 Rust 窗口模块测试通过，系统窗口重叠效果待桌面端验证。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 88: 星动力商品查询提供剪映封面参考图
+<!-- trellis-session: v=2 fp=b56785ac2b0952eb -->
+
+**Date**: 2026-11-26
+**Task**: 星动力商品查询提供剪映封面参考图
+
+### Summary
+
+项目封面参考图使用来源直播间星动力查询首条商品的 productImg，下载到当前项目并沿用参考图缓存、预览与生图任务。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 前端构建、封面弹窗回归及 61 项后端测试通过。真实平台图片与剪映验收待开展。
+
+### Status
+
+[OK] **Completed**

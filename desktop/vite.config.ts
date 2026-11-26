@@ -11,7 +11,9 @@ if (!appVersion) throw new Error('.trellis/spec/project/index.md is missing a va
 export default defineConfig(({ mode }) => ({
   // A developer's environment must never bake a credential into shipped JS.
   define: { __APP_VERSION__: JSON.stringify(appVersion), ...(mode === 'production' ? { 'import.meta.env.VITE_SESSION_TOKEN': JSON.stringify('') } : {}) },
-  build: { rollupOptions: { input: { workbench: 'index.html', setup: 'setup.html' } } },
+  build: { rollupOptions: { input: {
+    workbench: 'index.html', setup: 'setup.html', xingdongliProducts: 'xingdongli-products.html',
+  } } },
   plugins: [vue({ template: { compilerOptions: {
     isCustomElement: tag => tag === 'calendar-date' || tag === 'calendar-month',
   } } }), tailwindcss(), vueDevTools()],

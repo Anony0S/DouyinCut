@@ -26,6 +26,21 @@ description = "允许本机工作台打开抖音扫码登录窗口"
 commands.allow = ["scan_douyin_login"]
 
 [[permission]]
+identifier = "allow-open-xingdongli-products"
+description = "允许工作台打开星动力商品列表窗口"
+commands.allow = ["open_xingdongli_products"]
+
+[[permission]]
+identifier = "allow-xingdongli-products-always-on-top"
+description = "允许商品列表窗口读取和切换自身置顶状态"
+commands.allow = ["xingdongli_products_always_on_top"]
+
+[[permission]]
+identifier = "allow-read-appearance-preference"
+description = "允许辅助窗口读取外观主题"
+commands.allow = ["get_appearance_preference"]
+
+[[permission]]
 identifier = "allow-pick-source-video"
 description = "允许工作台打开本机原始视频选择器"
 commands.allow = ["pick_source_video"]

@@ -4,7 +4,7 @@ let nextId = 0
 </script>
 
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref } from "vue"
+import { nextTick, onDeactivated, onUnmounted, ref } from "vue"
 
 type ConfirmAction = () => void | Promise<void>
 
@@ -120,6 +120,7 @@ async function confirm() {
   }
 }
 
+onDeactivated(() => close(false))
 onUnmounted(() => {
   if (activeClose === close) activeClose = null
   removeListeners()

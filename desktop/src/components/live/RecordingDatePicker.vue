@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 
 const props = defineProps<{ value: string; max: string; disabled: boolean }>()
 const emit = defineEmits<{ change: [date: string] }>()
@@ -43,6 +43,7 @@ onMounted(() => {
   window.addEventListener('pointerdown', outside)
   window.addEventListener('keydown', escape)
 })
+onDeactivated(() => close())
 onUnmounted(() => {
   window.removeEventListener('pointerdown', outside)
   window.removeEventListener('keydown', escape)

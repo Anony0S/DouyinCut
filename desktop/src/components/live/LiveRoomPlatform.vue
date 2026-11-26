@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { productPlatformApi, type CatalogStatus } from '../../services/productPlatform'
 import type { LiveMonitor } from '../../services/liveMonitoring'
 
@@ -10,10 +10,10 @@ const syncing = computed(() => status.value?.state === 'running' || status.value
 const bindingKey = computed(() => JSON.stringify(props.monitor.product_platform))
 let active = true
 let readVersion = 0
-let timer: ReturnType<typeof setInterval>
+let timer: ReturnType<typeof setInterval> | undefined
 
 async function readStatus() {
-  if (updating.value) return
+  if (!active || updating.value) return
   const version = ++readVersion
   try {
     const result = await productPlatformApi.catalogStatus(props.monitor.id)
@@ -44,14 +44,22 @@ watch(bindingKey, () => {
   error.value = ''
   void readStatus()
 })
-onMounted(() => {
+function startPolling() {
+  if (timer !== undefined) return
+  active = true
   void readStatus()
   timer = setInterval(readStatus, 2500)
-})
-onUnmounted(() => {
+}
+function stopPolling() {
   active = false
+  readVersion++
   clearInterval(timer)
-})
+  timer = undefined
+}
+onMounted(startPolling)
+onActivated(startPolling)
+onDeactivated(stopPolling)
+onUnmounted(stopPolling)
 </script>
 
 <template>

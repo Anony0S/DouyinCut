@@ -19,6 +19,7 @@ let coverRequest
 let coverPrompts=[{id:'default',name:'默认提示词',prompt:'# 默认生成要求'}]
 let localCoverReferences=[{id:'local',url:'/reference-local.png'}]
 const networkCoverReference={id:'network',url:'/reference-network.png'}
+const xingdongliCoverReference={id:'xingdongli',url:'/reference-xingdongli.png'}
 const asset = { id: 'video', name: '奶黄千层.mp4', path: 'local.mp4', duration_us: 250e6, width: 160, height: 120 }
 const lists = { '/assets': [], '/products': [], '/candidates': [], '/plans': [], '/jobs': [], '/exports': [] }
 const config = { region: 'cn', base_url: 'https://service.example/v1', planner_model: 'text', asr_model: 'audio',
@@ -29,6 +30,10 @@ const api = async (url, method = 'GET', body) => {
   if (url === '/auth') return {}
   if (url === '/product-platform/products/search') {
     coverSearches.push(body.keyword)
+    if (body.keyword === '星动力商品') {
+      assert.equal(body.refresh,true)
+      return {product:{id:'xingdongli-product',title:body.keyword},reference_images:[xingdongliCoverReference]}
+    }
     return {product:{id:body.keyword,title:body.keyword}}
   }
   if (url === '/product-platform/products/images') return {images:[networkCoverReference]}
@@ -386,17 +391,22 @@ async function verifyEditingControls() {
     await settle()
     assert.equal(coverSearches.at(-1),'换一个图片搜索标题')
     assert.deepEqual(all(searchForm,el=>el.type==='button').map(el=>text(el).trim()),['获取图片','上传图片'])
+    const separateImageRequests=requests.filter(url=>url==='/product-platform/products/images').length
+    search.props['onUpdate:modelValue']('星动力商品')
+    await searchForm.props.onSubmit({preventDefault(){}})
+    await settle()
+    assert.equal(requests.filter(url=>url==='/product-platform/products/images').length,separateImageRequests)
     const removeReference=()=>all(root,el=>el.props['aria-label']==='删除上传的参考图')
     assert.equal(removeReference().length,1)
     await removeReference()[0].props.onClick()
     await settle()
     assert.equal(removeReference().length,0)
-    const networkImage=all(root,el=>el.props.src===networkCoverReference.url)[0]
+    const networkImage=all(root,el=>el.props.src===xingdongliCoverReference.url)[0]
     networkImage.props.onLoad()
     await settle()
     assert.equal(button('生成封面').props.disabled,false)
     await button('生成封面').props.onClick()
-    assert.equal(coverRequest.reference_id,networkCoverReference.id)
+    assert.equal(coverRequest.reference_id,xingdongliCoverReference.id)
     assert.equal(coverRequest.prompt,'# 原有生成要求\n商品名称：'+projectName.trim())
     assert.equal(project.productName,projectName)
     await promptAction('删除 商品特写').props.onClick()

@@ -365,6 +365,11 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if !matches!(window.label(), "main" | "workbench") {
         return;
     }
+    if cfg!(debug_assertions) && matches!(event, tauri::WindowEvent::Destroyed) {
+        if let Some(products) = window.app_handle().get_webview_window(crate::product_window::LABEL) {
+            let _ = products.destroy();
+        }
+    }
     let tauri::WindowEvent::CloseRequested { api, .. } = event else {
         return;
     };

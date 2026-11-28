@@ -1,4 +1,9 @@
-import type { LiveClipProjectStatus, LiveMonitor, LiveProductClip } from '../../services/liveMonitoring'
+import type {
+  LiveClipProjectStatus,
+  LiveMonitor,
+  LivePeriodPlatformProduct,
+  LiveProductClip,
+} from '../../services/liveMonitoring'
 
 export function productPeriodColor(promotionId: string) {
   let hash = 2166136261
@@ -40,6 +45,68 @@ const clipProjectBadges: Record<LiveClipProjectStatus, ClipBadge> = {
 export function productClipBadge(clip: LiveProductClip): ClipBadge {
   if (clip.project_status) return clipProjectBadges[clip.project_status]
   return clipBadges[clip.status] || { label: clip.status, color: 'badge-neutral' }
+}
+
+const stockNumberFormat = new Intl.NumberFormat('zh-CN')
+const platformLabels: Record<LivePeriodPlatformProduct['platform'], string> = {
+  daduoduo: '达多多',
+  xingdou: '星斗',
+  xingdongli: '星动力',
+}
+
+function formatStockValue(stock: string | number | null): string {
+  if (typeof stock === 'number') return stockNumberFormat.format(stock)
+  if (typeof stock === 'string') {
+    const text = stock.trim()
+    if (/^\d{1,15}$/.test(text)) return stockNumberFormat.format(Number(text))
+    return text
+  }
+  return ''
+}
+
+export type PeriodPlatformBadge = ClipBadge & { title: string }
+
+export function periodPlatformBadge(info?: LivePeriodPlatformProduct | null): PeriodPlatformBadge | null {
+  if (!info || info.state === 'unchecked' || info.state === 'not_synced') return null
+  const platformName = platformLabels[info.platform] || info.platform
+  const timeNote = info.checked_at ? ` · 更新于 ${formatLiveTime(info.checked_at)}` : ''
+  const matchNote = info.matched_title
+    ? `${info.match_kind === 'contains_title' ? '近似匹配' : '匹配商品'}：${info.matched_title}`
+    : platformName
+  if (info.state === 'available') {
+    const formatted = formatStockValue(info.stock)
+    return {
+      label: formatted ? `库存 ${formatted}` : '平台有货',
+      color: 'badge-success',
+      title: `${platformName} · ${matchNote}${timeNote}`,
+    }
+  }
+  if (info.state === 'out_of_stock') {
+    return {
+      label: '无库存',
+      color: 'badge-warning',
+      title: `${platformName} · ${matchNote}${timeNote}`,
+    }
+  }
+  if (info.state === 'stock_unknown') {
+    return {
+      label: '平台有货',
+      color: 'badge-info',
+      title: `${platformName} · ${matchNote}（平台未提供库存）${timeNote}`,
+    }
+  }
+  if (info.state === 'not_found') {
+    return {
+      label: '平台无此商品',
+      color: 'badge-neutral',
+      title: `${platformName}未找到匹配商品${timeNote}`,
+    }
+  }
+  return {
+    label: '检测失败',
+    color: 'badge-error',
+    title: `${platformName}检测失败：${info.error || '请重试'}${timeNote}`,
+  }
 }
 
 export function formatLiveTime(value: number | null, timeOnly = false) {

@@ -4,7 +4,17 @@ import type { RoomPlatformBinding } from './productPlatform'
 export type LiveClipJob = { id:string; state:string; error:string|null }
 export type LiveSegment = { id:string; path:string; segment_index:number; status:string; size_bytes:number; duration_us:number|null; asset_id:string|null; import_job_id:string|null; splitting:boolean }
 export type LivePeriodSource = { segment_id:string; segment_index:number; state:'ready'|'recording'|'deleted'|'missing'|'failed'; start:number; end:number; clip_start:number; clip_end:number; clip_status:string|null; clip_id:string|null }
-export type LiveProductPeriod = { id:string; session_id:string; promotion_id:string; product_name:string; started:number; ended:number|null; sources:LivePeriodSource[]; mapping_error:string; clip_job:LiveClipJob|null }
+export type LivePeriodPlatformProduct = {
+  platform: 'daduoduo' | 'xingdou' | 'xingdongli'
+  state: 'available' | 'out_of_stock' | 'stock_unknown' | 'not_found' | 'unchecked' | 'not_synced' | 'error'
+  match_kind: 'id' | 'exact_title' | 'contains_title' | null
+  stock: string | number | null
+  matched_title: string | null
+  platform_product_id: string | null
+  checked_at: number | null
+  error: string
+}
+export type LiveProductPeriod = { id:string; session_id:string; promotion_id:string; product_name:string; started:number; ended:number|null; sources:LivePeriodSource[]; mapping_error:string; clip_job:LiveClipJob|null; platform_product?:LivePeriodPlatformProduct|null }
 export type LiveSplitResult = Job | {state:'confirmation_required'; missing_segments:LivePeriodSource[]; available_count:number} | {state:'noop'; message:string}
 export type LiveProductEvent = { id:string; promotion_id:string; product_name:string; explain_type:number|null; event_time:number; received_at:number; source:string }
 export type LiveProductClipSource = {id:string;started:number;ended:number|null}

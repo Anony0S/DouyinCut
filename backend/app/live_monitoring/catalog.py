@@ -17,10 +17,12 @@ INITIAL_ATTEMPT_LIMIT = 3
 
 class ProductCatalogRefresher:
     def __init__(self, live, monitor_id: str, session_id: str, resolver,
-                 stop_event: threading.Event, *, force: bool = False, clock=None):
+                 stop_event: threading.Event, *, force: bool = False, clock=None,
+                 on_product_ready=None):
         self.live, self.monitor_id, self.session_id = live, monitor_id, session_id
         self.resolver, self.stop_event = resolver, stop_event
         self.clock = clock or time.time
+        self.on_product_ready = on_product_ready
         state = live.product_catalog_state(monitor_id)
         self.initial = state["fetched"] is None
         self.initial_attempts = 0
@@ -49,7 +51,8 @@ class ProductCatalogRefresher:
                     self.product_names[promotion_id] = found
                 name = self.product_names.get(promotion_id)
         if name:
-            self.live.update_product_name(self.session_id, promotion_id, name)
+            if self.live.update_product_name(self.session_id, promotion_id, name) and self.on_product_ready is not None:
+                self.on_product_ready(promotion_id, name)
             return
         with self.lock:
             if self.clock() >= self.misses.get(promotion_id, 0):
@@ -101,11 +104,13 @@ class ProductCatalogRefresher:
             self.live.set_product_catalog_error(self.session_id, None)
             if include_current and current is not None:
                 promotion_id, title = current
-                self.live.set_current_product(
+                resolved_name = title or names.get(promotion_id, "")
+                if self.live.set_current_product(
                     self.session_id, promotion_id=promotion_id,
-                    product_name=title or names.get(promotion_id, ""),
+                    product_name=resolved_name,
                     event_time=requested_at, received_at=requested_at,
-                )
+                ) and self.on_product_ready is not None:
+                    self.on_product_ready(promotion_id, resolved_name)
             succeeded = True
         except Exception as exc:
             if not self.stop_event.is_set():
@@ -141,7 +146,8 @@ class ProductCatalogRefresher:
                     # behind a slow SQLite call.
                     self.live.defer_missing_products(self.monitor_id, missing, retry_at)
                     for product_id in pending.difference(missing):
-                        self.live.update_product_name(self.session_id, product_id, names[product_id])
+                        if self.live.update_product_name(self.session_id, product_id, names[product_id]) and self.on_product_ready is not None:
+                            self.on_product_ready(product_id, names[product_id])
             finally:
                 with self.lock:
                     if self.retrying and not self.stop_event.is_set():

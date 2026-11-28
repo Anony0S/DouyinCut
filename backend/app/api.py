@@ -38,6 +38,7 @@ from .projects.service import (EditingDefaults, editing_defaults, save_editing_d
 from .live_monitoring import (LiveClipOpen, LivePeriodSplit, LiveProductMerge, LiveMonitorRequest,
                               LiveMonitorSettings, LiveRecordingAction, LiveStore)
 from .product_platform import ProductPlatformService
+from .product_platform.availability import SessionProductAvailabilityChecker
 from .product_platform.client import ProductPlatformError
 from .product_platform.daduoduo import DaduoduoCatalog
 from .product_platform.xingdongli import PRODUCT_IMAGE_HOSTS as XINGDONGLI_IMAGE_HOSTS, XingdongliService
@@ -113,6 +114,8 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     session_cookie = f"douyincut_session_{settings.port}"
     catalog = DaduoduoCatalog(store)
     xingdongli = XingdongliService(store)
+    product_platform = ProductPlatformService(store)
+    availability = SessionProductAvailabilityChecker(store, product_platform, xingdongli)
     active_mutations = 0
     clearing_data = False
 
@@ -122,11 +125,13 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             await asyncio.to_thread(catalog.start)
             yield
         finally:
+            availability.close()
             catalog.close()
 
     app = FastAPI(title="DouyinCut", version="0.1.0", lifespan=lifespan)
     app.state.store, app.state.settings, app.state.live_store = store, settings, live_store
-    app.state.product_platform = ProductPlatformService(store)
+    app.state.product_platform = product_platform
+    app.state.product_availability = availability
     allowed = {f"http://127.0.0.1:{settings.port}"}
     if frontend_dir is None:
         allowed.update({"http://127.0.0.1:5173", "http://tauri.localhost", "https://tauri.localhost"})
@@ -310,6 +315,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
     def update_daduoduo_catalog(monitor_id: str):
         return catalog.update(monitor_id)
 
+    @app.get("/api/v1/live/monitors/{monitor_id}/sessions/{session_id}/product-availability")
+    def session_product_availability_status(monitor_id: str, session_id: str):
+        return availability.status(monitor_id, session_id)
+
+    @app.post("/api/v1/live/monitors/{monitor_id}/sessions/{session_id}/product-availability", status_code=202)
+    def refresh_session_product_availability(monitor_id: str, session_id: str):
+        return availability.refresh_session(monitor_id, session_id)
+
     def resolve_product_platform(monitor_id=None, asset_id=None, *, reference_images=False):
         if monitor_id is not None and asset_id is not None:
             raise HTTPException(422, "请只传直播间或项目 ID")
@@ -337,6 +350,10 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             raise HTTPException(422, "商品名称不能为空")
         if platform == "xingdongli":
             result = xingdongli.search(binding["ip_id"], body.keyword, body.start, body.sort_type, body.sort_order)
+            if body.monitor_id is not None and body.keyword and body.start == 0:
+                availability.record_search_result(
+                    body.monitor_id, "xingdongli", binding["ip_id"], body.keyword, result["products"]
+                )
             if body.asset_id is not None:
                 from .ai.image_generation import fetch_xingdongli_product_image
 
@@ -359,6 +376,14 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             return result
         if platform == "daduoduo":
             return catalog.search(body.monitor_id, body.keyword)
+        if body.monitor_id is not None and body.keyword:
+            products, scope_name, main_ip_id = app.state.product_platform.search_items(body.keyword)
+            availability.record_search_result(body.monitor_id, "xingdou", main_ip_id, body.keyword, products)
+            return {
+                "product": products[0] if products else None,
+                "scope_name": scope_name,
+                "can_add_to_showcase": True,
+            }
         return {**app.state.product_platform.search(body.keyword), "can_add_to_showcase": True}
 
     @app.post("/api/v1/product-platform/products/images")

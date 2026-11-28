@@ -16,6 +16,7 @@ import {
 import LiveIcon from "../components/live/LiveIcon.vue";
 import LiveRoomList from "../components/live/LiveRoomList.vue";
 import LiveRoomPlatform from "../components/live/LiveRoomPlatform.vue";
+import LiveSessionAvailability from "../components/live/LiveSessionAvailability.vue";
 import RoomPlatformFields from "../components/product/RoomPlatformFields.vue";
 import { needsPlatformIp, openXingdongliProducts, type RoomPlatformBinding } from "../services/productPlatform";
 import { readRoomOrder, sortRooms } from "../components/live/roomOrder";
@@ -97,6 +98,15 @@ const cardEmptyMessage = computed(() => readingSession.value ? "正在读取场�
   : recordingWindow.value.date ? "当天无录制" : "今天无录制");
 const selectionOutsideWindow = computed(() => selectedSession.value
   && !sessions.value.some(item => item.id === selectedSession.value?.id));
+const selectedBindingKey = computed(() => JSON.stringify(selectedMonitor.value?.product_platform ?? null));
+const sessionHasNamedProducts = computed(() =>
+  Boolean(selectedSession.value?.product_periods.some(period => period.product_name.trim())),
+);
+const sessionHasCheckedProducts = computed(() =>
+  Boolean(selectedSession.value?.product_periods.some(
+    period => period.platform_product && !["unchecked", "not_synced"].includes(period.platform_product.state),
+  )),
+);
 function defaultSession(items: LiveSessionSummary[]) {
   return [...items].sort(recordingFirst)[0];
 }
@@ -557,12 +567,35 @@ onDeactivated(() => {
           :on-retry-product-listener="retryProductListener"
           @select-period="selectedPeriodId = $event"
           @update:merge-period-ids="mergePeriodIds = $event"
+          @product-searched="refresh"
           @open-file="openClipFile">
           <template #catalog>
             <LiveRoomPlatform v-if="selectedMonitor.product_platform?.platform === 'daduoduo'"
-              :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" />
-            <button v-else-if="selectedMonitor.product_platform?.platform === 'xingdongli'"
-              type="button" class="btn btn-sm" :disabled="openingProducts" @click="browseProducts(selectedMonitor.id)">星动力商品列表</button>
+              :key="selectedMonitor.id" :monitor="selectedMonitor" :busy="busy" @synced="refresh" />
+            <div v-else-if="selectedMonitor.product_platform?.platform === 'xingdongli'"
+              class="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <LiveSessionAvailability
+                :monitor-id="selectedMonitor.id"
+                :session-id="selectedSession.id"
+                platform="xingdongli"
+                :binding-key="selectedBindingKey"
+                :has-products="sessionHasNamedProducts"
+                :has-checked="sessionHasCheckedProducts"
+                :busy="busy"
+                @updated="refresh" />
+              <button type="button" class="btn btn-xs" :disabled="openingProducts"
+                @click="browseProducts(selectedMonitor.id)">星动力商品列表</button>
+            </div>
+            <LiveSessionAvailability
+              v-else-if="selectedMonitor.product_platform?.platform === 'xingdou'"
+              :monitor-id="selectedMonitor.id"
+              :session-id="selectedSession.id"
+              platform="xingdou"
+              :binding-key="selectedBindingKey"
+              :has-products="sessionHasNamedProducts"
+              :has-checked="sessionHasCheckedProducts"
+              :busy="busy"
+              @updated="refresh" />
           </template>
         </LiveSessionPanel>
         <div v-else class="live-content-columns">

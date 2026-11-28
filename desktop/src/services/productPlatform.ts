@@ -54,11 +54,20 @@ export type CatalogStatus = {
   state: 'idle' | 'queued' | 'running' | 'failed'; downloaded: number; total: number | null
   count: number; synced_at: number | null; error: string
 }
+export type SessionAvailabilityStatus = {
+  state: 'idle' | 'queued' | 'running' | 'failed'
+  checked: number
+  total: number
+  error: string
+  error_code: string
+}
 export type DaduoduoSettings = {
   rooms: (CatalogStatus & {id: string; name: string})[]
 }
 
 const roomCatalogPath = (id: string) => `/live/monitors/${encodeURIComponent(id)}/product-catalog`
+const sessionAvailabilityPath = (monitorId: string, sessionId: string) =>
+  `/live/monitors/${encodeURIComponent(monitorId)}/sessions/${encodeURIComponent(sessionId)}/product-availability`
 
 export async function openXingdongliProducts(monitorId: string): Promise<void> {
   const internals = (window as Window & {
@@ -93,6 +102,10 @@ export const productPlatformApi = {
   daduoduoSettings: () => api<DaduoduoSettings>('/product-platform/daduoduo'),
   catalogStatus: (id: string) => api<CatalogStatus>(roomCatalogPath(id)),
   updateCatalog: (id: string) => api<CatalogStatus>(roomCatalogPath(id), 'POST'),
+  sessionAvailabilityStatus: (monitorId: string, sessionId: string) =>
+    api<SessionAvailabilityStatus>(sessionAvailabilityPath(monitorId, sessionId)),
+  refreshSessionAvailability: (monitorId: string, sessionId: string) =>
+    api<SessionAvailabilityStatus>(sessionAvailabilityPath(monitorId, sessionId), 'POST'),
   xingdongliStatus: () => api<XingdongliStatus>('/product-platform/xingdongli'),
   connectXingdongli: (member_token: string) =>
     api<XingdongliStatus>('/product-platform/xingdongli/connect', 'POST', {member_token}),

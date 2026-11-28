@@ -4,6 +4,7 @@ import { productPlatformApi, type CatalogStatus } from '../../services/productPl
 import type { LiveMonitor } from '../../services/liveMonitoring'
 
 const props = defineProps<{ monitor: LiveMonitor; busy: boolean }>()
+const emit = defineEmits<{ synced: [] }>()
 const updating = ref(false)
 const status = ref<CatalogStatus>(), error = ref('')
 const syncing = computed(() => status.value?.state === 'running' || status.value?.state === 'queued')
@@ -15,9 +16,16 @@ let timer: ReturnType<typeof setInterval> | undefined
 async function readStatus() {
   if (!active || updating.value) return
   const version = ++readVersion
+  const previousSyncedAt = status.value?.synced_at ?? null
+  const hadStatus = status.value !== undefined
   try {
     const result = await productPlatformApi.catalogStatus(props.monitor.id)
-    if (active && version === readVersion) status.value = result
+    if (active && version === readVersion) {
+      status.value = result
+      if (hadStatus && result.synced_at && result.synced_at !== previousSyncedAt) {
+        emit('synced')
+      }
+    }
   } catch (cause) {
     if (active && version === readVersion && !status.value) {
       error.value = cause instanceof Error ? cause.message : '读取商品目录状态失败'

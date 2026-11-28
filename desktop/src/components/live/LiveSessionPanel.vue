@@ -10,6 +10,7 @@ import {
   formatOffset,
   listenerBadgeClasses,
   listenerNames,
+  periodPlatformBadge,
   productClipBadge,
   productPeriodColor,
 } from "./presentation";
@@ -29,6 +30,7 @@ const emit = defineEmits<{
   "import-product-clip": [id: string];
   open: [assetId: string];
   "open-file": [id: string, reveal: boolean];
+  "product-searched": [];
   "select-period": [id: string];
   "update:merge-period-ids": [ids: string[]];
 }>();
@@ -58,6 +60,9 @@ const periods = computed(() =>
   [...props.session.product_periods].sort(
     (a, b) => Number(b.ended === null) - Number(a.ended === null) || b.started - a.started || b.id.localeCompare(a.id),
   ),
+);
+const periodsWithBadges = computed(() =>
+  periods.value.map(period => ({ period, platformBadge: periodPlatformBadge(period.platform_product) })),
 );
 const selectedPeriod = computed(() => props.session.product_periods.find(period => period.id === props.selectedPeriodId));
 const clipsWithBadges = computed(() => props.session.product_clips.map(clip => ({ clip, badge: productClipBadge(clip) })));
@@ -179,9 +184,9 @@ const listenerNote = computed(() => {
           <span>讲解列表</span>
           <slot name="catalog" />
         </div>
-        <div v-if="periods.length" class="live-product-event-list">
+        <div v-if="periodsWithBadges.length" class="live-product-event-list">
           <article
-            v-for="(period, index) in periods"
+            v-for="({ period, platformBadge }, index) in periodsWithBadges"
             :id="`live-period-${period.id}`"
             :key="period.id"
             class="live-product-event"
@@ -207,8 +212,15 @@ const listenerNote = computed(() => {
                   <strong>
                     {{ period.product_name || `商品 ${period.promotion_id}` }}
                   </strong>
-                  <div class="live-event-meta mb-1">
+                  <div class="live-event-meta mb-1 items-center">
                     <span>商品 ID {{ period.promotion_id }}</span>
+                    <span
+                      v-if="platformBadge"
+                      class="badge badge-xs badge-soft shrink-0"
+                      :class="platformBadge.color"
+                      :title="platformBadge.title">
+                      {{ platformBadge.label }}
+                    </span>
                   </div>
                   <p v-if="splitSummary(period)" class="text-base-content/60 text-xs mt-2">{{ splitSummary(period) }}</p>
                   <p v-if="period.mapping_error" class="live-product-clip-error">{{ period.mapping_error }}</p>
@@ -217,7 +229,7 @@ const listenerNote = computed(() => {
                   </p>
                 </div>
                 <div class="flex h-8 shrink-0 items-center gap-2">
-                  <label v-if="mergeCandidateIds.has(period.id) && mergeCandidates.length > 1" class="inline-flex h-8 min-h-8 cursor-pointer items-center justify-start gap-2 px-1 py-0 leading-none"
+                  <label v-if="mergeCandidateIds.has(period.id) && mergeCandidates.length > 1" class="m-0 inline-flex h-8 min-h-8 cursor-pointer items-center justify-start gap-2 px-1 py-0 leading-none"
                     @click.stop>
                     <input type="checkbox" class="checkbox checkbox-sm m-0"
                       :checked="props.mergePeriodIds.includes(period.id)"
@@ -401,6 +413,7 @@ const listenerNote = computed(() => {
       </section>
     </div>
     <ProductSearchDialog v-if="queryProductName" :keyword="queryProductName" :monitor-id="monitorId"
+      @searched="$emit('product-searched')"
       @close="queryProductName = ''" />
   </div>
 </template>

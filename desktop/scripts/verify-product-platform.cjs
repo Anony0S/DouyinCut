@@ -467,6 +467,77 @@ async function verifyDouyinScan() {
   }
 }
 
+async function verifyPlatformAvailability() {
+  respond = () => ({ product: null, scope_name: '店铺 A' })
+  const period = { id: 'lecture-a', session_id: 'session', promotion_id: 'product-a', product_name: '完整商品名称',
+    started: 1000, ended: 1020, sources: [], mapping_error: '', clip_job: null,
+    platform_product: { platform: 'xingdongli', state: 'available', match_kind: 'exact_title', stock: 1280,
+      matched_title: '完整商品名称', platform_product_id: 'p1', checked_at: 1700000000, error: '' } }
+  const outOfStock = { ...period, id: 'lecture-zero', promotion_id: 'product-z', product_name: '断货商品',
+    platform_product: { platform: 'daduoduo', state: 'out_of_stock', match_kind: 'exact_title', stock: 0,
+      matched_title: '断货商品', platform_product_id: 'p2', checked_at: 1700000000, error: '' } }
+  const notFound = { ...period, id: 'lecture-miss', promotion_id: 'product-m', product_name: '平台无此商品名称',
+    platform_product: { platform: 'xingdou', state: 'not_found', match_kind: null, stock: null,
+      matched_title: null, platform_product_id: null, checked_at: 1700000000, error: '' } }
+  const session = { id: 'session', status: 'ended', started: 1000, ended: 1040, end_time_source: 'observed', segments: [],
+    product_clips: [], product_periods: [period, outOfStock, notFound],
+    current_product: null, product_events: [], product_listener: null, product_catalog_error: null }
+  let searchedEvents = 0
+  const mounted = await mount('components/live/LiveSessionPanel.vue', { session, monitorId: 'monitor', busy: false,
+    selectedPeriodId: '', mergePeriodIds: [],
+    onDeleteProductClip: async () => {}, onSplit: async () => {}, onRetryProductListener: async () => {},
+    onProductSearched: () => { searchedEvents++ } })
+  try {
+    assert.ok(text(mounted.root).includes('库存 1,280'))
+    assert.ok(text(mounted.root).includes('无库存'))
+    assert.ok(text(mounted.root).includes('平台无此商品'))
+    const actions = all(mounted.root, el => el.type === 'button' && text(el).trim() === '查询商品')
+    await click(actions[0])
+    assert.equal(searchedEvents, 1)
+    await click(button(body, '关闭商品查询'))
+  } finally { mounted.app.unmount() }
+
+  let availabilityState = { state: 'idle', checked: 0, total: 0, error: '', error_code: '' }
+  let updatedCount = 0
+  respond = (url, options) => {
+    if (url.endsWith('/product-availability')) {
+      if (options.method === 'POST') {
+        availabilityState = { state: 'running', checked: 1, total: 3, error: '', error_code: '' }
+      }
+      return availabilityState
+    }
+    throw new Error(`Unexpected request ${url}`)
+  }
+  const avail = await mount('components/live/LiveSessionAvailability.vue', {
+    monitorId: 'monitor-x', sessionId: 'session-x', platform: 'xingdou',
+    bindingKey: '{"platform":"xingdou","ip_id":""}', hasProducts: true, hasChecked: false, busy: false,
+    onUpdated: () => { updatedCount++ },
+  })
+  try {
+    assert.ok(text(avail.root).includes('商品平台 星斗'))
+    await click(button(avail.root, '检测库存'))
+    assert.ok(text(avail.root).includes('已检测 1 / 3 件'))
+    assert.ok(button(avail.root, '检测中…').props.disabled)
+    assert.equal(updatedCount, 1)
+  } finally { avail.app.unmount() }
+
+  respond = (url, options) => {
+    if (url.endsWith('/product-availability') && options.method === 'POST') {
+      return { status: 401, body: { detail: { code: 'XINGDONGLI_AUTH_REQUIRED', message: '星动力登录已失效' } } }
+    }
+    return { state: 'idle', checked: 0, total: 0, error: '', error_code: '' }
+  }
+  const authAvail = await mount('components/live/LiveSessionAvailability.vue', {
+    monitorId: 'monitor-x', sessionId: 'session-x', platform: 'xingdongli',
+    bindingKey: '{"platform":"xingdongli","ip_id":"42"}', hasProducts: true, hasChecked: true, busy: false,
+  })
+  try {
+    await click(button(authAvail.root, '刷新库存'))
+    assert.ok(text(authAvail.root).includes('星动力登录已失效'))
+    assert.ok(text(authAvail.root).includes('前往设置'))
+  } finally { authAvail.app.unmount() }
+}
+
 async function main() {
   const originalFetch = global.fetch
   const originalWindow = global.window
@@ -477,7 +548,7 @@ async function main() {
     return new Response(JSON.stringify(result?.body ?? result), { status: result?.status ?? 200, headers: { 'Content-Type': 'application/json' } })
   }
   try {
-    await verifyLogin(); await verifySearch(); await verifyLectureButton(); await verifyDaduoduoControls(); await verifyXingdongli()
+    await verifyLogin(); await verifySearch(); await verifyLectureButton(); await verifyPlatformAvailability(); await verifyDaduoduoControls(); await verifyXingdongli()
     assert.ok(calls.every(call => call.url.startsWith('/api/v1/')), 'The frontend only calls its authenticated local API')
     await verifyDouyinScan()
     console.log('Product platform UI checks passed: settings, SMS and QR login, Xingdongli token and pagination, product cards and auth redirects.')

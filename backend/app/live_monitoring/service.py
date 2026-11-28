@@ -22,6 +22,7 @@ from pydantic import Field
 from ..core.config import Settings
 from ..core.domain import Model, new_id
 from ..core.storage import Store
+from ..product_platform.availability import LiveProductAvailabilityWatcher, resolve_session_period_availability
 from ..product_platform.schemas import RoomPlatformBinding
 from ..projects.service import project_workflow_statuses
 from ..work_directory import REQUIRED_COLUMNS
@@ -102,6 +103,14 @@ class LiveStore:
                 );
                 CREATE TABLE IF NOT EXISTS daduoduo_catalogs (
                     binding_id TEXT PRIMARY KEY, products TEXT NOT NULL, synced_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS live_platform_product_cache (
+                    monitor_id TEXT NOT NULL, platform TEXT NOT NULL, scope_key TEXT NOT NULL,
+                    query_key TEXT NOT NULL, state TEXT NOT NULL, match_kind TEXT, stock TEXT,
+                    matched_title TEXT, platform_product_id TEXT, error TEXT NOT NULL DEFAULT '',
+                    checked_at REAL NOT NULL,
+                    PRIMARY KEY(monitor_id, platform, scope_key, query_key),
+                    FOREIGN KEY(monitor_id) REFERENCES live_monitors(id)
                 );
                 -- record_requested: manual start for the current broadcast;
                 -- record_held: user stopped recording, suppress until the room goes offline.
@@ -247,6 +256,7 @@ class LiveStore:
             return
         if previous:
             conn.execute("DELETE FROM daduoduo_catalogs WHERE binding_id=?", (previous["binding_id"],))
+            conn.execute("DELETE FROM live_platform_product_cache WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_room_platforms WHERE monitor_id=?", (monitor_id,))
         if binding:
             conn.execute("INSERT INTO live_room_platforms VALUES (?,?,?)", (monitor_id, new_id("binding"), body))
@@ -353,6 +363,9 @@ class LiveStore:
                 clip["project_status"] = (
                     statuses.get(clip["asset_id"], "project_missing") if clip["status"] == "imported" else None
                 )
+            availability = resolve_session_period_availability(conn, monitor_id, detail["product_periods"])
+            for period in detail["product_periods"]:
+                period["platform_product"] = availability.get(period["id"])
             return detail
 
     def delete_session(self, monitor_id: str, session_id: str, recordings_root: Path):
@@ -617,10 +630,10 @@ class LiveStore:
             row = conn.execute("SELECT id FROM live_product_events WHERE event_key=?", (event_key,)).fetchone()
         return row["id"] if row else None
 
-    def update_product_name(self, session_id: str, promotion_id: str, product_name: str):
+    def update_product_name(self, session_id: str, promotion_id: str, product_name: str) -> bool:
         product_name = product_name.strip()[:500]
         if not product_name:
-            return
+            return False
         with self.store.connection() as conn:
             conn.execute(
                 "UPDATE live_product_events SET product_name=? WHERE session_id=? "
@@ -632,11 +645,12 @@ class LiveStore:
                 "WHERE session_id=? AND promotion_id=? AND product_name=''",
                 (product_name, session_id, str(promotion_id)),
             )
-            conn.execute(
+            cursor = conn.execute(
                 "UPDATE live_product_periods SET product_name=? "
                 "WHERE session_id=? AND promotion_id=? AND product_name=''",
                 (product_name, session_id, str(promotion_id)),
             )
+        return cursor.rowcount > 0
 
     def monitor_products(self, monitor_id: str) -> dict[str, str]:
         with self.store.connection() as conn:
@@ -745,11 +759,12 @@ class LiveStore:
             )
 
     def set_current_product(self, session_id: str, *, promotion_id: str,
-                            event_time: float, received_at: float, product_name: str = ""):
+                            event_time: float, received_at: float, product_name: str = "") -> bool:
         promotion_id = str(promotion_id).strip()
         if not promotion_id:
             raise ValueError("当前商品缺少商品 ID")
         product_name = product_name.strip()[:500]
+        ready_for_platform_check = False
         with self.store.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             current = conn.execute(
@@ -757,7 +772,7 @@ class LiveStore:
                 (session_id,),
             ).fetchone()
             if current and received_at < current["received_at"]:
-                return
+                return False
             changed = current is None or current["promotion_id"] != promotion_id
             if changed:
                 session = conn.execute("SELECT started FROM live_sessions WHERE id=?", (session_id,)).fetchone()
@@ -774,12 +789,14 @@ class LiveStore:
                     "VALUES(?,?,?,?,?)",
                     (new_id("product_period"), session_id, promotion_id, product_name, start),
                 )
+                ready_for_platform_check = bool(product_name)
             elif product_name:
-                conn.execute(
+                cursor = conn.execute(
                     "UPDATE live_product_periods SET product_name=? WHERE session_id=? AND ended IS NULL "
                     "AND promotion_id=? AND product_name=''",
                     (product_name, session_id, promotion_id),
                 )
+                ready_for_platform_check = cursor.rowcount > 0
             conn.execute(
                 "INSERT INTO live_session_current_product "
                 "(session_id,promotion_id,product_name,event_time,received_at) "
@@ -789,6 +806,7 @@ class LiveStore:
                 "WHERE excluded.received_at>=live_session_current_product.received_at",
                 (session_id, promotion_id, product_name, event_time, received_at),
             )
+        return ready_for_platform_check
 
     def set_product_listener_state(self, session_id: str, status: str, detail: str = ""):
         with self.store.connection() as conn:
@@ -894,6 +912,7 @@ class LiveStore:
             conn.execute("DELETE FROM live_session_current_product WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
                          (monitor_id,))
             conn.execute("DELETE FROM live_monitor_products WHERE monitor_id=?", (monitor_id,))
+            conn.execute("DELETE FROM live_platform_product_cache WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_monitor_product_catalog WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_monitor_product_misses WHERE monitor_id=?", (monitor_id,))
             conn.execute("DELETE FROM live_session_product_catalog_state WHERE session_id IN (SELECT id FROM live_sessions WHERE monitor_id=?)",
@@ -1524,7 +1543,7 @@ class DouyinResolver:
 
 
 def probe_current_product(live, session_id: str, monitor_id: str, resolver,
-                          stop_event: threading.Event) -> bool:
+                          stop_event: threading.Event, *, on_product_ready=None) -> bool:
     """Seed this session's current product from one catalog page, once per session.
 
     The room catalog is cached per monitor and reused across sessions, so a session
@@ -1556,11 +1575,13 @@ def probe_current_product(live, session_id: str, monitor_id: str, resolver,
     # started" rule. Any real message arrives later, so it always overwrites this seed
     # instead of being replaced by it.
     seeded_at = live.session_started(session_id) or time.time()
-    live.set_current_product(
+    resolved_name = title or live.product_name(monitor_id, promotion_id)
+    if live.set_current_product(
         session_id, promotion_id=promotion_id,
-        product_name=title or live.product_name(monitor_id, promotion_id),
+        product_name=resolved_name,
         event_time=seeded_at, received_at=seeded_at,
-    )
+    ) and on_product_ready is not None:
+        on_product_ready(promotion_id, resolved_name)
     return True
 
 
@@ -1578,11 +1599,13 @@ def _safe_listener_exception(exc: Exception) -> str:
 
 
 class LiveMonitorWorker:
-    def __init__(self, settings: Settings, resolver=None, poll_seconds: int = POLL_SECONDS):
+    def __init__(self, settings: Settings, resolver=None, poll_seconds: int = POLL_SECONDS,
+                 platform_watcher=None):
         self.settings = settings
         self.store = Store(settings.database)
         self.live = LiveStore(self.store)
         self.resolver = resolver or DouyinResolver()
+        self.platform_watcher = platform_watcher or LiveProductAvailabilityWatcher(self.store)
         self.poll_seconds = poll_seconds
         self.processes: dict[str, tuple[subprocess.Popen, str]] = {}
         self.product_threads: dict[str, tuple[threading.Thread, threading.Event, str]] = {}
@@ -1797,12 +1820,17 @@ class LiveMonitorWorker:
             self._mark_listener_stopped(session_id, monitor_id)
             return
 
+        def notify_platform_product(promotion_id: str, product_name: str):
+            if not stop_event.is_set() and product_name.strip():
+                self.platform_watcher.schedule(monitor_id, session_id, promotion_id, product_name)
+
         self.live.set_product_listener_state(session_id, "connecting", "正在连接 Python 商品消息流")
         resolver = DouyinPromotionNameResolver(
             session.room, session.user_agent, session.cookie, timeout=8
         )
         catalog = ProductCatalogRefresher(
-            self.live, monitor_id, session_id, resolver, stop_event, force=refresh_catalog
+            self.live, monitor_id, session_id, resolver, stop_event, force=refresh_catalog,
+            on_product_ready=notify_platform_product,
         )
         self.product_catalogs[monitor_id] = catalog
 
@@ -1824,11 +1852,12 @@ class LiveMonitorWorker:
             if stop_event.is_set():
                 return ""
             product_name = self.live.product_name(monitor_id, event.promotion_id)
-            self.live.set_current_product(
+            if self.live.set_current_product(
                 session_id, promotion_id=event.promotion_id,
                 event_time=event.event_time, received_at=event.received_at,
                 product_name=product_name,
-            )
+            ):
+                notify_platform_product(event.promotion_id, product_name)
             if not product_name:
                 catalog.request_missing(event.promotion_id)
             return product_name
@@ -1846,16 +1875,19 @@ class LiveMonitorWorker:
             )
             if not product_name:
                 # A fast catalog response may have finished before this event was inserted.
-                self.live.update_product_name(
-                    session_id, event.promotion_id, self.live.product_name(monitor_id, event.promotion_id)
-                )
+                resolved_name = self.live.product_name(monitor_id, event.promotion_id)
+                if self.live.update_product_name(session_id, event.promotion_id, resolved_name):
+                    notify_platform_product(event.promotion_id, resolved_name)
 
         try:
             catalog.tick()
             # Seeded before the message stream starts, stamped with the session start so
             # any real message is later and always overwrites it. Costs one request per
             # session; the catalog itself is still reused and never re-fetched.
-            probe_current_product(self.live, session_id, monitor_id, resolver, stop_event)
+            probe_current_product(
+                self.live, session_id, monitor_id, resolver, stop_event,
+                on_product_ready=notify_platform_product,
+            )
             client = DouyinProductEventClient(
                 on_event, on_current_product=on_current_product,
                 on_product_observed=on_product_observed,
@@ -2115,6 +2147,7 @@ class LiveMonitorWorker:
             self.live.set_monitor_state(monitor_id, "unknown")
         for monitor_id in list(self.product_threads):
             self._stop_product_listener(monitor_id)
+        self.platform_watcher.close()
 
 
 def main():

@@ -27,6 +27,7 @@ _SESSION_TABLES = {
 _MONITOR_TABLES = (
     "live_monitor_products", "live_monitor_product_catalog", "live_monitor_product_misses",
     "live_monitor_liveness", "live_monitor_controls", "live_room_platforms",
+    "live_platform_product_cache",
 )
 
 

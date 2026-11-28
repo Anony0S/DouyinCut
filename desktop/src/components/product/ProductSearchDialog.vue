@@ -6,7 +6,7 @@ import { useSessionStore } from '../../stores/session'
 import ProductSearchCard from './ProductSearchCard.vue'
 
 const props = defineProps<{ keyword: string; monitorId: string }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; searched: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const id = useId(), router = useRouter(), session = useSessionStore()
 const query = ref(props.keyword.trim())
@@ -44,6 +44,7 @@ async function search(keyword = query.value.trim()) {
     if (disposed) return
     product.value = result.product; scopeName.value = result.scope_name
     canAddToShowcase.value = result.can_add_to_showcase
+    emit('searched')
   } catch (cause) {
     if (disposed) return
     if (isXingdongliAuthError(cause)) {

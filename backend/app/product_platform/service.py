@@ -134,7 +134,7 @@ class ProductPlatformService:
             self._save_config({"id": CONFIG_ID, "logged_in": False})
             return self.status()
 
-    def search(self, keyword: str):
+    def search_items(self, keyword: str) -> tuple[list[dict[str, Any]], str, str]:
         with self._lock:
             config = self._config()
             token = read_secret(TOKEN_KEY)
@@ -159,10 +159,14 @@ class ProductPlatformService:
             finally:
                 client.close()
             self._save_config({**config, "last_validated_at": time.time()})
-            return {
-                "product": self._product(items[0]) if items else None,
-                "scope_name": config.get("main_ip_name", ""),
-            }
+            return [self._product(item) for item in items], config.get("main_ip_name", ""), main_ip_id
+
+    def search(self, keyword: str):
+        products, scope_name, _ = self.search_items(keyword)
+        return {
+            "product": products[0] if products else None,
+            "scope_name": scope_name,
+        }
 
     def add_to_showcase(self, platform_product_id: str):
         with self._lock:

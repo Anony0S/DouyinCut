@@ -6,12 +6,11 @@ import LiveIcon from "./LiveIcon.vue";
 import ConfirmPopover from "../ConfirmPopover.vue";
 import ProductSearchDialog from "../product/ProductSearchDialog.vue";
 import {
-  clipBadgeClasses,
-  clipNames,
   formatBytes,
   formatOffset,
   listenerBadgeClasses,
   listenerNames,
+  productClipBadge,
   productPeriodColor,
 } from "./presentation";
 
@@ -46,8 +45,12 @@ function togglePath(kind: "segment" | "clip", id: string) {
 function deleteProductClip(clip: LiveSession["product_clips"][number]) {
   return props.onDeleteProductClip(clip.id);
 }
-function productClipMessage(status: string, name: string) {
-  return status === "imported"
+function productClipMessage(clip: LiveSession["product_clips"][number]) {
+  const name = clip.product_name || clip.promotion_id;
+  if (clip.project_status === "project_missing") {
+    return `只删除直播监控中的“${name}”商品片段记录，保留片段文件。`;
+  }
+  return clip.status === "imported"
     ? `只删除直播监控中的“${name}”商品片段记录，已导入项目和文件会保留。`
     : `将删除“${name}”商品片段及其本地文件。`;
 }
@@ -57,6 +60,7 @@ const periods = computed(() =>
   ),
 );
 const selectedPeriod = computed(() => props.session.product_periods.find(period => period.id === props.selectedPeriodId));
+const clipsWithBadges = computed(() => props.session.product_clips.map(clip => ({ clip, badge: productClipBadge(clip) })));
 function periodMergeKey(period: LiveProductPeriod) {
   return period.promotion_id.trim() || period.product_name.trim();
 }
@@ -250,7 +254,7 @@ const listenerNote = computed(() => {
         </div>
         <div v-if="session.product_clips.length" class="live-segment-list">
           <article
-            v-for="clip in session.product_clips"
+            v-for="{ clip, badge } in clipsWithBadges"
             :key="clip.id"
             class="live-segment-row live-product-clip-row">
             <div class="live-segment-info">
@@ -258,13 +262,8 @@ const listenerNote = computed(() => {
                 <strong :title="clip.product_name || clip.promotion_id">
                   {{ clip.product_name || `商品 ${clip.promotion_id}` }}
                 </strong>
-                <span
-                  :class="[
-                    'badge',
-                    'badge-xs',
-                    clipBadgeClasses[clip.status] || 'badge-soft badge-neutral',
-                  ]">
-                  {{ clipNames[clip.status] || clip.status }}
+                <span class="badge badge-xs badge-soft shrink-0" :class="badge.color">
+                  {{ badge.label }}
                 </span>
               </div>
               <div class="live-segment-meta items-center">
@@ -364,7 +363,7 @@ const listenerNote = computed(() => {
                 <span class="live-segment-action-label" aria-hidden="true">导入中…</span>
               </button>
               <button
-                v-else-if="clip.status === 'imported' && clip.asset_id"
+                v-else-if="clip.status === 'imported' && clip.asset_id && clip.project_status !== 'project_missing'"
                 class="btn btn-outline btn-sm live-segment-action live-segment-action-project"
                 :disabled="busy"
                 aria-label="打开项目"
@@ -375,7 +374,7 @@ const listenerNote = computed(() => {
               <ConfirmPopover
                 v-if="!['processing', 'importing'].includes(clip.status)"
                 :title="`删除“${clip.product_name || clip.promotion_id}”商品片段？`"
-                :message="productClipMessage(clip.status, clip.product_name || clip.promotion_id)"
+                :message="productClipMessage(clip)"
                 :confirm-action="() => deleteProductClip(clip)"
                 :disabled="busy"
                 v-slot="{ open, expanded, popoverId }">

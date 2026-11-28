@@ -26,11 +26,15 @@ def image_extension(data: bytes | bytearray) -> str | None:
     return None
 
 
-def fetch_product_image(url: str, *, allowed_hosts=PRODUCT_IMAGE_HOSTS) -> tuple[bytes, str]:
+def _validate_product_image_url(url: str, allowed_hosts):
     parsed = urlparse(url)
     if (parsed.scheme != "https" or parsed.hostname not in allowed_hosts
             or parsed.username or parsed.password or parsed.port not in (None, 443)):
         raise ValueError("商品图片地址无效")
+
+
+def fetch_product_image(url: str, *, allowed_hosts=PRODUCT_IMAGE_HOSTS) -> tuple[bytes, str]:
+    _validate_product_image_url(url, allowed_hosts)
     try:
         with httpx.Client(timeout=20, follow_redirects=False, trust_env=False) as client:
             response = client.get(url)
@@ -42,6 +46,27 @@ def fetch_product_image(url: str, *, allowed_hosts=PRODUCT_IMAGE_HOSTS) -> tuple
     if not content_type.startswith("image/") or not data or len(data) > MAX_IMAGE_BYTES:
         raise ValueError("商品图片格式无效或文件过大")
     return data, content_type
+
+
+def fetch_xingdongli_product_image(url: str, *, allowed_hosts) -> tuple[bytes, str]:
+    _validate_product_image_url(url, allowed_hosts)
+    data = bytearray()
+    try:
+        with httpx.Client(timeout=20, follow_redirects=False, trust_env=False) as client:
+            with client.stream("GET", url, headers={"Accept": "image/jpeg, image/png, image/webp"}) as response:
+                response.raise_for_status()
+                for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                    if len(data) + len(chunk) > MAX_IMAGE_BYTES:
+                        raise ValueError("星动力商品图片超过 20 MiB")
+                    data.extend(chunk)
+    except httpx.HTTPError:
+        raise ValueError("下载星动力商品图片失败，请稍后重试") from None
+    if not data:
+        raise ValueError("星动力商品图片为空")
+    content_type = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}.get(image_extension(data))
+    if content_type is None:
+        raise ValueError("星动力商品图片不是可用的 PNG、JPEG 或 WebP 图片")
+    return bytes(data), content_type
 
 
 def _safe_result_url(url: str, base_url: str) -> bool:

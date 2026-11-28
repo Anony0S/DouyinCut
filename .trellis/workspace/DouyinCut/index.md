@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 88
-- **Last Active**: 2026-11-26
+- **Total Sessions**: 93
+- **Last Active**: 2026-11-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~232 | Active |
+| `journal-2.md` | ~368 | Active |
 | `journal-1.md` | ~1985 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,11 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 93 | 2026-11-28 | 剪映素材区改为原素材和全部商品参考图 | - | `-` |
+| 92 | 2026-11-28 | 剪映草稿素材区登记 | - | `-` |
+| 91 | 2026-11-27 | 实测星动力 S3329 封面取图 | - | `master` |
+| 90 | 2026-11-27 | 修复星动力剪映封面参考图获取 | - | `master` |
+| 89 | 2026-11-27 | 直播商品视频片段显示粗剪和剪映草稿状态 | - | `master` |
 | 88 | 2026-11-26 | 星动力商品查询提供剪映封面参考图 | - | `-` |
 | 87 | 2026-11-26 | 星动力商品列表窗口置顶 | - | `-` |
 | 86 | 2026-11-26 | 单商品查询增加复制链接 | - | `-` |

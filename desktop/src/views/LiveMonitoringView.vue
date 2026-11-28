@@ -347,7 +347,7 @@ async function deleteProductClip(clipId: string) {
   await session.act(async () => {
     const result = await liveMonitoringApi.deleteProductClip(clipId);
     session.message = result.project_file_retained
-      ? "商品片段记录已删除；已导入项目及文件保留"
+      ? "商品片段记录已删除；片段文件保留"
       : result.file_deleted ? "商品片段及本地文件已删除" : "商品片段记录已删除；本地文件原已不存在";
     await refresh();
   });

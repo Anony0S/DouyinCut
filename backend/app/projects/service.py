@@ -125,6 +125,56 @@ def project_list(store, page=1, page_size=20, search="", status="all"):
     return {"items": items, "total": total, "page": page, "page_size": page_size, "pages": pages}
 
 
+ACTIVE_PROJECT_TASK_STATES = ("queued", "running", "pause_requested", "paused", "cancel_requested")
+
+
+def project_workflow_statuses(conn, asset_ids):
+    """Summarize roughcut and draft delivery for a batch of source videos."""
+    if not asset_ids:
+        return {}
+    active_states = ",".join(f"'{state}'" for state in ACTIVE_PROJECT_TASK_STATES)
+    rows = conn.execute(f"""
+        WITH assets AS (
+            SELECT value AS id FROM json_each(?)
+            WHERE EXISTS (SELECT 1 FROM objects WHERE kind='asset' AND id=value)
+        ), ranked_plans AS (
+            SELECT p.id, a.id AS asset_id,
+                   ROW_NUMBER() OVER (PARTITION BY a.id ORDER BY p.created DESC,p.id DESC) AS rank
+            FROM objects p JOIN assets a ON a.id=json_extract(p.body,'$.clips[0].source_asset_id')
+            WHERE p.kind='plan' AND p.revision=1
+        ), current_plans AS (
+            SELECT p.id,p.asset_id,
+                   (SELECT MAX(revision) FROM objects WHERE kind='plan' AND id=p.id) AS revision
+            FROM ranked_plans p WHERE p.rank=1
+        )
+        SELECT a.id,p.id AS plan_id,
+               (SELECT j.state FROM jobs j
+                WHERE j.kind='analyze' AND json_extract(j.payload,'$.asset_id')=a.id
+                ORDER BY (j.state IN ({active_states})) DESC,j.created DESC,j.id DESC LIMIT 1) AS analysis_state,
+               (SELECT j.state FROM jobs j
+                WHERE j.kind='jianying' AND json_extract(j.payload,'$.plan_id')=p.id
+                  AND json_extract(j.payload,'$.revision')=p.revision
+                  AND j.state!='cancelled'
+                ORDER BY (j.state IN ({active_states})) DESC,(j.state='succeeded') DESC,
+                         j.created DESC,j.id DESC LIMIT 1) AS draft_state
+        FROM assets a LEFT JOIN current_plans p ON p.asset_id=a.id
+    """, (json.dumps(sorted(asset_ids)),)).fetchall()
+    statuses = {}
+    for row in rows:
+        analysis_state = row["analysis_state"]
+        draft_state = row["draft_state"]
+        if analysis_state in ACTIVE_PROJECT_TASK_STATES or analysis_state == "failed":
+            status = f"roughcut_{analysis_state}"
+        elif row["plan_id"]:
+            status = f"draft_{draft_state}" if draft_state else "roughcut_completed"
+        elif analysis_state == "cancelled":
+            status = "roughcut_cancelled"
+        else:
+            status = "roughcut_pending"
+        statuses[row["id"]] = status
+    return statuses
+
+
 def save_draft(store, asset_id, draft):
     store.get("asset", asset_id)
     data = {"id": asset_id, "draft": draft.model_dump()}

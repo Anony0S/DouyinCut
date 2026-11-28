@@ -52,6 +52,7 @@ class JianyingDraftTests(unittest.TestCase):
             result = create_jianying_draft(self.plan, {self.asset.id: self.asset}, self.settings, "job_12345678")
         draft_path = Path(result["draft_path"])
         content = json.loads((draft_path / "draft_info.json").read_text(encoding="utf-8"))
+        metadata = json.loads((draft_path / "draft_meta_info.json").read_text(encoding="utf-8"))
         track = next(track for track in content["tracks"] if track["name"] == "DouyinCut 视频")
         segments = track["segments"]
         self.assertEqual(len(segments), 2)
@@ -63,6 +64,16 @@ class JianyingDraftTests(unittest.TestCase):
         self.assertTrue(all(draft_path.name in str(path) for path in paths))
         self.assertLessEqual(len(draft_path.name), 36)
         self.assertTrue(all(path.resolve() != Path(self.asset.path).resolve() for path in paths))
+        media_entries = next(group["value"] for group in metadata["draft_materials"] if group["type"] == 0)
+        source_copy = draft_path / "Resources" / "DouyinCut_source.mp4"
+        self.assertEqual(len(media_entries), 1)
+        source_entry = media_entries[0]
+        self.assertEqual(Path(source_entry["file_Path"]), source_copy)
+        self.assertEqual(source_copy.read_bytes(), self.source.read_bytes())
+        self.assertEqual(source_entry["metetype"], "video")
+        self.assertEqual(source_entry["duration"], self.asset.duration_us)
+        self.assertEqual((source_entry["width"], source_entry["height"]), (self.asset.width, self.asset.height))
+        self.assertEqual(source_entry["roughcut_time_range"], {"start": 0, "duration": self.asset.duration_us})
         self.assertEqual(result["clip_count"], 2)
         self.assertEqual(result["subtitle_count"], 2)
         subtitle_track = next(track for track in content["tracks"] if track["name"] == "DouyinCut 字幕")
@@ -79,13 +90,13 @@ class JianyingDraftTests(unittest.TestCase):
         with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root)}):
             retried = create_jianying_draft(self.plan, {self.asset.id: self.asset}, self.settings, "job_12345678")
         self.assertEqual(retried, result)
-        self.assertEqual(len(list((draft_path / "Resources").glob("*.mp4"))), 2)
+        self.assertEqual(len(list((draft_path / "Resources").glob("*.mp4"))), 3)
 
     def test_failed_generation_removes_partial_draft(self):
         output_root = self.root / "jianying-projects"
         checkpoints = 0
 
-        def stop_after_first_clip():
+        def stop_during_source_copy():
             nonlocal checkpoints
             checkpoints += 1
             if checkpoints == 2:
@@ -94,7 +105,7 @@ class JianyingDraftTests(unittest.TestCase):
         with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root)}):
             with self.assertRaisesRegex(RuntimeError, "cancel test"):
                 create_jianying_draft(self.plan, {self.asset.id: self.asset}, self.settings,
-                                      "job_cancelled", checkpoint=stop_after_first_clip)
+                                      "job_cancelled", checkpoint=stop_during_source_copy)
         self.assertEqual(list(output_root.iterdir()), [])
 
     def test_cover_is_copied_and_written_to_both_draft_metadata_files(self):
@@ -102,10 +113,15 @@ class JianyingDraftTests(unittest.TestCase):
         cover = self.root / "generated-cover.png"
         run_process([self.settings.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
                      "color=c=red:s=300x400", "-frames:v", "1", str(cover)])
+        references = (self.root / "reference-one.png", self.root / "reference-two.jpg")
+        for reference, color in zip(references, ("blue", "green"), strict=True):
+            run_process([self.settings.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i",
+                         f"color=c={color}:s=240x160", "-frames:v", "1", str(reference)])
         with patch.dict(os.environ, {"DOUYINCUT_JIANYING_DRAFTS_DIR": str(output_root), "PATH": ""}), \
                 patch("app._vendor.pyJianYingDraft.local_materials.pymediainfo", None):
             result = create_jianying_draft(self.plan, {self.asset.id: self.asset}, self.settings,
-                                           "job_cover_test", cover_image_path=cover)
+                                           "job_cover_test", cover_image_path=cover,
+                                           reference_image_paths=references)
         draft_path = Path(result["draft_path"])
         cover_copy = draft_path / "Resources" / "DouyinCut_cover.jpg"
         cover_resource = next((draft_path / "Resources" / "cover").glob("*.jpg"))
@@ -151,6 +167,24 @@ class JianyingDraftTests(unittest.TestCase):
         self.assertIn("##_draftpath_placeholder_", cover_draft["materials"]["videos"][0]["path"])
         self.assertTrue(cover_draft["materials"]["videos"][0]["path"].endswith(cover_resource.name))
         self.assertEqual(metadata["draft_cover"], "draft_cover.jpg")
+        media_entries = next(group["value"] for group in metadata["draft_materials"] if group["type"] == 0)
+        self.assertEqual([entry["metetype"] for entry in media_entries], ["video", "photo", "photo", "photo"])
+        self.assertEqual(len({entry["id"] for entry in media_entries}), 4)
+        self.assertEqual(Path(media_entries[0]["file_Path"]),
+                         draft_path / "Resources" / "DouyinCut_source.mp4")
+        for entry, reference in zip(media_entries[1:-1], references, strict=True):
+            path = Path(entry["file_Path"])
+            self.assertEqual(path.parent, draft_path / "Resources")
+            self.assertEqual(path.suffix, reference.suffix)
+            self.assertEqual(path.read_bytes(), reference.read_bytes())
+            self.assertEqual((entry["width"], entry["height"]), (240, 160))
+        self.assertEqual(len(content["materials"]["videos"]), 2)
+        self.assertTrue(all(len(track["segments"]) == 2 for track in content["tracks"]))
+        cover_entry = media_entries[-1]
+        self.assertEqual(Path(cover_entry["file_Path"]), cover_resource)
+        self.assertEqual(cover_entry["id"], cover_draft["materials"]["videos"][0]["local_material_id"])
+        self.assertEqual((cover_entry["width"], cover_entry["height"], cover_entry["duration"]), (300, 400, 5_000_000))
+        self.assertEqual(cover_entry["roughcut_time_range"], {"start": -1, "duration": -1})
 
     def test_override_directory_is_created(self):
         output_root = self.root / "configured" / "drafts"

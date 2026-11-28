@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { ApiError, type Asset, type Candidate, type Plan, type Job, type Artifact, type ProjectDraft, type ProjectDetail } from '../api'
-import { projectsApi, type ShortFillerFilter } from '../services/projects'
+import { projectsApi, type JianyingDraftCover, type ShortFillerFilter } from '../services/projects'
 import { useSessionStore } from './session'
 
 export const useProjectStore=defineStore('project',()=>{
@@ -131,12 +131,17 @@ async function loadTranscript() { await session.act(async()=>{
   const loaded=await projectsApi.transcript(job.id)
   if(assetId.value===currentAsset) { transcript.value=loaded;transcriptVisible.value=true }
 }) }
-async function createJianyingDraft(plan: Plan, coverId?: string) { await session.act(async()=>{
-  if(planDirty.value) throw new Error('请先保存片段调整，再生成剪映草稿')
-  const task=await projectsApi.createJianyingDraft(plan.id,plan.revision,coverId)
-  await refresh();session.message='剪映草稿生成任务已排队，完成后会显示草稿目录'
-  return task
-}) }
+async function createJianyingDraft(plan: Plan, cover?: JianyingDraftCover) {
+  let queued = false
+  await session.act(async()=>{
+    if(planDirty.value) throw new Error('请先保存片段调整，再生成剪映草稿')
+    await projectsApi.createJianyingDraft(plan.id,plan.revision,cover)
+    queued = true
+    await refresh()
+    session.message='剪映草稿生成任务已排队，完成后会显示草稿目录'
+  })
+  return queued
+}
 async function savePlan() { await session.act(async()=>{
   if(!selectedPlan.value) return
   const plan=JSON.parse(JSON.stringify(selectedPlan.value)) as Plan

@@ -109,18 +109,29 @@ async function verify() {
   await checkConfirmation(editor.root, '删除方案 2', '/plans/one', '源视频、ASR 对话')
   editor.app.unmount()
 
-  const liveSession = { id: 's', started: 1, status: 'completed', product_events: [], product_periods: [], product_clips: [
-    { id: 'c', status: 'completed', product_name: '商品一', promotion_id: 'p', source_periods: [] },
-    { id: 'i', status: 'imported', product_name: '商品二', promotion_id: 'q', source_periods: [] },
-    { id: 'busy', status: 'processing', product_name: '生成中', promotion_id: 'r', source_periods: [] },
-  ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, splitting: true }] }
+  const liveSession = vue.reactive({ id: 's', started: 1, status: 'completed', product_events: [], product_periods: [], product_clips: [
+    { id: 'c', status: 'completed', project_status: null, product_name: '商品一', promotion_id: 'p', source_periods: [] },
+    { id: 'i', status: 'imported', project_status: 'roughcut_running', asset_id: 'video', product_name: '商品二', promotion_id: 'q', source_periods: [] },
+    { id: 'busy', status: 'processing', project_status: null, product_name: '生成中', promotion_id: 'r', source_periods: [] },
+  ], segments: [{ id: 'seg', status: 'completed', segment_index: 1 }, { id: 'split', status: 'completed', segment_index: 2, splitting: true }] })
   const panel = await mount('components/live/LiveSessionPanel.vue', { session: liveSession, monitorId: 'monitor', busy: false, selectedPeriodId: '', mergePeriodIds: [],
     onDeleteProductClip: async id => calls.push(`/clips/${id}`),
     onSplit: async () => ({state: 'noop', message: ''}), onRetryProductListener: async () => {},
   })
   assert.equal(all(panel.root, el => el.type === 'h3' && text(el) === '录制分段').length, 0, 'internal media chunks are not shown as a recording segment card')
-  await checkConfirmation(panel.root, '删除商品片段 商品一', '/clips/c', '本地文件')
+  const importedRow = all(panel.root, el => el.type === 'article' && text(el).includes('商品二'))[0]
+  assert.deepEqual(all(importedRow, el => el.type === 'span' && el.props.class?.includes('badge')).map(text), ['粗剪中'])
+  assert.ok(button(importedRow, '打开项目'))
+  liveSession.product_clips[1].project_status = 'draft_succeeded'
+  await settle()
+  assert.deepEqual(all(importedRow, el => el.type === 'span' && el.props.class?.includes('badge')).map(text), ['已生成剪映草稿'])
+  assert.ok(button(importedRow, '打开项目'))
   await checkConfirmation(panel.root, '删除商品片段 商品二', '/clips/i', '已导入项目和文件会保留')
+  liveSession.product_clips[1].project_status = 'project_missing'
+  await settle()
+  assert.equal(button(importedRow, '打开项目'), undefined)
+  await checkConfirmation(panel.root, '删除商品片段 商品二', '/clips/i', '保留片段文件')
+  await checkConfirmation(panel.root, '删除商品片段 商品一', '/clips/c', '本地文件')
   assert.equal(button(panel.root, '删除商品片段 生成中'), undefined)
   panel.app.unmount()
 
@@ -168,10 +179,11 @@ async function verify() {
   })
   const deleteSessionButton = all(timeline.root, el => el.type === 'button' && el.props['aria-label']?.startsWith('删除录制场次：'))[0]
   assert.ok(deleteSessionButton, 'selected finished session exposes delete action')
+  const beforeSessionDelete = calls.length
   await click(deleteSessionButton)
   assert.ok(text(dialog()).includes('未导入录制视频文件'), 'session confirmation explains recording cleanup')
   await click(button(dialog(), '取消'))
-  assert.equal(calls.at(-1), '/clips/i', 'cancelling session deletion performs no action')
+  assert.equal(calls.length, beforeSessionDelete, 'cancelling session deletion performs no action')
   await click(deleteSessionButton); await click(button(dialog(), '确定删除场次'))
   assert.equal(calls.at(-1), '/sessions/finished')
   timeline.app.unmount()

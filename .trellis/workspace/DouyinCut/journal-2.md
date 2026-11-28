@@ -230,3 +230,139 @@ Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 89: 直播商品视频片段显示粗剪和剪映草稿状态
+<!-- trellis-session: v=2 fp=ffd3eded171b048b -->
+
+**Date**: 2026-11-27
+**Task**: 直播商品视频片段显示粗剪和剪映草稿状态
+**Branch**: `master`
+
+### Summary
+
+活动粗剪优先。剪映草稿状态按最新创建方案的当前修订读取；单独切分和合并切分均通过关联视频项目显示。
+Topics: [.trellis/spec/project/live-monitoring.md](../../spec/project/live-monitoring.md)
+
+### Main Changes
+
+- 场次详情批量返回编辑状态，直播监控沿用场次刷新更新标签。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 使用工作区临时目录运行后端全量测试，434 项通过，任务恢复测试有 1 条线程警告。前端类型检查、生产构建、状态切换与直播监控回归通过。真实直播、云端和剪映实机待验收。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 90: 修复星动力剪映封面参考图获取
+<!-- trellis-session: v=2 fp=b6de5f7e2b24be3e -->
+
+**Date**: 2026-11-27
+**Task**: 修复星动力剪映封面参考图获取
+**Branch**: `master`
+
+### Summary
+
+星动力参考图按内容识别格式。查询命中但下载失败时保留匹配商品并提供具体原因和本地上传入口。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端相关用例 59 项和 24 个子测试通过。前端封面流程、商品平台测试、类型检查和生产构建通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 在已登录的星动力环境用 S3329 项目点击获取图片，验证实际 CDN 响应和参考图预览。
+
+
+## Session 91: 实测星动力 S3329 封面取图
+<!-- trellis-session: v=2 fp=4c5957af1320e7e4 -->
+
+**Date**: 2026-11-27
+**Task**: 实测星动力 S3329 封面取图
+**Branch**: `master`
+
+### Summary
+
+运行中的旧开发后端复现取图失败。S3329 的真实 CDN 响应将 JPEG 标为 application/octet-stream，当前源码按图片内容识别后可保存和预览。
+Topics: [.trellis/spec/project/acceptance.md](../../spec/project/acceptance.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 通过已登录开发工作台确认商品列表及原图。真实 CDN 返回 200 和 92,838 字节 JPEG。隔离工作目录的当前封面接口及预览接口均返回 200。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启开发启动器后在原工作台对 S3329 点击获取图片，确认弹窗显示参考图。
+
+
+## Session 92: 剪映草稿素材区登记
+<!-- trellis-session: v=2 fp=2807fef272c714e0 -->
+
+**Date**: 2026-11-28
+**Task**: 剪映草稿素材区登记
+
+### Summary
+
+新生成的剪映草稿登记全部入选短片，带封面草稿另外登记最终 JPG。时间线与素材区复用草稿内资源。对照剪映手动导入 MP4 / JPG 的本地素材组及文件关联 ID。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 草稿生成和封面同步专项 7 项通过。剪映专业版 11.9.1.14906 首次打开与重开合成样本，用户确认素材区显示，保存后三项继续引用草稿内文件。
+- [OK] 后端全量初跑 428 项通过，129 个子测试通过。8 个清理用例受默认临时目录的 Windows 权限影响，将临时目录改到工作区后，相关 12 项重跑通过。另有 1 条线程告警。
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 93: 剪映素材区改为原素材和全部商品参考图
+<!-- trellis-session: v=2 fp=26b544a40475b78f -->
+
+**Date**: 2026-11-28
+**Task**: 剪映素材区改为原素材和全部商品参考图
+
+### Summary
+
+新草稿素材区收入完整项目源文件。带封面草稿同时带上弹窗内全部平台和本地参考图、仍存在的实际生图参考图及最终封面。入选片段仅用于主时间线，用户确认剪映实机验收通过。
+Topics: [.trellis/spec/project/workspace.md](../../spec/project/workspace.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] 后端专项 52 项和 22 个子测试通过，前端类型检查、粗剪流程检查和 Vite 构建通过。剪映 11.9.1 手动验收通过，保存后 4 个素材路径均有效。
+
+### Status
+
+[OK] **Completed**

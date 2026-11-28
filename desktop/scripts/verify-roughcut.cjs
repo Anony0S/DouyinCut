@@ -30,6 +30,10 @@ const api = async (url, method = 'GET', body) => {
   if (url === '/auth') return {}
   if (url === '/product-platform/products/search') {
     coverSearches.push(body.keyword)
+    if (body.keyword === '星动力取图失败') {
+      return {product:{id:'xingdongli-product',title:body.keyword},reference_images:[],
+        reference_image_error:'星动力商品图片超过 20 MiB'}
+    }
     if (body.keyword === '星动力商品') {
       assert.equal(body.refresh,true)
       return {product:{id:'xingdongli-product',title:body.keyword},reference_images:[xingdongliCoverReference]}
@@ -392,6 +396,12 @@ async function verifyEditingControls() {
     assert.equal(coverSearches.at(-1),'换一个图片搜索标题')
     assert.deepEqual(all(searchForm,el=>el.type==='button').map(el=>text(el).trim()),['获取图片','上传图片'])
     const separateImageRequests=requests.filter(url=>url==='/product-platform/products/images').length
+    search.props['onUpdate:modelValue']('星动力取图失败')
+    await searchForm.props.onSubmit({preventDefault(){}})
+    await settle()
+    assert.ok(text(root).includes('匹配商品：星动力取图失败'))
+    assert.ok(text(root).includes('星动力商品图片超过 20 MiB'))
+    assert.ok(all(root,el=>el.props.src==='/reference-local.png').length)
     search.props['onUpdate:modelValue']('星动力商品')
     await searchForm.props.onSubmit({preventDefault(){}})
     await settle()

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import httpx
 from fastapi.testclient import TestClient
 
-from app.ai.image_generation import fetch_product_image, request_image
+from app.ai.image_generation import fetch_product_image, fetch_xingdongli_product_image, request_image
 from app.ai.providers import CloudConfig, ProviderError
 from app.api import create_app
 from app.core.config import Settings
@@ -131,3 +131,44 @@ class ImageGenerationTests(unittest.TestCase):
         self.assertEqual(mime, "image/jpeg")
         self.assertFalse(get.call_args.kwargs["follow_redirects"])
         self.assertFalse(get.call_args.kwargs["trust_env"])
+
+    def test_xingdongli_image_uses_file_signatures_instead_of_response_type(self):
+        host = "lf26-cm.ecombdstatic.com"
+        responses = [
+            ("application/octet-stream", b"\xff\xd8\xfffixture", "image/jpeg"),
+            (None, PNG, "image/png"),
+            ("image/jpeg", b"RIFF\x04\x00\x00\x00WEBP", "image/webp"),
+        ]
+        for header, data, expected_type in responses:
+            with self.subTest(header=header, expected_type=expected_type):
+                def handle(request):
+                    self.assertEqual(request.headers["accept"], "image/jpeg, image/png, image/webp")
+                    self.assertNotIn("member-token", request.headers)
+                    return httpx.Response(200, headers={"content-type": header} if header else {}, content=data)
+
+                client = httpx.Client(transport=httpx.MockTransport(handle))
+                with patch("app.ai.image_generation.httpx.Client", return_value=client) as make_client:
+                    result = fetch_xingdongli_product_image(f"https://{host}/reference.jpg", allowed_hosts=(host,))
+                self.assertEqual(result, (data, expected_type))
+                self.assertFalse(make_client.call_args.kwargs["follow_redirects"])
+                self.assertFalse(make_client.call_args.kwargs["trust_env"])
+
+    def test_xingdongli_image_distinguishes_download_format_and_size_failures(self):
+        host = "lf26-cm.ecombdstatic.com"
+        cases = [
+            (200, b"", "图片为空"),
+            (200, b"<html>expired", "不是可用的 PNG、JPEG 或 WebP"),
+            (200, PNG + b"oversized", "图片超过 20 MiB"),
+            (403, b"", "下载星动力商品图片失败"),
+            (302, b"", "下载星动力商品图片失败"),
+        ]
+        for status, data, error in cases:
+            with self.subTest(status=status, error=error):
+                client = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(
+                    status, headers={"content-type": "image/png", "location": "https://other.example/image"},
+                    content=data,
+                )))
+                with (patch("app.ai.image_generation.httpx.Client", return_value=client),
+                      patch("app.ai.image_generation.MAX_IMAGE_BYTES", len(PNG)),
+                      self.assertRaisesRegex(ValueError, error)):
+                    fetch_xingdongli_product_image(f"https://{host}/reference", allowed_hosts=(host,))

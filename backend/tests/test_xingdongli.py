@@ -159,7 +159,8 @@ class XingdongliTests(unittest.TestCase):
             return self.client.post("/api/v1/product-platform/products/search", headers=self.headers,
                                     json={**payload, **changes})
 
-        with patch("app.ai.image_generation.fetch_product_image", return_value=(b"\xff\xd8\xfffixture", "image/jpeg")) as fetch:
+        fetch_path = "app.ai.image_generation.fetch_xingdongli_product_image"
+        with patch(fetch_path, return_value=(b"\xff\xd8\xfffixture", "image/jpeg")) as fetch:
             result = cover_search()
             self.assertEqual(result.status_code, 200, result.text)
             reference, = result.json()["reference_images"]
@@ -172,6 +173,15 @@ class XingdongliTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 1)
             self.assertNotEqual(cover_search(refresh=True).json()["reference_images"], [reference])
             self.assertEqual(fetch.call_count, 2)
+
+        with patch(fetch_path, side_effect=ValueError("星动力商品图片超过 20 MiB")) as fetch:
+            unavailable = cover_search(refresh=True)
+            self.assertEqual(unavailable.status_code, 200, unavailable.text)
+            self.assertEqual(unavailable.json()["product"]["title"], "测试商品")
+            self.assertEqual(unavailable.json()["reference_images"], [])
+            self.assertEqual(unavailable.json()["reference_image_error"], "星动力商品图片超过 20 MiB")
+            self.assertTrue(cover_search().json()["reference_images"])
+            self.assertEqual(fetch.call_count, 1)
 
         self.assertEqual(self.client.get(reference["url"], headers=self.headers).content, b"\xff\xd8\xfffixture")
         with patch("app.api.read_secret", return_value="fixture-key"):

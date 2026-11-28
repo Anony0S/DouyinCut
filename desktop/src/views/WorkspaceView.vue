@@ -74,6 +74,8 @@ function markCoverPreviewFailed() { coverPreviewState.value='error' }
 const canGenerateCover=computed(()=>Boolean(connected.value&&selectedPlan.value&&activeAsset.value&&coverPrompt.value.trim()&&
   productImageStates.value[selectedReferenceId.value]==='loaded'&&
   !planDirty.value&&!activeCoverJob.value&&!coverBusy.value&&!uploadingCoverImage.value&&!deletingCoverImage.value))
+const canCreateCoveredDraft=computed(()=>Boolean(selectedCoverJob.value&&!busy.value&&!coverBusy.value&&!planDirty.value&&
+  !loadingCoverImages.value&&!loadingUploadedImages.value&&!uploadingCoverImage.value&&!deletingCoverImage.value))
 function handleCoverPlatformError(error:unknown, message:string) {
   platformImageError.value=error instanceof Error?error.message:message
   platformLoginRequired.value=isProductPlatformAuthError(error) ? 'xingdou' : isXingdongliAuthError(error) ? 'xingdongli' : null
@@ -126,7 +128,7 @@ async function loadCoverImages(refresh=false) {
     matchedProductTitle.value=match.product.title||''
     productImages.value=images
     selectAvailableCoverReference()
-    if(!images.length) platformImageError.value='该商品没有可用图片'
+    if(!images.length) platformImageError.value=match.reference_image_error||'该商品没有可用图片'
   } catch(error) {
     if(version===coverDialogVersion) handleCoverPlatformError(error,'获取商品图片失败，请重试')
   } finally {
@@ -209,9 +211,17 @@ async function generateCover() {
 }
 async function createCoveredDraft() {
   const plan=selectedPlan.value
-  if(!plan||!selectedCoverJob.value||planDirty.value) return
-  await createJianyingDraft(plan,selectedCoverJob.value.id)
-  closeCoverDraftDialog()
+  const cover=selectedCoverJob.value
+  if(!plan||!cover||!canCreateCoveredDraft.value) return
+  const version=coverDialogVersion
+  coverError.value=''
+  const queued=await createJianyingDraft(plan, {
+    id: cover.id,
+    referenceIds: coverReferences.value.map(image=>image.id),
+  })
+  if(version!==coverDialogVersion) return
+  if(queued) closeCoverDraftDialog()
+  else coverError.value=session.error
 }
 const video=ref<HTMLVideoElement|null>(null),mediaUrl=ref('')
 let cleanupPlayback: (()=>void) | undefined
@@ -521,7 +531,7 @@ onUnmounted(()=>{coverDialogVersion++;stopSourcePlayback();finishClipDrag(false)
     <div class="modal-action">
       <button type="button" class="btn" :disabled="coverBusy" @click="closeCoverDraftDialog">关闭</button>
       <button type="button" class="btn btn-primary" :disabled="!canGenerateCover" @click="generateCover">{{ activeCoverJob?'封面生成中…':coverBusy?'正在提交…':'生成封面' }}</button>
-      <button v-if="selectedCoverJob" type="button" class="btn btn-success" :disabled="busy||planDirty" @click="createCoveredDraft">创建带封面草稿</button>
+      <button v-if="selectedCoverJob" type="button" class="btn btn-success" :disabled="!canCreateCoveredDraft" @click="createCoveredDraft">创建带封面草稿</button>
     </div>
   </div>
   <form method="dialog" class="modal-backdrop" @submit.prevent="closeCoverDraftDialog"><button>关闭</button></form>

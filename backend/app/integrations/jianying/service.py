@@ -26,6 +26,7 @@ from ..._vendor.pyJianYingDraft import (
 _COVER_PATH_PLACEHOLDER = "##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##"
 _COVER_DURATION_US = 5_000_000
 _COVER_SEGMENT_DURATION_US = 3_000_000
+_LOCAL_MEDIA_TYPE = 0
 
 
 def draft_root() -> Path:
@@ -57,16 +58,51 @@ def _draft_name(name: str, plan: Plan, job_id: str) -> str:
     return f"DC_{asset_token}_{plan_token}_r{plan.revision}_{job_token}"
 
 
-def _build_cover_draft(image_path: Path, settings: Settings, draft_id: str) -> dict:
+def _local_media_entry(path: Path, *, name: str, media_type: str, duration_us: int,
+                       width: int, height: int, local_material_id: str | None = None) -> dict:
+    imported_at_us = time.time_ns() // 1_000
+    # 剪映的 import_time_ms 字段实际使用微秒。
+    return {
+        "ai_group_type": "",
+        "create_time": int(path.stat().st_mtime),
+        "duration": duration_us,
+        "enter_from": 0,
+        "extra_info": f"{name}{path.suffix}",
+        "file_Path": path.as_posix(),
+        "height": height,
+        "id": local_material_id or str(uuid.uuid4()),
+        "import_time": imported_at_us // 1_000_000,
+        "import_time_ms": imported_at_us,
+        "item_source": 1,
+        "material_color_tag": "",
+        "md5": "",
+        "metetype": media_type,
+        "roughcut_time_range": (
+            {"start": 0, "duration": duration_us}
+            if media_type == "video" else {"start": -1, "duration": -1}
+        ),
+        "sub_time_range": {"start": -1, "duration": -1},
+        "type": _LOCAL_MEDIA_TYPE,
+        "width": width,
+    }
+
+
+def _copy_source(source: Path, target: Path, checkpoint) -> None:
+    if not source.is_file():
+        raise MediaError("项目原素材已移动或删除，无法生成剪映草稿")
+    if checkpoint:
+        checkpoint()
+    with source.open("rb") as input_file, target.open("wb") as output:
+        while block := input_file.read(8 * 1024 * 1024):
+            output.write(block)
+            if checkpoint:
+                checkpoint()
+
+
+def _build_cover_draft(image: VideoMaterial, draft_id: str) -> dict:
     cover_script = ScriptFile(1080, 1440, 30, maintrack_adsorb=True)
     cover_track = "DouyinCut 封面"
     cover_script.add_track(TrackType.video, cover_track)
-    image = VideoMaterial(str(image_path), material_name="DouyinCut 封面",
-                          duration=_COVER_DURATION_US, ffprobe=settings.ffprobe)
-    image.material_type = "photo"
-    image.duration = _COVER_DURATION_US
-    image.local_material_id = image_path.stem
-    image.path = f"{_COVER_PATH_PLACEHOLDER}/Resources/cover/{image_path.name}"
     cover_script.add_segment(VideoSegment(
         image,
         Timerange(0, _COVER_DURATION_US),
@@ -85,9 +121,11 @@ def _build_cover_draft(image_path: Path, settings: Settings, draft_id: str) -> d
 
 def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settings,
                           job_id: str, checkpoint=None, progress=None,
-                          cover_image_path: Path | None = None) -> dict:
+                          cover_image_path: Path | None = None,
+                          reference_image_paths: tuple[Path, ...] = ()) -> dict:
     root = draft_root()
-    name = _draft_name(assets[plan.clips[0].source_asset_id].name, plan, job_id)
+    source_asset = assets[plan.clips[0].source_asset_id]
+    name = _draft_name(source_asset.name, plan, job_id)
     draft_path = root / name
     if draft_path.exists():
         marker_path = draft_path / "douyincut_draft.json"
@@ -111,6 +149,7 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         resources = draft_path / "Resources"
         resources.mkdir()
+        local_media = []
         cover_resource = None
         if cover_image_path is not None:
             source_cover = Path(cover_image_path).resolve()
@@ -119,6 +158,21 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
             suffix = source_cover.suffix.lower()
             if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
                 raise MediaError("所选封面格式不受支持")
+            for index, reference_path in enumerate(reference_image_paths, start=1):
+                if checkpoint:
+                    checkpoint()
+                if not reference_path.is_file():
+                    raise MediaError("商品参考图已移动或删除，请重新打开封面弹窗")
+                reference_suffix = reference_path.suffix.lower()
+                if reference_suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+                    raise MediaError("商品参考图格式不受支持")
+                reference_copy = resources / f"DouyinCut_reference_{index:03}{reference_suffix}"
+                shutil.copyfile(reference_path, reference_copy)
+                reference = VideoMaterial(str(reference_copy), duration=_COVER_DURATION_US, ffprobe=settings.ffprobe)
+                local_media.append(_local_media_entry(
+                    reference_copy, name=f"商品参考图 {index:02}", media_type="photo",
+                    duration_us=_COVER_DURATION_US, width=reference.width, height=reference.height,
+                ))
             cover_resource = resources / "DouyinCut_cover.jpg"
             prepare_cover_jpeg(source_cover, cover_resource, settings, checkpoint=checkpoint)
             script.content.pop("static_cover_image_path", None)
@@ -126,8 +180,14 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
             cover_resources.mkdir()
             cover_resource_copy = cover_resources / f"{uuid.uuid4()}.jpg"
             shutil.copy2(cover_resource, cover_resource_copy)
+            image = VideoMaterial(str(cover_resource_copy), material_name="DouyinCut 封面",
+                                  duration=_COVER_DURATION_US, ffprobe=settings.ffprobe)
+            image.material_type = "photo"
+            image.duration = _COVER_DURATION_US
+            image.local_material_id = cover_resource_copy.stem
+            image.path = f"{_COVER_PATH_PLACEHOLDER}/Resources/cover/{cover_resource_copy.name}"
             cover_draft_id = uuid.uuid4().hex.upper()
-            cover_draft = _build_cover_draft(cover_resource_copy, settings, cover_draft_id)
+            cover_draft = _build_cover_draft(image, cover_draft_id)
             script.content["cover_enable"] = True
             script.content["cover"] = {
                 "type": "image",
@@ -140,6 +200,13 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
                 "draft": cover_draft,
             }]
             shutil.copy2(cover_resource, draft_path / "draft_cover.jpg")
+        source = Path(source_asset.path)
+        source_copy = resources / f"DouyinCut_source{source.suffix.lower()}"
+        _copy_source(source, source_copy, checkpoint)
+        local_media.insert(0, _local_media_entry(
+            source_copy, name=f"原素材 - {Path(source_asset.name).stem}", media_type="video",
+            duration_us=source_asset.duration_us, width=source_asset.width, height=source_asset.height,
+        ))
         script.add_track(TrackType.video, "DouyinCut 视频")
         timeline_cursor = 0
         clip_timeline = []
@@ -147,7 +214,7 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
             if checkpoint:
                 checkpoint()
             asset = assets[clip.source_asset_id]
-            source = Path(asset.path)
+            source = source_copy if asset.id == source_asset.id else Path(asset.path)
             if not source.is_file():
                 raise MediaError(f"源素材已移动，无法生成第 {index + 1} 段剪映素材")
             output = resources / f"DouyinCut_{index + 1:03}.mp4"
@@ -172,7 +239,6 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
                                      duration=media["duration_us"], ffprobe=settings.ffprobe)
             material.duration = media["duration_us"]
             material.path = str(output.resolve())
-            material.local_material_id = output.stem
             segment = VideoSegment(material, Timerange(timeline_cursor, media["duration_us"]),
                                    source_timerange=Timerange(0, media["duration_us"]),
                                    speed=1.0, volume=10 ** (clip.audio_gain_db / 20))
@@ -244,6 +310,13 @@ def create_jianying_draft(plan: Plan, assets: dict[str, Asset], settings: Settin
                          "tm_draft_cloud_modified": int(time.time())})
         if cover_resource is not None:
             metadata["draft_cover"] = "draft_cover.jpg"
+            local_media.append(_local_media_entry(
+                cover_resource_copy, name=image.material_name, media_type="photo",
+                duration_us=image.duration, width=image.width, height=image.height,
+                local_material_id=image.local_material_id,
+            ))
+        media_group = next(group for group in metadata["draft_materials"] if group["type"] == _LOCAL_MEDIA_TYPE)
+        media_group["value"] = local_media
         meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         settings_path = draft_path / "draft_settings"
         settings_text = settings_path.read_text(encoding="utf-8")

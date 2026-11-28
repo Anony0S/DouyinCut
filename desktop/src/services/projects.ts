@@ -3,6 +3,7 @@ import { api, apiJson, uploadVideo, type ProjectDetail, type ProjectDraft, type 
 export type ProjectFilter = { page: number; search: string; status: string }
 export type ShortFillerFilter = { max_chars: number; max_duration_ms: number }
 export type CoverReference = { id: string; url: string }
+export type JianyingDraftCover = { id: string; referenceIds: string[] }
 export type CoverPromptDraft = { name: string; prompt: string }
 export type CoverPrompt = CoverPromptDraft & { id: string }
 export const projectsApi = {
@@ -17,7 +18,10 @@ export const projectsApi = {
     api<Job>(`/assets/${encodeURIComponent(id)}/analyze`, 'POST', { ...draft, ...options }),
   savePlan: (plan: Plan) => api<Plan>(`/plans/${encodeURIComponent(plan.id)}`, 'PATCH', plan),
   deletePlan: (id: string) => api<{deleted_plan_id:string;source_asset_id:string;cleanup_pending:string[]}>(`/plans/${encodeURIComponent(id)}`, 'DELETE'),
-  createJianyingDraft: (id: string, revision: number, coverId?: string) => api<Job>(`/plans/${encodeURIComponent(id)}/jianying-drafts`, 'POST', {revision, ...(coverId ? {cover_id:coverId} : {})}),
+  createJianyingDraft: (id: string, revision: number, cover?: JianyingDraftCover) =>
+    api<Job>(`/plans/${encodeURIComponent(id)}/jianying-drafts`, 'POST', {
+      revision, ...(cover ? {cover_id: cover.id, reference_ids: cover.referenceIds} : {}),
+    }),
   uploadCoverReference: (assetId: string, file: File) => apiJson<CoverReference>(
     `/assets/${encodeURIComponent(assetId)}/cover-references`,
     { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file },

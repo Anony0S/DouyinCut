@@ -57,6 +57,7 @@ class ExportRequest(Model):
 class JianyingDraftRequest(Model):
     revision: int = Field(ge=1)
     cover_id: str | None = Field(default=None, min_length=1, max_length=100)
+    reference_ids: list[str] = Field(default_factory=list)
 
 
 class CoverGenerationRequest(Model):
@@ -337,18 +338,24 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if platform == "xingdongli":
             result = xingdongli.search(binding["ip_id"], body.keyword, body.start, body.sort_type, body.sort_order)
             if body.asset_id is not None:
-                from .ai.image_generation import fetch_product_image
+                from .ai.image_generation import fetch_xingdongli_product_image
 
                 product = result["product"]
                 result["reference_images"] = []
                 if product and product["cover"]:
-                    images = cache_product_reference_images(
-                        body.asset_id, local_cover_reference_root(body.asset_id),
-                        product["id"], f"{platform}:{binding['ip_id']}", body.refresh,
-                        load_urls=lambda: [product["cover"]],
-                        download=lambda url: fetch_product_image(url, allowed_hosts=XINGDONGLI_IMAGE_HOSTS),
-                    )
-                    result["reference_images"] = images["images"]
+                    try:
+                        images = cache_product_reference_images(
+                            body.asset_id, local_cover_reference_root(body.asset_id),
+                            product["id"], f"{platform}:{binding['ip_id']}", body.refresh,
+                            load_urls=lambda: [product["cover"]],
+                            download=lambda url: fetch_xingdongli_product_image(url, allowed_hosts=XINGDONGLI_IMAGE_HOSTS),
+                        )
+                    except HTTPException as exc:
+                        if exc.status_code != 502:
+                            raise
+                        result["reference_image_error"] = exc.detail
+                    else:
+                        result["reference_images"] = images["images"]
             return result
         if platform == "daduoduo":
             return catalog.search(body.monitor_id, body.keyword)
@@ -427,6 +434,15 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
             raise HTTPException(409, "项目参考图目录不可用")
         return references
 
+    def resolve_cover_reference(references: Path, image_id: str) -> Path:
+        if not image_id.startswith("coverref_") or not image_id[9:].isalnum() or len(image_id) > 100:
+            raise HTTPException(422, "参考图片标识无效")
+        matches = [path for path in references.glob(f"{image_id}.*")
+                   if path.suffix in _REFERENCE_EXTENSIONS and path.is_file()]
+        if len(matches) != 1 or matches[0].resolve().parent != references:
+            raise HTTPException(410, "商品参考图已移动或删除，请重新获取或上传参考图")
+        return matches[0].resolve()
+
     def local_cover_references(references: Path):
         if not references.is_dir():
             return
@@ -456,11 +472,13 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
                 return {"deleted": True}
             states = ", ".join("?" for _ in ACTIVE_JOB_STATES)
             if conn.execute(
-                f"SELECT 1 FROM jobs WHERE kind='cover' AND state IN ({states}) "
-                "AND json_extract(payload,'$.reference_path')=? LIMIT 1",
-                (*ACTIVE_JOB_STATES, str(paths[0])),
+                f"SELECT 1 FROM jobs WHERE state IN ({states}) AND ("
+                "(kind='cover' AND json_extract(payload,'$.reference_path')=?) OR "
+                "(kind='jianying' AND EXISTS (SELECT 1 FROM json_each(jobs.payload,'$.reference_paths') "
+                "WHERE value=?))) LIMIT 1",
+                (*ACTIVE_JOB_STATES, str(paths[0]), str(paths[0])),
             ).fetchone():
-                raise HTTPException(409, "参考图正在被封面任务使用，请在任务结束后删除")
+                raise HTTPException(409, "参考图正在被封面或剪映草稿任务使用，请在任务结束后删除")
             try:
                 paths[0].unlink(missing_ok=True)
             except OSError:
@@ -926,19 +944,32 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         if active:
             raise HTTPException(409, "该方案修订已有剪映草稿生成任务")
         payload = {"plan_id": plan_id, "revision": body.revision}
-        if body.cover_id:
-            cover = store.job(body.cover_id)
-            if (cover["kind"] != "cover" or cover["state"] != "succeeded"
-                    or cover["payload"].get("plan_id") != plan_id
-                    or cover["payload"].get("revision") != body.revision
-                    or cover["payload"].get("asset_id") != plan.clips[0].source_asset_id):
-                raise HTTPException(422, "所选封面不属于当前方案修订")
-            cover_path = Path(cover["result"]["path"]).resolve()
-            covers_root = (settings.data_dir / "covers").resolve()
-            if not cover_path.is_file() or not cover_path.is_relative_to(covers_root):
-                raise HTTPException(410, "所选封面文件已移动或删除")
-            payload["cover_path"] = str(cover_path)
-        return store.enqueue("jianying", payload)
+        if not body.cover_id:
+            return store.enqueue("jianying", payload)
+        cover = store.job(body.cover_id)
+        asset_id = plan.clips[0].source_asset_id
+        if (cover["kind"] != "cover" or cover["state"] != "succeeded"
+                or cover["payload"].get("plan_id") != plan_id
+                or cover["payload"].get("revision") != body.revision
+                or cover["payload"].get("asset_id") != asset_id):
+            raise HTTPException(422, "所选封面不属于当前方案修订")
+        cover_path = Path(cover["result"]["path"]).resolve()
+        covers_root = (settings.data_dir / "covers").resolve()
+        if not cover_path.is_file() or not cover_path.is_relative_to(covers_root):
+            raise HTTPException(410, "所选封面文件已移动或删除")
+        reference_root = local_cover_reference_root(asset_id)
+        reference_paths = [resolve_cover_reference(reference_root, image_id)
+                           for image_id in dict.fromkeys(body.reference_ids)]
+        used_reference = Path(cover["payload"]["reference_path"]).resolve()
+        if (used_reference.parent == reference_root and used_reference.suffix in _REFERENCE_EXTENSIONS
+                and used_reference.is_file() and used_reference not in reference_paths):
+            reference_paths.append(used_reference)
+        payload.update(asset_id=asset_id, cover_path=str(cover_path),
+                       reference_paths=[str(path) for path in reference_paths])
+        try:
+            return store.enqueue("jianying", payload, required_files=(cover_path, *reference_paths))
+        except FileNotFoundError:
+            raise HTTPException(410, "封面或商品参考图已移动或删除，请重新打开封面弹窗") from None
 
     @app.post("/api/v1/assets/{asset_id}/covers", status_code=202)
     def generate_cover(asset_id: str, body: CoverGenerationRequest):
@@ -951,20 +982,13 @@ def create_app(settings: Settings | None = None, token: str | None = None, *, fr
         config.require_image_connection()
         if not read_secret("image_generation_api_key"):
             raise ProviderError("请在云端设置的封面生图卡片配置 API Key")
-        reference_id = body.reference_id
-        if not reference_id.startswith("coverref_") or not reference_id[9:].isalnum():
-            raise HTTPException(422, "参考图片标识无效")
-        reference_root = (settings.data_dir / "covers" / asset_id / "references").resolve()
-        reference_matches = [path for path in reference_root.glob(f"{reference_id}.*") if path.is_file()]
-        if len(reference_matches) != 1 or not reference_matches[0].resolve().is_relative_to(reference_root):
-            raise HTTPException(410, "参考图片已移动或删除，请重新获取或上传参考图")
-        reference_path = reference_matches[0].resolve()
+        reference_path = resolve_cover_reference(local_cover_reference_root(asset_id), body.reference_id)
         try:
             return store.enqueue("cover", {
                 "asset_id": asset.id, "plan_id": plan.id, "revision": plan.revision,
                 "reference_path": str(reference_path), "prompt": body.prompt.strip(),
                 "config": config.model_dump(),
-            }, required_file=reference_path)
+            }, required_files=(reference_path,))
         except FileNotFoundError:
             raise HTTPException(410, "参考图片已移动或删除，请重新获取或上传参考图") from None
 

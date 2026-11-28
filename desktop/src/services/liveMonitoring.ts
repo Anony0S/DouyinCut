@@ -8,7 +8,12 @@ export type LiveProductPeriod = { id:string; session_id:string; promotion_id:str
 export type LiveSplitResult = Job | {state:'confirmation_required'; missing_segments:LivePeriodSource[]; available_count:number} | {state:'noop'; message:string}
 export type LiveProductEvent = { id:string; promotion_id:string; product_name:string; explain_type:number|null; event_time:number; received_at:number; source:string }
 export type LiveProductClipSource = {id:string;started:number;ended:number|null}
-export type LiveProductClip = { id:string; segment_id:string; segment_index:number; period_id:string; promotion_id:string; product_name:string; start:number; end:number; path:string; status:string; size_bytes:number; duration_us:number|null; asset_id:string|null; import_job_id:string|null; error:string; clip_kind:'single'|'merged'; source_periods:LiveProductClipSource[] }
+type ProjectTaskState = 'queued' | 'running' | 'pause_requested' | 'paused' | 'cancel_requested' | 'failed'
+export type LiveClipProjectStatus =
+  | `roughcut_${ProjectTaskState | 'pending' | 'completed' | 'cancelled'}`
+  | `draft_${ProjectTaskState | 'succeeded'}`
+  | 'project_missing'
+export type LiveProductClip = { id:string; segment_id:string; segment_index:number; period_id:string; promotion_id:string; product_name:string; start:number; end:number; path:string; status:string; project_status:LiveClipProjectStatus|null; size_bytes:number; duration_us:number|null; asset_id:string|null; import_job_id:string|null; error:string; clip_kind:'single'|'merged'; source_periods:LiveProductClipSource[] }
 export type LiveMergeResult = Job | {state:'confirmation_required';missing_sources:Array<LivePeriodSource & {period_id:string}>;available_count:number} | {state:'noop';message:string}
 export type LiveCurrentProduct = { promotion_id:string; product_name:string; event_time:number; received_at:number }
 export type LiveProductListener = { status:string; detail:string; updated:number; event_count?:number; silent?:boolean; silent_detail?:string }

@@ -23,6 +23,7 @@ from ..core.config import Settings
 from ..core.domain import Model, new_id
 from ..core.storage import Store
 from ..product_platform.schemas import RoomPlatformBinding
+from ..projects.service import project_workflow_statuses
 from ..work_directory import REQUIRED_COLUMNS
 from .catalog import ProductCatalogRefresher
 
@@ -338,9 +339,21 @@ class LiveStore:
 
     def recording_session(self, monitor_id: str, session_id: str):
         with self.store.connection() as conn:
+            conn.execute("BEGIN")
             row = conn.execute("SELECT * FROM live_sessions WHERE monitor_id=? AND id=?",
                                (monitor_id, session_id)).fetchone()
-            return self._session_detail(conn, row) if row is not None else None
+            if row is None:
+                return None
+            detail = self._session_detail(conn, row)
+            clips = detail["product_clips"]
+            statuses = project_workflow_statuses(
+                conn, {clip["asset_id"] for clip in clips if clip["status"] == "imported" and clip["asset_id"]},
+            )
+            for clip in clips:
+                clip["project_status"] = (
+                    statuses.get(clip["asset_id"], "project_missing") if clip["status"] == "imported" else None
+                )
+            return detail
 
     def delete_session(self, monitor_id: str, session_id: str, recordings_root: Path):
         recordings_root = recordings_root.resolve()

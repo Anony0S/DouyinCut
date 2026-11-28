@@ -48,6 +48,7 @@ type ProductSearchResult = {
   start?: number
   length?: number
   reference_images?: CoverReference[]
+  reference_image_error?: string
 }
 export type CatalogStatus = {
   state: 'idle' | 'queued' | 'running' | 'failed'; downloaded: number; total: number | null

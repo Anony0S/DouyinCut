@@ -99,17 +99,22 @@ class ApiTests(unittest.TestCase):
 
     def test_local_cover_reference_can_queue_generation_without_platform_binding(self):
         import base64
+        import json
         from app.ai.providers import CloudConfig
-        from app.core.domain import Asset, Canvas, Clip, Plan
+        from app.core.domain import Asset, Candidate, Canvas, Clip, Plan, Product
 
         store = self.app.state.store
         asset = Asset(id="asset_local", path="source.mp4", name="source.mp4", sha256="hash",
                       duration_us=5_000_000, width=1080, height=1920, has_audio=True,
                       source_monitor_id="unbound_room")
-        plan = Plan(product_id="product", canvas=Canvas(width=1080, height=1920),
+        product = Product(name="轻薄针织开衫", confirmed=True)
+        candidate = Candidate(source_asset_id=asset.id, product_id=product.id, start_us=0, end_us=1_000_000)
+        plan = Plan(product_id=product.id, canvas=Canvas(width=1080, height=1920),
                     clips=[Clip(source_asset_id=asset.id, source_start_us=0, source_end_us=1_000_000,
-                                timeline_start_us=0, candidate_id="candidate")])
+                                timeline_start_us=0, candidate_id=candidate.id)])
         store.put("asset", asset.model_dump())
+        store.put("candidate", candidate.model_dump())
+        store.put("product", product.model_dump())
         store.put("plan", plan.model_dump())
         store.put("config", {"id": "cloud", "config": CloudConfig(
             image_base_url="https://images.example/v1", image_model="cover-model").model_dump()})
@@ -146,8 +151,27 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["prompt"], prompt)
         self.assertEqual(Path(payload["reference_path"]).read_bytes(), png)
         self.assertEqual(self.client.delete(image["url"], headers=self.headers).status_code, 409)
+        cover_id = queued.json()["id"]
+        cover_path = network_path.parent.parent / f"{cover_id}.jpg"
+        cover_path.write_bytes(b"cover fixture")
         with store.connection() as conn:
-            conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (queued.json()["id"],))
+            conn.execute("UPDATE jobs SET state='succeeded', result=? WHERE id=?",
+                         (json.dumps({"path": str(cover_path)}), cover_id))
+        draft_url = f"/api/v1/plans/{plan.id}/jianying-drafts"
+        draft_request = {"revision": plan.revision, "cover_id": cover_id}
+        missing = self.client.post(draft_url, headers=self.headers, json={
+            **draft_request, "reference_ids": ["coverref_nonexistent"],
+        })
+        self.assertEqual(missing.status_code, 410, missing.text)
+        draft = self.client.post(draft_url, headers=self.headers, json={
+            **draft_request, "reference_ids": [network_id, image["id"], network_id],
+        })
+        self.assertEqual(draft.status_code, 202, draft.text)
+        self.assertEqual(draft.json()["payload"]["reference_paths"],
+                         [str(network_path.resolve()), payload["reference_path"]])
+        self.assertEqual(self.client.delete(image["url"], headers=self.headers).status_code, 409)
+        with store.connection() as conn:
+            conn.execute("UPDATE jobs SET state='succeeded' WHERE id=?", (draft.json()["id"],))
         self.assertEqual(self.client.delete(image["url"], headers=self.headers).status_code, 200)
         self.assertEqual(self.client.get(image["url"], headers=self.headers).status_code, 404)
         self.assertEqual(self.client.get(url, headers=self.headers).json(), {"images": []})

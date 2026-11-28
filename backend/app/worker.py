@@ -151,7 +151,8 @@ class Worker:
             validate_plan(plan, product, candidates, assets)
             result = create_jianying_draft(plan, assets, settings, job["id"],
                                            checkpoint=ctx.checkpoint, progress=ctx.progress,
-                                           cover_image_path=Path(payload["cover_path"]) if payload.get("cover_path") else None)
+                                           cover_image_path=Path(payload["cover_path"]) if payload.get("cover_path") else None,
+                                           reference_image_paths=tuple(Path(path) for path in payload.get("reference_paths", ())))
         elif job["kind"] == "analyze":
             from .ai.providers import CloudConfig, transcribe
             from .ai.roughcut import (RoughcutRequest, TimeSelection, candidates_from_intervals,

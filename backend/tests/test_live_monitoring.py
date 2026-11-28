@@ -815,10 +815,13 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertNotEqual(combined["path"], next(clip["path"] for clip in clips if clip["clip_kind"] == "single"))
         import_job = self.live.import_product_clip(combined["id"])
         self.assertEqual(import_job["payload"]["live_product_clip_id"], combined["id"])
+        self.store.put("asset", {"id": "asset-merged"})
         self.live.finish_product_clip_import(combined["id"], "asset-merged")
         imported = self.live.recording_session(monitor["id"], session_id)["product_clips"]
         merged = next(clip for clip in imported if clip["id"] == combined["id"])
         self.assertEqual(merged["status"], "imported")
+        self.assertEqual(merged["project_status"], "roughcut_pending")
+        self.assertIsNone(next(clip for clip in imported if clip["clip_kind"] == "single")["project_status"])
         deleted = self.live.delete_product_clip(combined["id"], self.settings.data_dir / "recordings" / "live")
         self.assertTrue(deleted["project_file_retained"])
         self.assertTrue(Path(combined["path"]).is_file())
@@ -1364,6 +1367,75 @@ class LiveMonitoringTests(unittest.TestCase):
         self.assertEqual(first.json()["payload"]["live_product_clip_id"], clip_id)
         self.assertEqual(first.json()["payload"]["product_name"], "针织开衫")
         self.assertEqual(first.json()["payload"]["source_monitor_id"], monitor["id"])
+
+    def test_recording_session_shows_roughcut_and_draft_for_the_current_plan_revision(self):
+        monitor, session_id, _segments = self._two_segment_session("clip-project-workflow")
+        with (patch("app.media.processing.run_process", side_effect=fake_media_process),
+              patch("app.media.processing.probe", return_value=fake_video_info())):
+            self._generate_test_period(session_id)
+        url = f"/api/v1/live/monitors/{monitor['id']}/sessions/{session_id}"
+
+        def clip():
+            response = self.client.get(url, headers=self.headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()["product_clips"][0]
+
+        def set_job_state(job, state):
+            with self.store.connection() as conn:
+                conn.execute("UPDATE jobs SET state=? WHERE id=?", (state, job["id"]))
+
+        def save_plan(plan_id):
+            plan = {"id": plan_id, "revision": 1, "clips": [{"source_asset_id": asset_id}]}
+            self.store.put("plan", plan)
+            return plan
+
+        original = clip()
+        self.assertEqual((original["status"], original["project_status"]), ("completed", None))
+        self.live.import_product_clip(original["id"])
+        self.assertEqual((clip()["status"], clip()["project_status"]), ("importing", None))
+        asset_id = "clip-asset"
+        self.store.put("asset", {"id": asset_id})
+        self.live.finish_product_clip_import(original["id"], asset_id)
+        self.store.enqueue("analyze", {"asset_id": "other-asset"})
+        self.assertEqual(clip()["project_status"], "roughcut_pending")
+
+        analysis = self.store.enqueue("analyze", {"asset_id": asset_id})
+        self.assertEqual(clip()["project_status"], "roughcut_queued")
+        for state in ("running", "pause_requested", "paused", "failed"):
+            set_job_state(analysis, state)
+            self.assertEqual(clip()["project_status"], f"roughcut_{state}")
+
+        first_plan = save_plan("plan-one")
+        set_job_state(analysis, "succeeded")
+        self.store.enqueue("preview", {"plan_id": first_plan["id"], "revision": 1})
+        self.assertEqual(clip()["project_status"], "roughcut_completed")
+        first_draft = self.store.enqueue("jianying", {"plan_id": first_plan["id"], "revision": 1})
+        for state in ("running", "failed", "succeeded"):
+            set_job_state(first_draft, state)
+            self.assertEqual(clip()["project_status"], f"draft_{state}")
+
+        retry = self.store.enqueue("analyze", {"asset_id": asset_id})
+        self.assertEqual(clip()["project_status"], "roughcut_queued")
+        set_job_state(retry, "cancelled")
+        self.assertEqual(clip()["project_status"], "draft_succeeded")
+        set_job_state(retry, "running")
+        self.assertEqual(clip()["project_status"], "roughcut_running")
+        second_plan = save_plan("plan-two")
+        set_job_state(retry, "succeeded")
+        self.store.next_revision("plan", first_plan["id"], first_plan)
+        old_plan_draft = self.store.enqueue("jianying", {"plan_id": first_plan["id"], "revision": 2})
+        set_job_state(old_plan_draft, "succeeded")
+        self.assertEqual(clip()["project_status"], "roughcut_completed")
+
+        current_draft = self.store.enqueue("jianying", {"plan_id": second_plan["id"], "revision": 1})
+        set_job_state(current_draft, "succeeded")
+        self.assertEqual(clip()["project_status"], "draft_succeeded")
+        self.store.next_revision("plan", second_plan["id"], second_plan)
+        self.assertEqual(clip()["project_status"], "roughcut_completed")
+        with self.store.connection() as conn:
+            conn.execute("DELETE FROM objects WHERE kind='asset' AND id=?", (asset_id,))
+        deleted = clip()
+        self.assertEqual((deleted["status"], deleted["project_status"]), ("imported", "project_missing"))
 
     def test_product_clip_delete_removes_unimported_file_and_retains_imported_project_file(self):
 
